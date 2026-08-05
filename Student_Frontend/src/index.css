@@ -1,0 +1,90 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  html {
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+  }
+  body {
+    @apply bg-warm-paper text-deep-ink font-sans;
+  }
+}
+
+@layer components {
+  /* Card */
+  .zb-card {
+    @apply bg-pure-surface border border-whisper-line rounded-card p-6;
+  }
+  .zb-card-hover {
+    @apply transition-colors duration-200 cursor-pointer hover:bg-teal-tint hover:border-deep-teal/40;
+  }
+
+  /* Buttons */
+  .zb-btn {
+    @apply inline-flex items-center justify-center gap-1.5 rounded-comp px-4 h-10 text-sm font-medium transition-all duration-150 select-none active:-translate-y-px disabled:opacity-40 disabled:pointer-events-none;
+  }
+  .zb-btn-primary {
+    @apply zb-btn bg-deep-teal text-white hover:bg-deep-teal/90;
+  }
+  .zb-btn-ghost {
+    @apply zb-btn border border-whisper-line text-deep-ink hover:bg-teal-tint;
+  }
+  .zb-btn-text {
+    @apply zb-btn text-deep-teal hover:bg-teal-tint px-2;
+  }
+
+  /* Badge (pill) */
+  .zb-badge {
+    @apply inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-xs font-medium whitespace-nowrap;
+  }
+
+  /* Forms */
+  .zb-input {
+    @apply w-full h-10 rounded-comp border border-whisper-line bg-pure-surface px-3 text-sm text-deep-ink placeholder:text-warm-stone/60 focus:outline-none focus:ring-2 focus:ring-deep-teal;
+  }
+
+  .zb-section-title {
+    @apply text-lg font-semibold tracking-tight;
+  }
+}
+
+/* Icon font */
+.mso {
+  font-family: 'Material Symbols Outlined';
+  font-weight: normal;
+  font-style: normal;
+  line-height: 1;
+  letter-spacing: normal;
+  text-transform: none;
+  display: inline-block;
+  white-space: nowrap;
+  word-wrap: normal;
+  direction: ltr;
+  font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+  vertical-align: middle;
+}
+
+/* Math formula styling */
+.math {
+  font-family: 'STIX Two Math', 'Times New Roman', serif;
+  font-style: italic;
+}
+.math-block {
+  @apply math my-3 text-[17px];
+}
+sup, sub { font-size: 0.7em; }
+
+/* Blur effect for locked hints */
+.hint-locked {
+  filter: blur(5px);
+  user-select: none;
+  pointer-events: none;
+}
+
+/* Scrollbar */
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: #E7E5E4; border-radius: 10px; }
+::-webkit-scrollbar-thumb:hover { background: #0D9488; }
