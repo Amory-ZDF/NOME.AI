@@ -10,8 +10,8 @@ const wrongQuestionsSafe = (session) => (session ? session.questions.filter((q) 
 export default function Summary() {
   const { sessionId } = useParams()
   const navigate = useNavigate()
-  const { lastSession, addErrors, errors, showToast, addTask, isActionPending } = useApp()
-  const session = lastSession
+  const { sessions, lastSession, addErrors, errors, showToast, addTask, isActionPending } = useApp()
+  const session = sessions[sessionId] || (lastSession?.sessionId === sessionId ? lastSession : null)
 
   // Error card state (whether already added to error book)
   const errorQuestionIds = useMemo(() => new Set(errors.map((e) => e.questionId)), [errors])

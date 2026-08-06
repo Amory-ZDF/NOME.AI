@@ -499,6 +499,39 @@ test('adopts a canonical session ID and retries it without another session POST'
   expect(submitSession).toHaveBeenCalledTimes(1)
 })
 
+test('indexes a successful save only under its canonical session ID', async () => {
+  const submitSession = vi.fn(() => Promise.resolve({ sessionId: 'canonical-session' }))
+  const harness = await renderApp(createApi({ submitSession }))
+  const request = { sessionId: 'request-session', taskId: null, completedAt: '2026-08-06T00:00:00.000Z', questions: [] }
+
+  await act(async () => { await harness.app.saveSession(request) })
+
+  expect(harness.app.sessions['canonical-session']).toMatchObject({
+    sessionId: 'canonical-session',
+    taskId: null,
+  })
+  expect(harness.app.sessions['request-session']).toBeUndefined()
+})
+
+test('keeps bootstrapped sessions unchanged when persistence fails', async () => {
+  const existingSession = { sessionId: 'existing-session', taskId: null, questions: [] }
+  const harness = await renderApp(createApi({
+    bootstrap: () => Promise.resolve({
+      ...bootData,
+      sessions: { 'existing-session': existingSession },
+    }),
+    submitSession: () => Promise.reject(new Error('session offline')),
+  }))
+
+  await act(async () => {
+    await expect(harness.app.saveSession({ sessionId: 'failed-session', taskId: null, questions: [] }))
+      .rejects.toThrow('session offline')
+  })
+
+  expect(harness.app.sessions).toEqual({ 'existing-session': existingSession })
+  expect(harness.app.sessions['failed-session']).toBeUndefined()
+})
+
 test.each([
   ['null', null],
   ['empty object', {}],

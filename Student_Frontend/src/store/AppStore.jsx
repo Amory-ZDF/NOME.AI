@@ -22,6 +22,7 @@ export function AppProvider({ children, services = defaultAppServices }) {
   const [noteFolders, setNoteFolders] = useState([])
   const [settings, setSettings] = useState(null)
   const [exerciseCache, setExerciseCache] = useState({})
+  const [sessions, setSessions] = useState({})
   const [lastSession, setLastSession] = useState(null)
   const [toast, setToast] = useState(null)
   const [pendingActions, setPendingActions] = useState(() => new Set())
@@ -41,6 +42,7 @@ export function AppProvider({ children, services = defaultAppServices }) {
   const notesRef = useRef([])
   const settingsRef = useRef(null)
   const exerciseCacheRef = useRef({})
+  const sessionsRef = useRef({})
   const lastSessionRef = useRef(null)
 
   const replaceTasks = useCallback((next) => {
@@ -66,6 +68,10 @@ export function AppProvider({ children, services = defaultAppServices }) {
   const replaceExerciseCache = useCallback((next) => {
     exerciseCacheRef.current = next
     setExerciseCache(next)
+  }, [])
+  const replaceSessions = useCallback((next) => {
+    sessionsRef.current = next
+    setSessions(next)
   }, [])
   const replaceLastSession = useCallback((next) => {
     lastSessionRef.current = next
@@ -98,7 +104,9 @@ export function AppProvider({ children, services = defaultAppServices }) {
       setNoteFolders(data.noteFolders)
       replaceSettings(data.settings)
       replaceExerciseCache({})
-      const persistedIds = Object.keys(data.sessions || {})
+      const bootSessions = data.sessions || {}
+      replaceSessions(bootSessions)
+      const persistedIds = Object.keys(bootSessions)
       persistedSessionIds.current = new Set(persistedIds)
       canonicalSessionIds.current = new Map(persistedIds.map((id) => [id, id]))
       setBootStatus('ready')
@@ -110,7 +118,7 @@ export function AppProvider({ children, services = defaultAppServices }) {
       }
       return undefined
     }
-  }, [replaceErrors, replaceExerciseCache, replaceNotes, replaceSettings, replaceTaskAdjustments, replaceTasks, services])
+  }, [replaceErrors, replaceExerciseCache, replaceNotes, replaceSessions, replaceSettings, replaceTaskAdjustments, replaceTasks, services])
 
   useEffect(() => {
     mounted.current = true
@@ -432,7 +440,9 @@ export function AppProvider({ children, services = defaultAppServices }) {
         }
       },
       commit: (result) => {
-        replaceLastSession({ ...savedSession, sessionId: result.sessionId })
+        const committedSession = { ...savedSession, sessionId: result.sessionId }
+        replaceLastSession(committedSession)
+        replaceSessions({ ...sessionsRef.current, [committedSession.sessionId]: committedSession })
         if (result?.task) {
           replaceTasks(tasksRef.current.map((task) => (
             task.id === result.task.id ? { ...task, ...result.task } : task
@@ -442,7 +452,7 @@ export function AppProvider({ children, services = defaultAppServices }) {
       },
       rollback: replaceLastSession,
     }))
-  }, [replaceLastSession, replaceTasks, runAction, services, showToast])
+  }, [replaceLastSession, replaceSessions, replaceTasks, runAction, services, showToast])
 
   const generateVariant = useCallback((sourceQuestion) => {
     const questionId = sourceQuestion?.id
@@ -487,7 +497,7 @@ export function AppProvider({ children, services = defaultAppServices }) {
   return (
     <AppContext.Provider value={{
       booted: bootStatus === 'ready', bootStatus, bootError, pendingActions, retryBootstrap, isActionPending,
-      tasks, taskAdjustments, greeting, moduleStats, learningSummary, errors, notes, noteFolders, settings, exerciseCache, lastSession, toast,
+      tasks, taskAdjustments, greeting, moduleStats, learningSummary, errors, notes, noteFolders, settings, exerciseCache, sessions, lastSession, toast,
       showToast, completeTask, requestTaskAdjustment, addTask,
       addErrors, markErrorMastered, recordRedo,
       addNote, updateNote, loadExerciseSet, saveSession, generateVariant, updateSettings,
