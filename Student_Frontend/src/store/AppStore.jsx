@@ -21,6 +21,7 @@ export function AppProvider({ children, services = defaultAppServices }) {
   const mounted = useRef(true)
   const bootRequest = useRef(0)
   const actionCounts = useRef(new Map())
+  const actionQueues = useRef(new Map())
   const tasksRef = useRef([])
   const errorsRef = useRef([])
   const notesRef = useRef([])
@@ -89,7 +90,7 @@ export function AppProvider({ children, services = defaultAppServices }) {
     }
   }, [retryBootstrap])
 
-  const runAction = useCallback((key, options) => {
+  const runAction = useCallback((key, createOptions) => {
     const count = actionCounts.current.get(key) || 0
     actionCounts.current.set(key, count + 1)
     setPendingActions((current) => {
@@ -98,19 +99,26 @@ export function AppProvider({ children, services = defaultAppServices }) {
       return next
     })
 
-    return runRecoverableAction({
-      ...options,
-      onError: (error) => {
-        options.onError?.(error)
-        showToast(error.message || 'Unable to save your changes. Please try again.', 'error')
-      },
-    }).finally(() => {
+    const start = () => {
+      const options = createOptions()
+      return runRecoverableAction({
+        ...options,
+        onError: (error) => {
+          options.onError?.(error)
+          showToast(error.message || 'Unable to save your changes. Please try again.', 'error')
+        },
+      })
+    }
+    const previous = actionQueues.current.get(key)
+    const operation = previous ? previous.catch(() => undefined).then(start) : start()
+    const queued = operation.finally(() => {
       const remaining = (actionCounts.current.get(key) || 1) - 1
       if (remaining > 0) {
         actionCounts.current.set(key, remaining)
         return
       }
       actionCounts.current.delete(key)
+      actionQueues.current.delete(key)
       if (mounted.current) {
         setPendingActions((current) => {
           const next = new Set(current)
@@ -119,44 +127,46 @@ export function AppProvider({ children, services = defaultAppServices }) {
         })
       }
     })
+    actionQueues.current.set(key, queued)
+    return queued
   }, [showToast])
 
-  const completeTask = useCallback((id) => runAction(`completeTask:${id}`, {
+  const completeTask = useCallback((id) => runAction(`completeTask:${id}`, () => ({
     snapshot: tasksRef.current,
     optimistic: () => replaceTasks(tasksRef.current.map((task) => (task.id === id ? { ...task, status: 'completed' } : task))),
     request: () => services.api.completeTask(id),
     commit: () => {},
     rollback: replaceTasks,
-  }), [replaceTasks, runAction, services])
+  })), [replaceTasks, runAction, services])
 
-  const removeTask = useCallback((id) => runAction(`removeTask:${id}`, {
+  const removeTask = useCallback((id) => runAction(`removeTask:${id}`, () => ({
     snapshot: tasksRef.current,
     optimistic: () => replaceTasks(tasksRef.current.filter((task) => task.id !== id)),
     request: () => Promise.resolve({ id }),
     commit: () => {},
     rollback: replaceTasks,
-  }), [replaceTasks, runAction])
+  })), [replaceTasks, runAction])
 
-  const cannotCompleteTask = useCallback((id) => runAction(`cannotCompleteTask:${id}`, {
+  const cannotCompleteTask = useCallback((id) => runAction(`cannotCompleteTask:${id}`, () => ({
     snapshot: tasksRef.current,
     optimistic: () => replaceTasks(tasksRef.current.filter((task) => task.id !== id)),
     request: () => services.api.reportTaskAdjustment(id),
     commit: () => showToast('Feedback sent to your teacher 鈥?the task plan will be adjusted to fit you', 'success'),
     rollback: replaceTasks,
-  }), [replaceTasks, runAction, services, showToast])
+  })), [replaceTasks, runAction, services, showToast])
 
   const addTask = useCallback((task) => {
     const createdTask = task.id ? task : { ...task, id: services.createId() }
-    return runAction(`addTask:${createdTask.id}`, {
+    return runAction(`addTask:${createdTask.id}`, () => ({
       snapshot: tasksRef.current,
       optimistic: () => replaceTasks([...tasksRef.current, createdTask]),
       request: () => services.api.createTask(createdTask),
       commit: () => {},
       rollback: replaceTasks,
-    })
+    }))
   }, [replaceTasks, runAction, services])
 
-  const addErrors = useCallback((items) => runAction('addErrors', {
+  const addErrors = useCallback((items) => runAction('addErrors', () => ({
     snapshot: errorsRef.current,
     optimistic: () => replaceErrors((() => {
       const existingQuestionIds = new Set(errorsRef.current.map((error) => error.questionId))
@@ -166,19 +176,19 @@ export function AppProvider({ children, services = defaultAppServices }) {
     request: () => services.api.addErrors(items),
     commit: () => {},
     rollback: replaceErrors,
-  }), [replaceErrors, runAction, services])
+  })), [replaceErrors, runAction, services])
 
-  const markErrorMastered = useCallback((id) => runAction(`markErrorMastered:${id}`, {
+  const markErrorMastered = useCallback((id) => runAction(`markErrorMastered:${id}`, () => ({
     snapshot: errorsRef.current,
     optimistic: () => replaceErrors(errorsRef.current.map((error) => (error.id === id ? { ...error, status: 'mastered' } : error))),
     request: () => services.api.markErrorMastered(id),
     commit: () => showToast('Marked as mastered 鈥?keep it up!', 'success'),
     rollback: replaceErrors,
-  }), [replaceErrors, runAction, services, showToast])
+  })), [replaceErrors, runAction, services, showToast])
 
   const recordRedo = useCallback((id, attempt) => {
     const recordedAttempt = attempt.attemptedAt ? attempt : { ...attempt, attemptedAt: services.now().toISOString() }
-    return runAction(`recordRedo:${id}`, {
+    return runAction(`recordRedo:${id}`, () => ({
       snapshot: errorsRef.current,
       optimistic: () => replaceErrors(errorsRef.current.map((error) => (error.id === id
         ? {
@@ -192,7 +202,7 @@ export function AppProvider({ children, services = defaultAppServices }) {
       request: () => services.api.submitRedo(id, recordedAttempt),
       commit: () => {},
       rollback: replaceErrors,
-    })
+    }))
   }, [replaceErrors, runAction, services])
 
   const addNote = useCallback((note) => {
@@ -203,24 +213,24 @@ export function AppProvider({ children, services = defaultAppServices }) {
       createdAt: note.createdAt || today,
       updatedAt: note.updatedAt || today,
     }
-    return runAction(`addNote:${createdNote.id}`, {
+    return runAction(`addNote:${createdNote.id}`, () => ({
       snapshot: notesRef.current,
       optimistic: () => replaceNotes([createdNote, ...notesRef.current]),
       request: () => services.api.createNote(createdNote),
       commit: () => {},
       rollback: replaceNotes,
-    })
+    })).then(() => createdNote.id)
   }, [replaceNotes, runAction, services])
 
   const updateNote = useCallback((id, patch) => {
     const updatedPatch = { ...patch, updatedAt: dateOnly(services.now()) }
-    return runAction(`updateNote:${id}`, {
+    return runAction(`updateNote:${id}`, () => ({
       snapshot: notesRef.current,
       optimistic: () => replaceNotes(notesRef.current.map((note) => (note.id === id ? { ...note, ...updatedPatch } : note))),
       request: () => services.api.updateNote(id, updatedPatch),
       commit: () => {},
       rollback: replaceNotes,
-    })
+    }))
   }, [replaceNotes, runAction, services])
 
   const saveSession = useCallback((session) => {
@@ -229,22 +239,22 @@ export function AppProvider({ children, services = defaultAppServices }) {
       sessionId: session.sessionId || services.createId(),
       completedAt: session.completedAt || services.now().toISOString(),
     }
-    return runAction(`saveSession:${savedSession.sessionId}`, {
+    return runAction(`saveSession:${savedSession.sessionId}`, () => ({
       snapshot: lastSessionRef.current,
       optimistic: () => replaceLastSession(savedSession),
       request: () => services.api.submitSession(savedSession),
       commit: () => {},
       rollback: replaceLastSession,
-    })
+    }))
   }, [replaceLastSession, runAction, services])
 
-  const updateSettings = useCallback((patch) => runAction('updateSettings', {
+  const updateSettings = useCallback((patch) => runAction('updateSettings', () => ({
     snapshot: settingsRef.current,
     optimistic: () => replaceSettings({ ...settingsRef.current, ...patch }),
     request: () => services.api.updateSettings(patch),
     commit: () => {},
     rollback: replaceSettings,
-  }), [replaceSettings, runAction, services])
+  })), [replaceSettings, runAction, services])
 
   const isActionPending = useCallback((key) => pendingActions.has(key), [pendingActions])
 
