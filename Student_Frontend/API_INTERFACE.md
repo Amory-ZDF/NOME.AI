@@ -51,6 +51,9 @@ One-shot load of everything the student shell needs. Frontend calls it once on m
 | `student` | Student | Current student profile |
 | `tasks` | Task[] | Pending + completed tasks |
 | `taskAdjustments` | TaskAdjustment[] | Submitted adjustment requests; never removes the related task |
+| `exerciseSets` | Record\<string, ExerciseSet\> | Task sets plus dynamically generated variant sets, keyed by set id |
+| `bankExerciseSets` | Record\<string, ExerciseSet\> | Question-bank sets keyed by bank set id |
+| `sessions` | Record\<string, Session\> | Persisted sessions keyed by `sessionId` (not an array) |
 | `errors` | ErrorItem[] | Error-book entries |
 | `notes` | Note[] | Notes |
 | `noteFolders` | NoteFolder[] | Folder tree (auto-created by AI) |
@@ -90,6 +93,9 @@ One-shot load of everything the student shell needs. Frontend calls it once on m
 | `topicIds` | string[]? | Linked curriculum topic ids |
 | `completedAt` | string? | ISO datetime set when the task is completed |
 | `adjustmentStatus` | enum? | `submitted` when the student has requested an adjustment |
+| `sourceQuestionId` | string? | Source question for an independently generated variant task |
+| `reason` | string? | Variant tasks use `"Independent transfer check"` |
+| `createdAt` | string? | ISO datetime for generated tasks |
 
 ### TaskAdjustment
 | Field | Type | Notes |
@@ -117,6 +123,12 @@ One-shot load of everything the student shell needs. Frontend calls it once on m
 | `correctDisplay` | string | Shown after solving |
 | `errorType` | enum | `calculation` \| `method` \| `knowledge` \| `reading` \| `execution` |
 | `hints` | Hint[] | L1–L5 progressive hints |
+| `variantOf` | string? | Source question id when this is an L6 transfer variant |
+| `sourceQuestionId` | string? | Optional explicit source reference carried by an API payload |
+| `understandingExplanation` | string? | A-Level conceptual explanation shown after solving |
+| `scoringExplanation` | string? | A-Level mark-scheme explanation shown after solving |
+| `passageEvidence` | string? | IELTS passage evidence shown after solving |
+| `errorPattern` | string? | IELTS reading pattern to avoid next time |
 
 ### Hint
 | Field | Type | Notes |
@@ -130,10 +142,13 @@ One-shot load of everything the student shell needs. Frontend calls it once on m
 ### ExerciseSet
 | Field | Type | Notes |
 |---|---|---|
+| `id` | string? | Present on generated/dynamic sets and used as the `exerciseSets` key |
 | `taskId` | string \| null | Owning task, if any |
 | `title` | string | |
 | `subject` | string | |
 | `questions` | Question[] | |
+| `sourceQuestionId` | string? | Source question for a generated L6 set |
+| `createdAt` | string? | ISO datetime for a generated L6 set |
 
 ### ErrorItem
 | Field | Type | Notes |
@@ -248,6 +263,7 @@ One-shot load of everything the student shell needs. Frontend calls it once on m
 | Endpoint | Body | Notes |
 |---|---|---|
 | `POST /api/sessions` | Session | Submit whole exercise set (PRD §2.7) |
+| `POST /api/questions/{questionId}/variant` | none | Generate and atomically persist the next deterministic L6 variant set and task; returns `{ exerciseSet, task }` |
 
 #### Session
 | Field | Type | Notes |
@@ -270,6 +286,7 @@ Question fields plus `result`:
 | `result.attempts` | `{ answer, submittedAt, isCorrect }[]` | |
 | `result.hintsUsed` | number | 0–5 |
 | `result.solvedAtHintLevel` | number \| null | null if never solved |
+| `result.handwritingUsed` | boolean | Whether handwriting mode was used for this question |
 
 ### Settings
 | Endpoint | Body |
@@ -278,7 +295,9 @@ Question fields plus `result`:
 
 ---
 
-## 4. Read-only Endpoints (future, served by bootstrap today)
+## 4. Read Endpoints
+
+Exercise pages use the two concrete set routes below. Other rows remain bootstrap-backed until their dedicated backend handlers land.
 
 | Endpoint | Response `data` |
 |---|---|
@@ -313,6 +332,8 @@ Task adjustments are submitted through `requestTaskAdjustment(task, draft)`; the
 | UI action | API call | Code path |
 |---|---|---|
 | App mount | `GET /api/student/bootstrap` | `AppStore.jsx` → `api.bootstrap()` |
+| Open assigned exercise | `GET /api/exercise-sets/{taskId}` | `Exercise.jsx` → `loadExerciseSet({ taskId })` |
+| Open bank exercise | `GET /api/bank/exercise/{setId}` | `Exercise.jsx` → `loadExerciseSet({ bankSetId })` |
 | Check a task done | `PATCH /api/tasks/{id}` | `Home.jsx / Tasks.jsx` → `completeTask` |
 | Submit adjustment request | `POST /api/tasks/{id}/adjustment-request` | `requestTaskAdjustment(task, draft)` |
 | Add wrong Qs to error book | `POST /api/errors/batch` | `Summary.jsx` → `addErrors` |
@@ -320,4 +341,5 @@ Task adjustments are submitted through `requestTaskAdjustment(task, draft)`; the
 | Submit redo | `POST /api/errors/{id}/redo` | `ErrorRedo.jsx` → `recordRedo` |
 | Create / edit note | `POST`/`PATCH /api/notes...` | `Notes.jsx` |
 | Submit exercise set | `POST /api/sessions` | `Exercise.jsx` → `saveSession` |
+| Create L6 transfer task | `POST /api/questions/{questionId}/variant` | `Exercise.jsx` → `generateVariant(sourceQuestion)` |
 | Save settings | `PATCH /api/student/settings` | `Profile.jsx` SettingsModal |

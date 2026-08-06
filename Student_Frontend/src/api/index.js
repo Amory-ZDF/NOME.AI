@@ -12,6 +12,8 @@ import { ApiError, http, isMockMode } from './client'
 import { createSeedState } from '../data/mockData'
 import { createMockRepository } from './mockRepository'
 import { isTaskAdjustmentEligible } from '../features/tasks/taskRules'
+import { createVariantExercise } from '../features/exercise/variantFactory'
+import { VARIANT_TEMPLATES } from '../data/variantTemplates'
 
 const repository = createMockRepository({ seedFactory: createSeedState })
 
@@ -82,6 +84,9 @@ const assertTask = (task) => {
   if (task.topicIds !== undefined && !isStringArray(task.topicIds)) throw invalid('Task.topicIds is invalid')
   if (task.completedAt !== undefined && !isNonemptyString(task.completedAt)) throw invalid('Task.completedAt is invalid')
   if (task.adjustmentStatus !== undefined && task.adjustmentStatus !== 'submitted') throw invalid('Task.adjustmentStatus is invalid')
+  if (task.sourceQuestionId !== undefined && !isNonemptyString(task.sourceQuestionId)) throw invalid('Task.sourceQuestionId is invalid')
+  if (task.reason !== undefined && !isString(task.reason)) throw invalid('Task.reason is invalid')
+  if (task.createdAt !== undefined && !isNonemptyString(task.createdAt)) throw invalid('Task.createdAt is invalid')
 }
 
 const noteFieldValidators = Object.freeze({
@@ -165,6 +170,13 @@ const isSessionQuestion = (question) => isRecord(question)
   && question.result.attempts.every(isSessionAttempt)
   && isNonnegativeNumber(question.result.hintsUsed)
   && (question.result.solvedAtHintLevel === null || isNonnegativeNumber(question.result.solvedAtHintLevel))
+  && (question.result.handwritingUsed === undefined || typeof question.result.handwritingUsed === 'boolean')
+  && (question.variantOf === undefined || isNonemptyString(question.variantOf))
+  && (question.sourceQuestionId === undefined || isNonemptyString(question.sourceQuestionId))
+  && (question.understandingExplanation === undefined || isString(question.understandingExplanation))
+  && (question.scoringExplanation === undefined || isString(question.scoringExplanation))
+  && (question.passageEvidence === undefined || isString(question.passageEvidence))
+  && (question.errorPattern === undefined || isString(question.errorPattern))
 
 const assertSession = (session) => {
   assertFields(session, 'Session', {
@@ -282,6 +294,24 @@ export const createTask = async (task) => {
   return { task: state.tasks.find((item) => item.id === task.id) }
 }
 
+// ---------- Exercise sets ----------
+export const getExerciseSet = async (taskId) => {
+  if (!isNonemptyString(taskId)) throw invalid('Task id is required')
+  if (!isMockMode) return http.get(`/api/exercise-sets/${encodeURIComponent(taskId)}`)
+  const set = await repository.read((current) => Object.values(current.exerciseSets)
+    .find((exerciseSet) => exerciseSet.taskId === taskId))
+  if (!set) throw notFound('Exercise set for task', taskId)
+  return set
+}
+
+export const getBankExerciseSet = async (setId) => {
+  if (!isNonemptyString(setId)) throw invalid('Bank exercise set id is required')
+  if (!isMockMode) return http.get(`/api/bank/exercise/${encodeURIComponent(setId)}`)
+  const set = await repository.read((current) => current.bankExerciseSets[setId])
+  if (!set) throw notFound('Bank exercise set', setId)
+  return set
+}
+
 // ---------- Error book ----------
 export const addErrors = async (items) => {
   if (!isMockMode) return http.post('/api/errors/batch', { items })
@@ -344,10 +374,54 @@ export const submitSession = async (session) => {
   if (!isMockMode) return http.post('/api/sessions', session)
   assertSession(session)
   await repository.update((current) => {
-    if (current.sessions.some((item) => item.sessionId === session.sessionId)) throw duplicate('Session', session.sessionId)
-    return { ...current, sessions: [...current.sessions, session] }
+    if (hasOwn(current.sessions, session.sessionId)) throw duplicate('Session', session.sessionId)
+    return { ...current, sessions: { ...current.sessions, [session.sessionId]: session } }
   })
   return { sessionId: session.sessionId }
+}
+
+export const generateVariant = async (sourceQuestionId) => {
+  if (!isNonemptyString(sourceQuestionId)) throw invalid('Source question id is required')
+  if (!isMockMode) return http.post(`/api/questions/${encodeURIComponent(sourceQuestionId)}/variant`)
+
+  let generated
+  await repository.update((current) => {
+    const allSets = [...Object.values(current.exerciseSets), ...Object.values(current.bankExerciseSets)]
+    const sourceQuestion = allSets
+      .flatMap((exerciseSet) => exerciseSet.questions || [])
+      .find((question) => question.id === sourceQuestionId)
+    if (!sourceQuestion) throw notFound('Question', sourceQuestionId)
+
+    const templates = VARIANT_TEMPLATES[sourceQuestion.topic]
+    if (!Array.isArray(templates) || templates.length === 0) {
+      throw invalid(`No variant templates are available for ${sourceQuestion.topic}`)
+    }
+    const persistedVariantCount = Object.values(current.exerciseSets)
+      .filter((exerciseSet) => exerciseSet.sourceQuestionId === sourceQuestionId)
+      .length
+    let ordinal = persistedVariantCount + 1
+    let variantId = `variant-${sourceQuestionId}-${ordinal}`
+    let taskId = `task-variant-${sourceQuestionId}-${ordinal}`
+    while (hasOwn(current.exerciseSets, variantId) || current.tasks.some((task) => task.id === taskId)) {
+      ordinal += 1
+      variantId = `variant-${sourceQuestionId}-${ordinal}`
+      taskId = `task-variant-${sourceQuestionId}-${ordinal}`
+    }
+
+    generated = createVariantExercise({
+      sourceQuestion,
+      templateIndex: persistedVariantCount % templates.length,
+      variantId,
+      taskId,
+      createdAt: new Date().toISOString(),
+    })
+    return {
+      ...current,
+      exerciseSets: { ...current.exerciseSets, [generated.exerciseSet.id]: generated.exerciseSet },
+      tasks: [...current.tasks, generated.task],
+    }
+  })
+  return structuredClone(generated)
 }
 
 // ---------- Settings ----------

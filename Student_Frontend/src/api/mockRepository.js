@@ -24,6 +24,11 @@ const hasNonemptyIdentifier = (value, field = 'id') => isPlainStateObject(value)
   && typeof value[field] === 'string'
   && value[field].trim().length > 0
 
+const hasValidKeyedSessions = (value) => isPlainStateObject(value)
+  && Object.entries(value).every(([sessionId, session]) => (
+    hasNonemptyIdentifier(session, 'sessionId') && session.sessionId === sessionId
+  ))
+
 const matchesSeedSchema = (value, seedValue) => {
   if (!isPlainStateObject(value) || !isPlainStateObject(seedValue)) return false
 
@@ -36,7 +41,10 @@ const matchesSeedSchema = (value, seedValue) => {
       const idBearing = expected.length > 0 && expected.every((item) => hasNonemptyIdentifier(item))
       return !idBearing || actual.every((item) => hasNonemptyIdentifier(item))
     }
-    if (isPlainStateObject(expected)) return isPlainStateObject(actual)
+    if (isPlainStateObject(expected)) {
+      if (key === 'sessions') return hasValidKeyedSessions(actual)
+      return isPlainStateObject(actual)
+    }
     return Object.prototype.hasOwnProperty.call(value, key)
   })
 }
@@ -44,9 +52,24 @@ const matchesSeedSchema = (value, seedValue) => {
 const migrateStoredState = (envelope, fallback) => {
   if (envelope?.version !== STORAGE_VERSION || !isPlainStateObject(envelope.data)) return null
 
-  const data = Object.prototype.hasOwnProperty.call(envelope.data, 'taskAdjustments')
+  let data = Object.prototype.hasOwnProperty.call(envelope.data, 'taskAdjustments')
     ? envelope.data
     : { ...envelope.data, taskAdjustments: [] }
+
+  if (Array.isArray(data.sessions)) {
+    const validLegacySessions = data.sessions.every((session) => hasNonemptyIdentifier(session, 'sessionId'))
+    const sessionIds = validLegacySessions ? data.sessions.map((session) => session.sessionId) : []
+    if (validLegacySessions && new Set(sessionIds).size === sessionIds.length) {
+      data = {
+        ...data,
+        sessions: Object.fromEntries(data.sessions.map((session) => [session.sessionId, session])),
+      }
+    } else {
+      data = { ...data, sessions: fallback.sessions }
+    }
+  } else if (!hasValidKeyedSessions(data.sessions)) {
+    data = { ...data, sessions: fallback.sessions }
+  }
 
   return matchesSeedSchema(data, fallback) ? data : null
 }

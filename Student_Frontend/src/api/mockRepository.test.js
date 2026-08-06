@@ -99,8 +99,8 @@ test.each([
   })
   const repository = createMockRepository({ storage, latencyMs: 0, seedFactory: createSeedState })
 
-  expect((await repository.bootstrap()).sessions).toEqual([])
-  expect(JSON.parse(storage.getItem(STORAGE_KEY)).data.sessions).toEqual([])
+  expect((await repository.bootstrap()).sessions).toEqual({})
+  expect(JSON.parse(storage.getItem(STORAGE_KEY)).data.sessions).toEqual({})
 })
 
 test('repairs persisted adjustment requests without stable identifiers', async () => {
@@ -130,13 +130,54 @@ test('migrates legacy v1 state without task adjustments while preserving user ch
 
   expect(migrated.tasks.find((task) => task.id === 't1')).toMatchObject({ status: 'completed' })
   expect(migrated.notes.find((note) => note.id === 'n1')).toMatchObject({ title: 'My edited note' })
-  expect(migrated.sessions).toEqual([{ sessionId: 'legacy-session' }])
+  expect(migrated.sessions).toEqual({ 'legacy-session': { sessionId: 'legacy-session' } })
   expect(migrated.settings).toMatchObject({ tone: 88 })
   expect(migrated.taskAdjustments).toEqual([])
   expect(JSON.parse(storage.getItem(STORAGE_KEY)).data).toMatchObject({
-    sessions: [{ sessionId: 'legacy-session' }],
+    sessions: { 'legacy-session': { sessionId: 'legacy-session' } },
     taskAdjustments: [],
   })
+})
+
+test('migrates every valid legacy session while preserving unrelated user state', async () => {
+  // Catches a schema migration that fixes sessions by discarding the rest of the saved profile.
+  const legacy = createSeedState()
+  legacy.tasks = legacy.tasks.map((task) => (task.id === 't1' ? { ...task, status: 'completed' } : task))
+  legacy.notes = legacy.notes.map((note) => (note.id === 'n1' ? { ...note, title: 'Kept note edit' } : note))
+  legacy.sessions = [{ sessionId: 'old-1', score: 80 }, { sessionId: 'old-2', score: 90 }]
+  legacy.settings = { ...legacy.settings, tone: 91 }
+  const storage = createMemoryStorage({ [STORAGE_KEY]: JSON.stringify({ version: 1, data: legacy }) })
+  const repository = createMockRepository({ storage, latencyMs: 0, seedFactory: createSeedState })
+
+  const migrated = await repository.bootstrap()
+
+  expect(migrated.sessions).toEqual({
+    'old-1': { sessionId: 'old-1', score: 80 },
+    'old-2': { sessionId: 'old-2', score: 90 },
+  })
+  expect(migrated.tasks.find((task) => task.id === 't1')).toMatchObject({ status: 'completed' })
+  expect(migrated.notes.find((note) => note.id === 'n1')).toMatchObject({ title: 'Kept note edit' })
+  expect(migrated.settings.tone).toBe(91)
+})
+
+test('repairs malformed keyed sessions instead of exposing corrupt records', async () => {
+  // Catches keyed session repair either accepting a mismatched identity or discarding unrelated edits.
+  const stored = createSeedState()
+  stored.tasks = stored.tasks.map((task) => (task.id === 't1' ? { ...task, status: 'completed' } : task))
+  stored.settings = { ...stored.settings, tone: 93 }
+  stored.sessions = { wrong: { sessionId: 'actual' } }
+  const storage = createMemoryStorage({
+    [STORAGE_KEY]: JSON.stringify({
+      version: 1,
+      data: stored,
+    }),
+  })
+  const repository = createMockRepository({ storage, latencyMs: 0, seedFactory: createSeedState })
+
+  const repaired = await repository.bootstrap()
+  expect(repaired.sessions).toEqual({})
+  expect(repaired.tasks.find((task) => task.id === 't1')).toMatchObject({ status: 'completed' })
+  expect(repaired.settings.tone).toBe(93)
 })
 
 test('honors configured latency before resolving repository calls', async () => {

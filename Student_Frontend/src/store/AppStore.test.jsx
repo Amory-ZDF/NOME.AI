@@ -6,6 +6,7 @@ import { createAppServices } from './services'
 const bootData = {
   tasks: [{ id: 't1', type: 'teacher_assigned', status: 'pending' }],
   taskAdjustments: [],
+  sessions: {},
   errors: [],
   notes: [],
   noteFolders: [],
@@ -23,7 +24,13 @@ function createApi(overrides = {}) {
     submitRedo: () => Promise.resolve({ error: { id: 'e1' } }),
     createNote: (note) => Promise.resolve({ note }),
     updateNote: () => Promise.resolve({ note: { id: 'n1' } }),
+    getExerciseSet: (taskId) => Promise.resolve({ taskId, title: 'Task set', subject: 'Math', questions: [] }),
+    getBankExerciseSet: (setId) => Promise.resolve({ id: setId, taskId: null, title: 'Bank set', subject: 'Math', questions: [] }),
     submitSession: () => Promise.resolve({ sessionId: 's1' }),
+    generateVariant: () => Promise.resolve({
+      exerciseSet: { id: 'variant-1', taskId: 'variant-task-1', title: 'Variant', subject: 'Math', questions: [] },
+      task: { id: 'variant-task-1', status: 'pending' },
+    }),
     updateSettings: () => Promise.resolve({ settings: bootData.settings }),
     ...overrides,
   }
@@ -58,6 +65,185 @@ function renderProvider(api) {
     </AppProvider>,
   )
 }
+
+async function renderApp(api, serviceOverrides = {}) {
+  let current
+  function Capture() {
+    current = useApp()
+    return <output data-testid="capture-status">{current.bootStatus}</output>
+  }
+  const view = render(
+    <AppProvider services={createAppServices({
+      apiClient: api,
+      now: () => new Date('2026-08-06T00:00:00.000Z'),
+      createId: () => 'generated-id',
+      ...serviceOverrides,
+    })}>
+      <Capture />
+    </AppProvider>,
+  )
+  await screen.findByText('ready', { selector: '[data-testid="capture-status"]' })
+  return { view, get app() { return current } }
+}
+
+test('deduplicates concurrent exercise loads, exposes the exact pending key, and caches the set', async () => {
+  // Catches duplicate reads and cache commits that use the returned set ID instead of the requested task ID.
+  let resolveLoad
+  const getExerciseSet = vi.fn(() => new Promise((resolve) => { resolveLoad = resolve }))
+  const harness = await renderApp(createApi({ getExerciseSet }))
+  let first
+  let second
+
+  act(() => {
+    first = harness.app.loadExerciseSet({ taskId: 't1' })
+    second = harness.app.loadExerciseSet({ taskId: 't1' })
+  })
+
+  expect(second).toBe(first)
+  expect(getExerciseSet).toHaveBeenCalledTimes(1)
+  await waitFor(() => expect(harness.app.isActionPending('exercise:load:t1')).toBe(true))
+  const set = { taskId: 't1', title: 'Loaded set', subject: 'Math', questions: [{ id: 'q1' }] }
+  await act(async () => {
+    resolveLoad(set)
+    await Promise.all([first, second])
+  })
+
+  expect(harness.app.exerciseCache.t1).toEqual(set)
+  expect(harness.app.isActionPending('exercise:load:t1')).toBe(false)
+  await expect(harness.app.loadExerciseSet({ taskId: 't1' })).resolves.toEqual(set)
+  expect(getExerciseSet).toHaveBeenCalledTimes(1)
+})
+
+test('loads bank sets through the bank API and retries cleanly after a failed load', async () => {
+  // Catches failed loads getting stuck in the in-flight map or dispatching to the wrong read endpoint.
+  let attempts = 0
+  const getBankExerciseSet = vi.fn((id) => {
+    attempts += 1
+    return attempts === 1
+      ? Promise.reject(new Error('bank offline'))
+      : Promise.resolve({ id, title: 'Bank set', subject: 'Math', questions: [] })
+  })
+  const harness = await renderApp(createApi({ getBankExerciseSet }))
+
+  await act(async () => {
+    await expect(harness.app.loadExerciseSet({ bankSetId: 'bq1' })).rejects.toThrow('bank offline')
+  })
+  expect(harness.app.exerciseCache.bq1).toBeUndefined()
+  expect(harness.app.isActionPending('exercise:load:bq1')).toBe(false)
+
+  await act(async () => {
+    await expect(harness.app.loadExerciseSet({ bankSetId: 'bq1' })).resolves.toMatchObject({ id: 'bq1' })
+  })
+  expect(getBankExerciseSet).toHaveBeenCalledTimes(2)
+  expect(harness.app.exerciseCache.bq1).toMatchObject({ id: 'bq1' })
+})
+
+test('persists a session before completing its task and merges the returned task', async () => {
+  // Catches session/task ordering reversal and completion results being ignored by task state.
+  const events = []
+  const api = createApi({
+    submitSession: async (session) => { events.push(`session:${session.sessionId}`); return { sessionId: session.sessionId } },
+    completeTask: async (id) => {
+      events.push(`task:${id}`)
+      return { task: { id, type: 'teacher_assigned', status: 'completed', completedAt: '2026-08-06T00:01:00.000Z' } }
+    },
+  })
+  const harness = await renderApp(api)
+  const session = { sessionId: 's-complete', taskId: 't1', completedAt: '2026-08-06T00:00:00.000Z', questions: [] }
+
+  let operation
+  act(() => { operation = harness.app.saveSession(session) })
+  await waitFor(() => expect(harness.app.isActionPending('exercise:submit:s-complete')).toBe(true))
+  await act(async () => { await operation })
+
+  expect(events).toEqual(['session:s-complete', 'task:t1'])
+  expect(harness.app.lastSession).toMatchObject({ sessionId: 's-complete', taskId: 't1' })
+  expect(harness.app.tasks[0]).toMatchObject({ id: 't1', status: 'completed', completedAt: '2026-08-06T00:01:00.000Z' })
+  expect(harness.app.isActionPending('exercise:submit:s-complete')).toBe(false)
+})
+
+test('keeps a saved session and safely retries task completion without submitting it twice', async () => {
+  // Catches completion failure rolling back durable work or a retry colliding with duplicate session storage.
+  const submitSession = vi.fn((session) => Promise.resolve({ sessionId: session.sessionId }))
+  let completionAttempts = 0
+  const completeTask = vi.fn((id) => {
+    completionAttempts += 1
+    return completionAttempts === 1
+      ? Promise.reject(new Error('completion offline'))
+      : Promise.resolve({ task: { id, type: 'teacher_assigned', status: 'completed' } })
+  })
+  const harness = await renderApp(createApi({ submitSession, completeTask }))
+  const session = { sessionId: 's-retry', taskId: 't1', completedAt: '2026-08-06T00:00:00.000Z', questions: [] }
+
+  await act(async () => {
+    await expect(harness.app.saveSession(session)).resolves.toMatchObject({ completionPending: true })
+  })
+  expect(harness.app.lastSession).toMatchObject({ sessionId: 's-retry' })
+  expect(harness.app.tasks[0]).toMatchObject({ id: 't1', status: 'pending' })
+  expect(harness.app.toast).toMatchObject({ message: 'Session saved; task completion will retry' })
+
+  await act(async () => {
+    await expect(harness.app.saveSession(session)).resolves.toMatchObject({ completionPending: false })
+  })
+  expect(submitSession).toHaveBeenCalledTimes(1)
+  expect(completeTask).toHaveBeenCalledTimes(2)
+  expect(harness.app.tasks[0]).toMatchObject({ id: 't1', status: 'completed' })
+})
+
+test('rolls back lastSession when session persistence itself fails', async () => {
+  // Catches optimistic session state being retained even though no durable save occurred.
+  const harness = await renderApp(createApi({ submitSession: () => Promise.reject(new Error('session offline')) }))
+
+  await act(async () => {
+    await expect(harness.app.saveSession({ sessionId: 's-fail', taskId: 't1', questions: [] })).rejects.toThrow('session offline')
+  })
+
+  expect(harness.app.lastSession).toBeNull()
+  expect(harness.app.tasks[0]).toMatchObject({ status: 'pending' })
+  expect(harness.app.isActionPending('exercise:submit:s-fail')).toBe(false)
+})
+
+test('stores generated variants in cache and adds their task only once', async () => {
+  // Catches an L6 response that is returned to the page but never becomes store-visible state.
+  let resolveVariant
+  const result = {
+    exerciseSet: { id: 'variant-1', taskId: 'variant-task-1', title: 'Variant', subject: 'Math', questions: [] },
+    task: { id: 'variant-task-1', type: 'ai_recommended', status: 'pending' },
+  }
+  const generateVariant = vi.fn(() => new Promise((resolve) => { resolveVariant = resolve }))
+  const harness = await renderApp(createApi({ generateVariant }))
+  const source = { id: 'q-source', topic: 'Calculus - Differentiation' }
+  let first
+
+  act(() => { first = harness.app.generateVariant(source) })
+  await waitFor(() => expect(harness.app.isActionPending('exercise:variant:q-source')).toBe(true))
+  await act(async () => { resolveVariant(result); await first })
+
+  expect(generateVariant).toHaveBeenCalledWith('q-source')
+  expect(harness.app.exerciseCache['variant-1']).toEqual(result.exerciseSet)
+  expect(harness.app.tasks).toContainEqual(result.task)
+
+  generateVariant.mockResolvedValueOnce(result)
+  await act(async () => { await harness.app.generateVariant(source) })
+  expect(harness.app.tasks.filter((task) => task.id === 'variant-task-1')).toHaveLength(1)
+})
+
+test('does not consume a late exercise load after provider unmount', async () => {
+  // Catches new exercise actions bypassing the existing mounted/action-generation guard.
+  let resolveLoad
+  let titleReads = 0
+  const harness = await renderApp(createApi({
+    getExerciseSet: () => new Promise((resolve) => { resolveLoad = resolve }),
+  }))
+  const operation = harness.app.loadExerciseSet({ taskId: 't1' })
+  harness.view.unmount()
+
+  await act(async () => {
+    resolveLoad({ taskId: 't1', get title() { titleReads += 1; return 'Late set' }, questions: [] })
+    await operation
+  })
+  expect(titleReads).toBe(0)
+})
 
 test('exposes loading before bootstrap data becomes ready', async () => {
   // Catches a provider mutation that reports ready before data is available to consumers.

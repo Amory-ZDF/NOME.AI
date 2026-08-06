@@ -20,6 +20,7 @@ export function AppProvider({ children, services = defaultAppServices }) {
   const [notes, setNotes] = useState([])
   const [noteFolders, setNoteFolders] = useState([])
   const [settings, setSettings] = useState(null)
+  const [exerciseCache, setExerciseCache] = useState({})
   const [lastSession, setLastSession] = useState(null)
   const [toast, setToast] = useState(null)
   const [pendingActions, setPendingActions] = useState(() => new Set())
@@ -29,11 +30,14 @@ export function AppProvider({ children, services = defaultAppServices }) {
   const actionGeneration = useRef(0)
   const actionCounts = useRef(new Map())
   const collectionQueues = useRef(new Map())
+  const exerciseLoads = useRef(new Map())
+  const persistedSessionIds = useRef(new Set())
   const tasksRef = useRef([])
   const taskAdjustmentsRef = useRef([])
   const errorsRef = useRef([])
   const notesRef = useRef([])
   const settingsRef = useRef(null)
+  const exerciseCacheRef = useRef({})
   const lastSessionRef = useRef(null)
 
   const replaceTasks = useCallback((next) => {
@@ -55,6 +59,10 @@ export function AppProvider({ children, services = defaultAppServices }) {
   const replaceSettings = useCallback((next) => {
     settingsRef.current = next
     setSettings(next)
+  }, [])
+  const replaceExerciseCache = useCallback((next) => {
+    exerciseCacheRef.current = next
+    setExerciseCache(next)
   }, [])
   const replaceLastSession = useCallback((next) => {
     lastSessionRef.current = next
@@ -86,6 +94,8 @@ export function AppProvider({ children, services = defaultAppServices }) {
       replaceNotes(data.notes)
       setNoteFolders(data.noteFolders)
       replaceSettings(data.settings)
+      replaceExerciseCache({})
+      persistedSessionIds.current = new Set(Object.keys(data.sessions || {}))
       setBootStatus('ready')
       return data
     } catch (error) {
@@ -95,7 +105,7 @@ export function AppProvider({ children, services = defaultAppServices }) {
       }
       return undefined
     }
-  }, [replaceErrors, replaceNotes, replaceSettings, replaceTaskAdjustments, replaceTasks, services])
+  }, [replaceErrors, replaceExerciseCache, replaceNotes, replaceSettings, replaceTaskAdjustments, replaceTasks, services])
 
   useEffect(() => {
     mounted.current = true
@@ -104,6 +114,7 @@ export function AppProvider({ children, services = defaultAppServices }) {
       mounted.current = false
       bootRequest.current += 1
       actionGeneration.current += 1
+      exerciseLoads.current.clear()
       clearTimeout(toastTimer.current)
     }
   }, [retryBootstrap])
@@ -302,6 +313,34 @@ export function AppProvider({ children, services = defaultAppServices }) {
     }))
   }, [replaceNotes, runAction, services])
 
+  const loadExerciseSet = useCallback(({ taskId, bankSetId } = {}) => {
+    const id = taskId || bankSetId
+    if (typeof id !== 'string' || id.trim().length === 0 || (taskId && bankSetId)) {
+      return Promise.reject(new Error('Provide exactly one exercise set identifier.'))
+    }
+    const cached = exerciseCacheRef.current[id]
+    if (cached) return Promise.resolve(cached)
+    const activeLoad = exerciseLoads.current.get(id)
+    if (activeLoad) return activeLoad
+
+    let load
+    load = runAction(`exercise:load:${id}`, 'exerciseCache', () => ({
+      snapshot: null,
+      optimistic: () => {},
+      request: () => (taskId
+        ? services.api.getExerciseSet(taskId)
+        : services.api.getBankExerciseSet(bankSetId)),
+      commit: (exerciseSet) => {
+        replaceExerciseCache({ ...exerciseCacheRef.current, [id]: exerciseSet })
+      },
+      rollback: () => {},
+    })).finally(() => {
+      if (exerciseLoads.current.get(id) === load) exerciseLoads.current.delete(id)
+    })
+    exerciseLoads.current.set(id, load)
+    return load
+  }, [replaceExerciseCache, runAction, services])
+
   const updateNote = useCallback((id, patch) => {
     const actionNow = services.now()
     const updatedPatch = { ...patch, updatedAt: dateOnly(actionNow) }
@@ -332,18 +371,62 @@ export function AppProvider({ children, services = defaultAppServices }) {
         },
       })) || [],
     }
-    return runAction('saveSession', 'session', () => ({
+    return runAction(`exercise:submit:${savedSession.sessionId}`, savedSession.taskId ? 'tasks' : 'session', () => ({
       snapshot: lastSessionRef.current,
       optimistic: () => replaceLastSession(savedSession),
-      request: () => services.api.submitSession(savedSession),
-      commit: (result) => {
-        if (result?.sessionId && result.sessionId !== savedSession.sessionId) {
-          replaceLastSession({ ...savedSession, sessionId: result.sessionId })
+      request: async () => {
+        let sessionResult = { sessionId: savedSession.sessionId }
+        if (!persistedSessionIds.current.has(savedSession.sessionId)) {
+          sessionResult = await services.api.submitSession(savedSession)
+          persistedSessionIds.current.add(savedSession.sessionId)
         }
+
+        if (!savedSession.taskId) return { ...sessionResult, completionPending: false }
+        try {
+          const completion = await services.api.completeTask(savedSession.taskId)
+          return { ...sessionResult, task: completion?.task, completionPending: false }
+        } catch (completionError) {
+          return { ...sessionResult, completionError, completionPending: true }
+        }
+      },
+      commit: (result) => {
+        replaceLastSession(result?.sessionId && result.sessionId !== savedSession.sessionId
+          ? { ...savedSession, sessionId: result.sessionId }
+          : savedSession)
+        if (result?.task) {
+          replaceTasks(tasksRef.current.map((task) => (
+            task.id === result.task.id ? { ...task, ...result.task } : task
+          )))
+        }
+        if (result?.completionPending) showToast('Session saved; task completion will retry', 'error')
       },
       rollback: replaceLastSession,
     }))
-  }, [replaceLastSession, runAction, services])
+  }, [replaceLastSession, replaceTasks, runAction, services, showToast])
+
+  const generateVariant = useCallback((sourceQuestion) => {
+    const questionId = sourceQuestion?.id
+    if (typeof questionId !== 'string' || questionId.trim().length === 0) {
+      return Promise.reject(new Error('A source question is required.'))
+    }
+    return runAction(`exercise:variant:${questionId}`, 'tasks', () => ({
+      snapshot: null,
+      optimistic: () => {},
+      request: () => services.api.generateVariant(questionId),
+      commit: (result) => {
+        if (result?.exerciseSet?.id) {
+          replaceExerciseCache({
+            ...exerciseCacheRef.current,
+            [result.exerciseSet.id]: result.exerciseSet,
+          })
+        }
+        if (result?.task && !tasksRef.current.some((task) => task.id === result.task.id)) {
+          replaceTasks([...tasksRef.current, result.task])
+        }
+      },
+      rollback: () => {},
+    }))
+  }, [replaceExerciseCache, replaceTasks, runAction, services])
 
   const updateSettings = useCallback((patch) => runAction('updateSettings', 'settings', () => ({
     snapshot: settingsRef.current,
@@ -358,10 +441,10 @@ export function AppProvider({ children, services = defaultAppServices }) {
   return (
     <AppContext.Provider value={{
       booted: bootStatus === 'ready', bootStatus, bootError, pendingActions, retryBootstrap, isActionPending,
-      tasks, taskAdjustments, greeting, moduleStats, learningSummary, errors, notes, noteFolders, settings, lastSession, toast,
+      tasks, taskAdjustments, greeting, moduleStats, learningSummary, errors, notes, noteFolders, settings, exerciseCache, lastSession, toast,
       showToast, completeTask, requestTaskAdjustment, addTask,
       addErrors, markErrorMastered, recordRedo,
-      addNote, updateNote, saveSession, updateSettings,
+      addNote, updateNote, loadExerciseSet, saveSession, generateVariant, updateSettings,
     }}>
       {children}
     </AppContext.Provider>

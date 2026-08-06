@@ -5,6 +5,9 @@ import {
   completeTask,
   createNote,
   createTask,
+  generateVariant,
+  getBankExerciseSet,
+  getExerciseSet,
   markErrorMastered,
   reportTaskAdjustment,
   resetMockState,
@@ -52,6 +55,7 @@ const makeSessionQuestion = (overrides = {}) => ({
     attempts: [{ answer: 'B', submittedAt: '2026-08-06T12:00:00.000Z', isCorrect: true }],
     hintsUsed: 0,
     solvedAtHintLevel: 0,
+    handwritingUsed: true,
   },
   ...overrides,
 })
@@ -209,13 +213,117 @@ test('updateNote returns and persists the note patch', async () => {
   })
 })
 
-test('submitSession returns an ID and persists the session', async () => {
+test('submitSession returns an ID and persists the session by session ID', async () => {
   // Catches a mock adapter mutation that reports a session ID but loses the session record.
   await resetMockState()
   const session = makeSession()
 
   await expect(submitSession(session)).resolves.toEqual({ sessionId: 's-new' })
-  await expect(bootstrap()).resolves.toMatchObject({ sessions: [session] })
+  await expect(bootstrap()).resolves.toMatchObject({ sessions: { 's-new': session } })
+})
+
+test('reads task and bank exercise sets and rejects invalid or unknown identifiers', async () => {
+  // Catches exercise reads that use the set key for task routes or silently return undefined.
+  await resetMockState()
+
+  const taskSet = await getExerciseSet('t1')
+  expect(taskSet.taskId).toBe('t1')
+  expect(taskSet.questions[0]).toMatchObject({ id: 'q1' })
+  await expect(getBankExerciseSet('bq2')).resolves.toMatchObject({ questions: [{ id: 'bq2-q1' }] })
+  await expect(getExerciseSet('missing')).rejects.toMatchObject({ status: 404, code: 'NOT_FOUND' })
+  await expect(getBankExerciseSet('missing')).rejects.toMatchObject({ status: 404, code: 'NOT_FOUND' })
+  await expect(getExerciseSet('   ')).rejects.toMatchObject({ status: 400, code: 'INVALID_INPUT' })
+})
+
+test('persists sessions and cycles deterministic variants atomically', async () => {
+  // Catches variant generation that repeats one template, collides IDs, or saves only half the transaction.
+  await resetMockState()
+  const set = await getExerciseSet('t1')
+  const session = makeSession({ sessionId: 's-variant', taskId: 't1' })
+
+  await submitSession(session)
+  const first = await generateVariant(set.questions[0].id)
+  const second = await generateVariant(set.questions[0].id)
+  const third = await generateVariant(set.questions[0].id)
+  const data = await bootstrap()
+
+  expect(data.sessions['s-variant']).toEqual(session)
+  expect(first.exerciseSet.id).toBe('variant-q1-1')
+  expect(second.exerciseSet.id).toBe('variant-q1-2')
+  expect(third.exerciseSet.id).toBe('variant-q1-3')
+  expect(new Set([first.task.id, second.task.id, third.task.id])).toHaveProperty('size', 3)
+  expect(first.exerciseSet.questions[0].content).not.toBe(second.exerciseSet.questions[0].content)
+  expect(third.exerciseSet.questions[0].content).toBe(first.exerciseSet.questions[0].content)
+  for (const generated of [first, second, third]) {
+    expect(data.exerciseSets[generated.exerciseSet.id]).toEqual(generated.exerciseSet)
+    expect(data.tasks).toContainEqual(generated.task)
+  }
+})
+
+test('generates a variant from a bank question and rejects invalid or unknown sources', async () => {
+  // Catches source lookup being limited to teacher task exercise sets.
+  await resetMockState()
+
+  await expect(generateVariant('bq2-q1')).resolves.toMatchObject({
+    exerciseSet: { sourceQuestionId: 'bq2-q1', questions: [{ variantOf: 'bq2-q1' }] },
+    task: { sourceQuestionId: 'bq2-q1', type: 'ai_recommended' },
+  })
+  await expect(generateVariant('missing')).rejects.toMatchObject({ status: 404, code: 'NOT_FOUND' })
+  await expect(generateVariant('')).rejects.toMatchObject({ status: 400, code: 'INVALID_INPUT' })
+})
+
+test('uses the documented real exercise routes and request bodies', async () => {
+  // Catches the real adapter drifting from the backend route contract while mock mode stays green.
+  const get = vi.fn((path) => Promise.resolve({ path }))
+  const post = vi.fn((path, body) => Promise.resolve({ path, body }))
+  vi.resetModules()
+  vi.doMock('./client', () => ({
+    ApiError: class ApiError extends Error {},
+    http: { get, post, patch: vi.fn() },
+    isMockMode: false,
+  }))
+
+  try {
+    const realApi = await import('./index')
+    const session = makeSession({ sessionId: 's-real' })
+    await realApi.getExerciseSet('task/id')
+    await realApi.getBankExerciseSet('bank/id')
+    await realApi.submitSession(session)
+    await realApi.generateVariant('question/id')
+
+    expect(get).toHaveBeenNthCalledWith(1, '/api/exercise-sets/task%2Fid')
+    expect(get).toHaveBeenNthCalledWith(2, '/api/bank/exercise/bank%2Fid')
+    expect(post).toHaveBeenNthCalledWith(1, '/api/sessions', session)
+    expect(post).toHaveBeenNthCalledWith(2, '/api/questions/question%2Fid/variant')
+  } finally {
+    vi.doUnmock('./client')
+    vi.resetModules()
+  }
+})
+
+test('accepts documented optional question metadata and rejects mistyped metadata', async () => {
+  // Catches explanation, variant, and handwriting metadata bypassing boundary validation.
+  await resetMockState()
+  const question = makeSessionQuestion({
+    variantOf: 'q-source',
+    sourceQuestionId: 'q-source',
+    understandingExplanation: 'Understand the derivative as a rate of change.',
+    scoringExplanation: 'Award one mark for the derivative and one for substitution.',
+    passageEvidence: 'The passage states the figure directly.',
+    errorPattern: 'Avoid replacing an explicit statement with an inference.',
+  })
+  await expect(submitSession(makeSession({ sessionId: 's-metadata', questions: [question] }))).resolves.toEqual({ sessionId: 's-metadata' })
+
+  const invalidQuestions = [
+    makeSessionQuestion({ variantOf: 42 }),
+    makeSessionQuestion({ understandingExplanation: false }),
+    makeSessionQuestion({ passageEvidence: [] }),
+    makeSessionQuestion({ result: { ...makeSessionQuestion().result, handwritingUsed: 'yes' } }),
+  ]
+  for (const [index, invalidQuestion] of invalidQuestions.entries()) {
+    await expect(submitSession(makeSession({ sessionId: `bad-${index}`, questions: [invalidQuestion] })))
+      .rejects.toMatchObject({ code: 'INVALID_INPUT' })
+  }
 })
 
 test('updateSettings returns and persists the merged settings', async () => {
