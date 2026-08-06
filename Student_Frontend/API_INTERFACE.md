@@ -21,6 +21,18 @@
 { "code": 0, "message": "ok", "data": { /* payload below */ } }
 ```
 
+- Response normalization: the HTTP client resolves the envelope's `data` value to endpoint callers.
+  It also accepts a bare JSON payload for compatibility with an endpoint that does not wrap data.
+- Error normalization: a non-2xx HTTP status or an envelope with `code !== 0` rejects with
+  `ApiError`; it retains the backend message, HTTP `status`, and API `code`. Network and JSON
+  parsing failures are likewise surfaced as `ApiError`.
+- Mock persistence: without `VITE_API_BASE_URL`, the local adapter persists the state that backs
+  these endpoint functions in `localStorage` key `nome-ai.student-state.v1`, using the versioned
+  `{ version: 1, data }` envelope. State survives refreshes; missing, malformed, or incompatible
+  stored data falls back to the seed state during bootstrap.
+- Test helper: `resetMockState()` is exported from `src/api/index.js`. It clears that local key and
+  returns a fresh bootstrapped seed state asynchronously. It does not introduce or alter an HTTP
+  endpoint.
 - Dates: ISO 8601 strings (`2026-08-05T22:00:00` or `2026-08-05` for date-only fields).
 
 ---
