@@ -20,6 +20,15 @@ const WHY_WRONG_BY_ERROR_TYPE = Object.freeze({
   habit: 'The same avoidable error pattern has recurred across recent attempts.',
 })
 
+const ERROR_CARD_STATUSES = new Set([
+  'pending_review',
+  'reviewing',
+  'verification_due',
+  'mastered',
+])
+
+const PRIVILEGED_INCOMING_STATUSES = new Set(['verification_due', 'mastered'])
+
 const isRecord = (value) => value !== null && typeof value === 'object' && !Array.isArray(value)
 const nonemptyString = (value) => (typeof value === 'string' && value.trim() ? value.trim() : null)
 const firstPresent = (...values) => values.find((value) => value !== undefined && value !== null)
@@ -39,9 +48,7 @@ const stripMarkup = (value) => (
 const latestWrongAttempt = (result) => {
   if (!Array.isArray(result.attempts)) return {}
   const attempts = result.attempts.filter(isRecord)
-  return attempts.findLast((attempt) => attempt.isCorrect === false)
-    ?? (result.status === 'wrong' ? attempts.at(-1) : undefined)
-    ?? {}
+  return attempts.findLast((attempt) => attempt.isCorrect === false) ?? {}
 }
 
 const normalizeHintsUsed = (value) => (
@@ -49,11 +56,21 @@ const normalizeHintsUsed = (value) => (
 )
 
 const occurrenceFrom = (occurredAt, session) => {
-  const explicit = nonemptyString(occurredAt)
-  if (explicit) return explicit
   const completedAt = nonemptyString(session.completedAt)
-  return completedAt ? completedAt.slice(0, 10) : null
+  return completedAt ?? nonemptyString(occurredAt)
 }
+
+const sessionOccurrenceKey = (sessionId, questionId) => (
+  sessionId ? `session:${sessionId}:question:${questionId}` : null
+)
+
+const legacyOccurrenceKey = (questionId, occurredAt) => (
+  occurredAt ? `legacy:${questionId}:${occurredAt}` : null
+)
+
+const cardOccurrenceKey = (id, questionId) => (
+  id ? `card:${id}:question:${questionId}` : null
+)
 
 const optionalEvidence = (name, question, result, attempt) => {
   const value = firstPresent(question[name], result[name], attempt[name])
@@ -65,7 +82,12 @@ export function buildErrorCard({ question, session, id, occurredAt } = {}) {
   const safeSession = isRecord(session) ? session : {}
   const result = isRecord(safeQuestion.result) ? safeQuestion.result : {}
   const wrongAttempt = latestWrongAttempt(result)
-  const questionId = nonemptyString(safeQuestion.id) ?? 'unknown-question'
+  const sourceQuestionId = nonemptyString(safeQuestion.id)
+  const requestedCardId = nonemptyString(id)
+  const questionId = sourceQuestionId
+    ?? (requestedCardId ? `missing-question:${requestedCardId}` : 'unknown-question')
+  const cardId = requestedCardId ?? `error-${questionId}`
+  const sessionId = nonemptyString(safeSession.sessionId)
   const errorType = normalizeErrorType(safeQuestion, result)
   const topic = nonemptyString(safeQuestion.relatedTopic)
     ?? nonemptyString(safeQuestion.topic)
@@ -91,6 +113,12 @@ export function buildErrorCard({ question, session, id, occurredAt } = {}) {
     ?? nonemptyString(wrongAttempt.avoidablePattern)
     ?? WHY_WRONG_BY_ERROR_TYPE[errorType]
   const occurrence = occurrenceFrom(occurredAt, safeSession)
+  const occurrenceKey = sessionOccurrenceKey(sessionId, questionId)
+    ?? legacyOccurrenceKey(questionId, occurrence)
+    ?? cardOccurrenceKey(cardId, questionId)
+  const occurrenceRecord = occurrenceKey
+    ? { key: occurrenceKey, occurredAt: occurrence }
+    : null
   const questionContent = nonemptyString(safeQuestion.questionContent)
     ?? nonemptyString(safeQuestion.content)
     ?? `Question ${questionId}`
@@ -106,9 +134,9 @@ export function buildErrorCard({ question, session, id, occurredAt } = {}) {
   )
 
   return {
-    id: nonemptyString(id) ?? `error-${questionId}`,
+    id: cardId,
     questionId,
-    sessionId: nonemptyString(safeSession.sessionId),
+    sessionId,
     subject: nonemptyString(safeSession.subject)
       ?? nonemptyString(safeQuestion.subject)
       ?? 'Unspecified',
@@ -133,6 +161,8 @@ export function buildErrorCard({ question, session, id, occurredAt } = {}) {
     linkedAbility: LINKED_ABILITY_BY_ERROR_TYPE[errorType],
     hintDependency: normalizeHintsUsed(result.hintsUsed),
     occurrences: occurrence ? [occurrence] : [],
+    occurrenceKeys: occurrenceKey ? [occurrenceKey] : [],
+    occurrenceRecords: occurrenceRecord ? [occurrenceRecord] : [],
     firstOccurredAt: occurrence,
     lastOccurredAt: occurrence,
     repeatCount: 1,
@@ -148,7 +178,26 @@ export function buildErrorCard({ question, session, id, occurredAt } = {}) {
   }
 }
 
-const normalizeOccurrences = (card) => {
+const sortOccurrenceRecords = (records) => [...records].sort((left, right) => {
+  if (left.occurredAt && right.occurredAt) {
+    const timeOrder = left.occurredAt.localeCompare(right.occurredAt)
+    if (timeOrder !== 0) return timeOrder
+  } else if (left.occurredAt) return -1
+  else if (right.occurredAt) return 1
+  return left.key.localeCompare(right.key)
+})
+
+const deduplicateOccurrenceRecords = (records) => {
+  const byKey = new Map()
+  records.forEach((record) => {
+    if (!record?.key) return
+    const current = byKey.get(record.key)
+    if (!current || (!current.occurredAt && record.occurredAt)) byKey.set(record.key, record)
+  })
+  return sortOccurrenceRecords([...byKey.values()])
+}
+
+const legacyOccurrenceValues = (card) => {
   const occurrences = Array.isArray(card.occurrences)
     ? card.occurrences.map(nonemptyString).filter(Boolean)
     : []
@@ -156,13 +205,50 @@ const normalizeOccurrences = (card) => {
     const first = nonemptyString(card.firstOccurredAt)
     const last = nonemptyString(card.lastOccurredAt)
     if (first) occurrences.push(first)
-    if (last) occurrences.push(last)
+    if (last && last !== first) occurrences.push(last)
   }
-  return [...new Set(occurrences)].sort((left, right) => left.localeCompare(right))
+  return occurrences
 }
 
-const normalizeRepeatCount = (value, occurrences) => (
-  Number.isInteger(value) && value > 0 ? Math.max(value, occurrences.length) : Math.max(1, occurrences.length)
+const normalizeOccurrenceRecords = (card, questionId, id) => {
+  if (Array.isArray(card.occurrenceRecords)) {
+    const persisted = card.occurrenceRecords.filter(isRecord).map((record) => ({
+      key: nonemptyString(record.key),
+      occurredAt: nonemptyString(record.occurredAt),
+    })).filter((record) => record.key)
+    if (persisted.length > 0) return deduplicateOccurrenceRecords(persisted)
+  }
+
+  const occurrences = legacyOccurrenceValues(card)
+  const providedKeys = Array.isArray(card.occurrenceKeys)
+    ? card.occurrenceKeys.map(nonemptyString).filter(Boolean)
+    : []
+  const sessionId = nonemptyString(card.sessionId)
+  const recordCount = Math.max(occurrences.length, providedKeys.length)
+  const records = []
+
+  for (let index = 0; index < recordCount; index += 1) {
+    const occurredAt = occurrences[index] ?? null
+    const key = providedKeys[index]
+      ?? (index === 0 ? sessionOccurrenceKey(sessionId, questionId) : null)
+      ?? legacyOccurrenceKey(questionId, occurredAt)
+      ?? cardOccurrenceKey(`${id}:${index}`, questionId)
+    if (key) records.push({ key, occurredAt })
+  }
+
+  if (records.length === 0) {
+    const key = sessionOccurrenceKey(sessionId, questionId)
+      ?? cardOccurrenceKey(id, questionId)
+    if (key) records.push({ key, occurredAt: null })
+  }
+
+  return deduplicateOccurrenceRecords(records)
+}
+
+const normalizeRepeatCount = (value, occurrenceRecords) => (
+  Number.isInteger(value) && value > 0
+    ? Math.max(value, occurrenceRecords.length)
+    : Math.max(1, occurrenceRecords.length)
 )
 
 const normalizeRedoHistory = (value) => (
@@ -187,39 +273,69 @@ const mergeRedoHistory = (current, incoming) => {
   }).map(cloneData)
 }
 
-const normalizeCard = (card) => {
-  if (!isRecord(card)) return null
+const normalizeQuestionId = (card, id) => {
   const questionId = nonemptyString(card.questionId)
+  if (questionId && questionId !== 'unknown-question') return questionId
+  if (!id || id === 'error-unknown-question') return null
+  return `missing-question:${id}`
+}
+
+const normalizeStatus = (status, source) => {
+  const candidate = nonemptyString(status)
+  if (!ERROR_CARD_STATUSES.has(candidate)) return 'pending_review'
+  if (source === 'incoming' && PRIVILEGED_INCOMING_STATUSES.has(candidate)) return 'pending_review'
+  return candidate
+}
+
+const normalizeCard = (card, source) => {
+  if (!isRecord(card)) return null
+  const sourceId = nonemptyString(card.id)
+  const questionId = normalizeQuestionId(card, sourceId)
   if (!questionId) return null
-  const occurrences = normalizeOccurrences(card)
+  const id = sourceId ?? `error-${questionId}`
+  const occurrenceRecords = normalizeOccurrenceRecords(card, questionId, id)
+  const occurrences = occurrenceRecords.map((record) => record.occurredAt).filter(Boolean)
+  const occurrenceKeys = occurrenceRecords.map((record) => record.key)
   const firstOccurredAt = occurrences.at(0) ?? nonemptyString(card.firstOccurredAt)
   const lastOccurredAt = occurrences.at(-1) ?? nonemptyString(card.lastOccurredAt)
+  const rawStatus = nonemptyString(card.status)
+  const status = normalizeStatus(rawStatus, source)
+  const lifecycleEvidenceAllowed = source === 'existing'
+    && ERROR_CARD_STATUSES.has(rawStatus)
 
   return {
     ...cloneData(card),
-    id: nonemptyString(card.id) ?? `error-${questionId}`,
+    id,
     questionId,
     occurrences,
+    occurrenceKeys,
+    occurrenceRecords: occurrenceRecords.map(cloneData),
     firstOccurredAt,
     lastOccurredAt,
-    repeatCount: normalizeRepeatCount(card.repeatCount, occurrences),
-    status: nonemptyString(card.status) ?? 'pending_review',
+    repeatCount: normalizeRepeatCount(card.repeatCount, occurrenceRecords),
+    status,
     redoHistory: normalizeRedoHistory(card.redoHistory),
-    verificationVariantId: nonemptyString(card.verificationVariantId),
-    variantVerifiedAt: nonemptyString(card.variantVerifiedAt),
+    verificationVariantId: lifecycleEvidenceAllowed
+      ? nonemptyString(card.verificationVariantId)
+      : null,
+    variantVerifiedAt: lifecycleEvidenceAllowed
+      ? nonemptyString(card.variantVerifiedAt)
+      : null,
   }
 }
 
 const mergeRepeatedCard = (current, incoming) => {
-  const knownOccurrences = new Set(current.occurrences)
-  const newOccurrences = incoming.occurrences.filter((occurredAt) => !knownOccurrences.has(occurredAt))
-  const occurrences = [...knownOccurrences, ...newOccurrences]
-    .sort((left, right) => left.localeCompare(right))
-  const recurrenceIncrement = incoming.occurrences.length > 0
-    ? newOccurrences.length
-    : incoming.repeatCount
+  const knownKeys = new Set(current.occurrenceRecords.map((record) => record.key))
+  const newOccurrenceRecords = incoming.occurrenceRecords
+    .filter((record) => !knownKeys.has(record.key))
+  const occurrenceRecords = deduplicateOccurrenceRecords([
+    ...current.occurrenceRecords,
+    ...newOccurrenceRecords,
+  ])
+  const occurrences = occurrenceRecords.map((record) => record.occurredAt).filter(Boolean)
+  const occurrenceKeys = occurrenceRecords.map((record) => record.key)
+  const recurrenceIncrement = newOccurrenceRecords.length
   const hasNewRecurrence = recurrenceIncrement > 0
-  const reopenedFromMastery = hasNewRecurrence && current.status === 'mastered'
 
   return {
     ...current,
@@ -227,6 +343,8 @@ const mergeRepeatedCard = (current, incoming) => {
     id: current.id,
     questionId: current.questionId,
     occurrences,
+    occurrenceKeys,
+    occurrenceRecords: occurrenceRecords.map(cloneData),
     firstOccurredAt: occurrences.at(0)
       ?? current.firstOccurredAt
       ?? incoming.firstOccurredAt,
@@ -234,34 +352,33 @@ const mergeRepeatedCard = (current, incoming) => {
       ?? incoming.lastOccurredAt
       ?? current.lastOccurredAt,
     repeatCount: current.repeatCount + recurrenceIncrement,
-    status: hasNewRecurrence
-      ? (reopenedFromMastery ? 'pending_review' : incoming.status)
-      : current.status,
+    status: hasNewRecurrence ? 'pending_review' : current.status,
     redoHistory: mergeRedoHistory(current.redoHistory, incoming.redoHistory),
-    verificationVariantId: reopenedFromMastery ? null : incoming.verificationVariantId,
-    variantVerifiedAt: reopenedFromMastery ? null : incoming.variantVerifiedAt,
+    verificationVariantId: hasNewRecurrence ? null : current.verificationVariantId,
+    variantVerifiedAt: hasNewRecurrence ? null : current.variantVerifiedAt,
   }
 }
 
 export function mergeErrorCards(existing, incoming) {
   const merged = []
   const indexByQuestionId = new Map()
-  const candidates = [
-    ...(Array.isArray(existing) ? existing : []),
-    ...(Array.isArray(incoming) ? incoming : []),
-  ]
 
-  candidates.forEach((candidate) => {
-    const card = normalizeCard(candidate)
-    if (!card) return
-    const existingIndex = indexByQuestionId.get(card.questionId)
-    if (existingIndex === undefined) {
-      indexByQuestionId.set(card.questionId, merged.length)
-      merged.push(card)
-      return
-    }
-    merged[existingIndex] = mergeRepeatedCard(merged[existingIndex], card)
-  })
+  const mergeCandidates = (candidates, source) => {
+    candidates.forEach((candidate) => {
+      const card = normalizeCard(candidate, source)
+      if (!card) return
+      const existingIndex = indexByQuestionId.get(card.questionId)
+      if (existingIndex === undefined) {
+        indexByQuestionId.set(card.questionId, merged.length)
+        merged.push(card)
+        return
+      }
+      merged[existingIndex] = mergeRepeatedCard(merged[existingIndex], card)
+    })
+  }
+
+  mergeCandidates(Array.isArray(existing) ? existing : [], 'existing')
+  mergeCandidates(Array.isArray(incoming) ? incoming : [], 'incoming')
 
   return merged
 }

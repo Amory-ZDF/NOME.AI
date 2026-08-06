@@ -138,6 +138,50 @@ describe('buildErrorCard', () => {
     expect(card.whereWrong).toEqual(expect.any(String))
     expect(card.whyWrong).toEqual(expect.any(String))
   })
+
+  test('never treats an arbitrary final attempt as the latest wrong answer', () => {
+    const storedAnswerCard = buildErrorCard({
+      question: {
+        id: 'q-inconsistent-stored',
+        studentAnswer: 'stored wrong response',
+        result: {
+          status: 'wrong',
+          attempts: [{ answer: 'actually correct', isCorrect: true }],
+        },
+      },
+    })
+    const emptyAnswerCard = buildErrorCard({
+      question: {
+        id: 'q-inconsistent-empty',
+        result: {
+          status: 'wrong',
+          attempts: [{ answer: 'actually correct', isCorrect: true }],
+        },
+      },
+    })
+
+    expect(storedAnswerCard.studentAnswer).toBe('stored wrong response')
+    expect(emptyAnswerCard.studentAnswer).toBe('')
+  })
+
+  test('preserves the full completion timestamp and persists a session recurrence identity', () => {
+    const card = buildErrorCard({
+      question: { id: 'q1', result: { status: 'wrong' } },
+      session: {
+        sessionId: 'session-morning',
+        completedAt: '2026-08-06T09:15:30.000Z',
+      },
+      id: 'e1',
+      occurredAt: '2026-08-06',
+    })
+
+    expect(card).toMatchObject({
+      occurrences: ['2026-08-06T09:15:30.000Z'],
+      occurrenceKeys: ['session:session-morning:question:q1'],
+      firstOccurredAt: '2026-08-06T09:15:30.000Z',
+      lastOccurredAt: '2026-08-06T09:15:30.000Z',
+    })
+  })
 })
 
 describe('mergeErrorCards', () => {
@@ -213,12 +257,19 @@ describe('mergeErrorCards', () => {
     })
   })
 
-  test('ignores malformed items and normalizes optional array fields', () => {
+  test('ignores unidentifiable items, preserves stable card ids, and normalizes optional arrays', () => {
     expect(mergeErrorCards(null, null)).toEqual([])
     expect(mergeErrorCards(
       [null, { id: 'missing-question' }],
       [{ id: 'e2', questionId: ' q2 ', repeatCount: -3, occurrences: 'invalid', redoHistory: 'invalid' }],
     )).toEqual([
+      expect.objectContaining({
+        id: 'missing-question',
+        questionId: 'missing-question:missing-question',
+        repeatCount: 1,
+        occurrences: [],
+        redoHistory: [],
+      }),
       expect.objectContaining({
         id: 'e2',
         questionId: 'q2',
@@ -226,6 +277,138 @@ describe('mergeErrorCards', () => {
         occurrences: [],
         redoHistory: [],
       }),
+    ])
+  })
+
+  test('preserves lifecycle and verification evidence for an idempotent session collision', () => {
+    const merged = mergeErrorCards([{
+      id: 'e1',
+      questionId: 'q1',
+      sessionId: 's1',
+      repeatCount: 1,
+      occurrences: ['2026-08-06T10:00:00.000Z'],
+      occurrenceKeys: ['session:s1:question:q1'],
+      status: 'verification_due',
+      verificationVariantId: 'variant-approved',
+      variantVerifiedAt: '2026-08-06T11:00:00.000Z',
+      redoHistory: [{ attemptedAt: '2026-08-06T10:30:00.000Z', isCorrect: true }],
+    }], [{
+      id: 'malicious-replay',
+      questionId: 'q1',
+      sessionId: 's1',
+      repeatCount: 1,
+      occurrences: ['2026-08-06T10:00:00.000Z'],
+      occurrenceKeys: ['session:s1:question:q1'],
+      status: 'mastered',
+      verificationVariantId: 'variant-injected',
+      variantVerifiedAt: '2026-08-06T12:00:00.000Z',
+    }])
+
+    expect(merged[0]).toMatchObject({
+      repeatCount: 1,
+      status: 'verification_due',
+      verificationVariantId: 'variant-approved',
+      variantVerifiedAt: '2026-08-06T11:00:00.000Z',
+      redoHistory: [{ attemptedAt: '2026-08-06T10:30:00.000Z', isCorrect: true }],
+    })
+  })
+
+  test('reopens every genuine recurrence and clears stale verification evidence', () => {
+    const merged = mergeErrorCards([{
+      id: 'e1',
+      questionId: 'q1',
+      sessionId: 's1',
+      repeatCount: 1,
+      occurrences: ['2026-08-06T10:00:00.000Z'],
+      occurrenceKeys: ['session:s1:question:q1'],
+      status: 'verification_due',
+      verificationVariantId: 'variant-old',
+      variantVerifiedAt: '2026-08-06T11:00:00.000Z',
+      redoHistory: [{ attemptedAt: '2026-08-06T10:30:00.000Z', isCorrect: true }],
+    }], [{
+      id: 'e2',
+      questionId: 'q1',
+      sessionId: 's2',
+      repeatCount: 1,
+      occurrences: ['2026-08-06T14:00:00.000Z'],
+      occurrenceKeys: ['session:s2:question:q1'],
+      status: 'mastered',
+      verificationVariantId: 'variant-injected',
+      variantVerifiedAt: '2026-08-06T15:00:00.000Z',
+    }])
+
+    expect(merged[0]).toMatchObject({
+      id: 'e1',
+      repeatCount: 2,
+      status: 'pending_review',
+      verificationVariantId: null,
+      variantVerifiedAt: null,
+      redoHistory: [{ attemptedAt: '2026-08-06T10:30:00.000Z', isCorrect: true }],
+    })
+  })
+
+  test('does not let a new incoming card grant a privileged or invalid lifecycle status', () => {
+    const merged = mergeErrorCards([], [
+      { id: 'e1', questionId: 'q1', status: 'mastered', verificationVariantId: 'injected' },
+      { id: 'e2', questionId: 'q2', status: 'verification_due', variantVerifiedAt: 'injected' },
+      { id: 'e3', questionId: 'q3', status: 'not-a-status' },
+    ])
+
+    expect(merged.map(({ status, verificationVariantId, variantVerifiedAt }) => ({
+      status,
+      verificationVariantId,
+      variantVerifiedAt,
+    }))).toEqual([
+      { status: 'pending_review', verificationVariantId: null, variantVerifiedAt: null },
+      { status: 'pending_review', verificationVariantId: null, variantVerifiedAt: null },
+      { status: 'pending_review', verificationVariantId: null, variantVerifiedAt: null },
+    ])
+  })
+
+  test('counts separate same-day sessions once each while replaying either session idempotently', () => {
+    const firstSession = buildErrorCard({
+      question: { id: 'q1', result: { status: 'wrong' } },
+      session: { sessionId: 's1', completedAt: '2026-08-06T09:00:00.000Z' },
+      id: 'e1',
+      occurredAt: '2026-08-06',
+    })
+    const secondSession = buildErrorCard({
+      question: { id: 'q1', result: { status: 'wrong' } },
+      session: { sessionId: 's2', completedAt: '2026-08-06T16:00:00.000Z' },
+      id: 'e2',
+      occurredAt: '2026-08-06',
+    })
+
+    const merged = mergeErrorCards([firstSession], [firstSession, secondSession, secondSession])
+
+    expect(merged).toHaveLength(1)
+    expect(merged[0]).toMatchObject({
+      id: 'e1',
+      repeatCount: 2,
+      occurrences: [
+        '2026-08-06T09:00:00.000Z',
+        '2026-08-06T16:00:00.000Z',
+      ],
+      occurrenceKeys: [
+        'session:s1:question:q1',
+        'session:s2:question:q1',
+      ],
+      firstOccurredAt: '2026-08-06T09:00:00.000Z',
+      lastOccurredAt: '2026-08-06T16:00:00.000Z',
+    })
+  })
+
+  test('keeps malformed cards with distinct card ids collision-safe', () => {
+    const merged = mergeErrorCards([
+      { id: 'malformed-one', status: 'pending_review' },
+      { id: 'malformed-two', status: 'reviewing' },
+      { status: 'pending_review' },
+    ], [])
+
+    expect(merged).toHaveLength(2)
+    expect(merged.map(({ id, questionId }) => ({ id, questionId }))).toEqual([
+      { id: 'malformed-one', questionId: 'missing-question:malformed-one' },
+      { id: 'malformed-two', questionId: 'missing-question:malformed-two' },
     ])
   })
 })
