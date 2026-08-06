@@ -168,6 +168,7 @@ export function buildErrorCard({ question, session, id, occurredAt } = {}) {
     redoHistory: [],
     verificationVariantId: null,
     variantVerifiedAt: null,
+    variantVerification: null,
     ...optionalEvidence('understandingExplanation', safeQuestion, result, wrongAttempt),
     ...optionalEvidence('scoringExplanation', safeQuestion, result, wrongAttempt),
     ...optionalEvidence('markSchemePoints', safeQuestion, result, wrongAttempt),
@@ -253,6 +254,19 @@ const normalizeRedoHistory = (value) => (
   Array.isArray(value) ? value.filter(isRecord).map(cloneData) : []
 )
 
+const normalizeVariantVerification = (value, allowed) => {
+  if (!allowed || !isRecord(value)) return null
+  const variantId = nonemptyString(value.variantId)
+  const verifiedAt = nonemptyString(value.verifiedAt)
+  if (!variantId || typeof value.isCorrect !== 'boolean' || !verifiedAt) return null
+  return {
+    ...cloneData(value),
+    variantId,
+    isCorrect: value.isCorrect,
+    verifiedAt,
+  }
+}
+
 const redoKey = (attempt) => JSON.stringify([
   attempt.attemptedAt ?? null,
   attempt.submittedAt ?? null,
@@ -319,6 +333,10 @@ const normalizeCard = (card, source) => {
     variantVerifiedAt: lifecycleEvidenceAllowed
       ? nonemptyString(card.variantVerifiedAt)
       : null,
+    variantVerification: normalizeVariantVerification(
+      card.variantVerification,
+      lifecycleEvidenceAllowed,
+    ),
   }
 }
 
@@ -358,6 +376,7 @@ const mergeRepeatedCard = (current, incoming) => {
     redoHistory: mergeRedoHistory(current.redoHistory, incoming.redoHistory),
     verificationVariantId: hasNewRecurrence ? null : current.verificationVariantId,
     variantVerifiedAt: hasNewRecurrence ? null : current.variantVerifiedAt,
+    variantVerification: hasNewRecurrence ? null : current.variantVerification,
   }
 }
 

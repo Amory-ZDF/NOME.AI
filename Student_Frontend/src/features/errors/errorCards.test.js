@@ -49,6 +49,7 @@ describe('buildErrorCard', () => {
       redoHistory: [],
       verificationVariantId: null,
       variantVerifiedAt: null,
+      variantVerification: null,
     })
   })
 
@@ -134,6 +135,7 @@ describe('buildErrorCard', () => {
       redoHistory: [],
       verificationVariantId: null,
       variantVerifiedAt: null,
+      variantVerification: null,
     })
     expect(card.whereWrong).toEqual(expect.any(String))
     expect(card.whyWrong).toEqual(expect.any(String))
@@ -516,5 +518,178 @@ describe('mergeErrorCards', () => {
       verificationVariantId: null,
       variantVerifiedAt: null,
     })
+  })
+
+  test('clears the complete verification audit when a mastered card recurs in a new session', () => {
+    const audit = {
+      variantId: 'variant-old',
+      isCorrect: true,
+      verifiedAt: '2026-08-02T12:00:00.000Z',
+      evidence: { source: 'verification-session' },
+    }
+    const existing = [{
+      id: 'e1',
+      questionId: 'q1',
+      sessionId: 's1',
+      repeatCount: 1,
+      occurrences: ['2026-08-01T09:00:00.000Z'],
+      occurrenceKeys: ['session:s1:question:q1'],
+      status: 'mastered',
+      verificationVariantId: 'variant-old',
+      variantVerifiedAt: '2026-08-02T12:00:00.000Z',
+      variantVerification: audit,
+      redoHistory: [{ attemptedAt: '2026-08-01T12:00:00.000Z', isCorrect: true }],
+    }]
+    const snapshot = structuredClone(existing)
+
+    const merged = mergeErrorCards(existing, [{
+      id: 'e2',
+      questionId: 'q1',
+      sessionId: 's2',
+      repeatCount: 1,
+      occurrences: ['2026-08-03T09:00:00.000Z'],
+      occurrenceKeys: ['session:s2:question:q1'],
+      status: 'mastered',
+    }])
+
+    expect(merged[0]).toMatchObject({
+      repeatCount: 2,
+      status: 'pending_review',
+      verificationVariantId: null,
+      variantVerifiedAt: null,
+      variantVerification: null,
+      redoHistory: [{ attemptedAt: '2026-08-01T12:00:00.000Z', isCorrect: true }],
+    })
+    expect(existing).toEqual(snapshot)
+  })
+
+  test('clears the complete verification audit when a same-key aggregate count increases', () => {
+    const merged = mergeErrorCards([{
+      id: 'e1',
+      questionId: 'q1',
+      repeatCount: 4,
+      occurrences: ['2026-08-01'],
+      occurrenceKeys: ['legacy:q1:2026-08-01'],
+      status: 'mastered',
+      verificationVariantId: 'variant-old',
+      variantVerifiedAt: '2026-08-02',
+      variantVerification: {
+        variantId: 'variant-old',
+        isCorrect: true,
+        verifiedAt: '2026-08-02',
+      },
+    }], [{
+      id: 'e2',
+      questionId: 'q1',
+      repeatCount: 7,
+      occurrences: ['2026-08-01'],
+      occurrenceKeys: ['legacy:q1:2026-08-01'],
+    }])
+
+    expect(merged[0]).toMatchObject({
+      repeatCount: 7,
+      status: 'pending_review',
+      verificationVariantId: null,
+      variantVerifiedAt: null,
+      variantVerification: null,
+    })
+  })
+
+  test('preserves trusted verification audit on an equal-count replay of the same session', () => {
+    const trustedAudit = {
+      variantId: 'variant-current',
+      isCorrect: true,
+      verifiedAt: '2026-08-02T12:00:00.000Z',
+      evidence: { score: 1 },
+    }
+    const existing = [{
+      id: 'e1',
+      questionId: 'q1',
+      sessionId: 's1',
+      repeatCount: 4,
+      occurrences: ['2026-08-01T09:00:00.000Z'],
+      occurrenceKeys: ['session:s1:question:q1'],
+      status: 'mastered',
+      verificationVariantId: 'variant-current',
+      variantVerifiedAt: '2026-08-02T12:00:00.000Z',
+      variantVerification: trustedAudit,
+    }]
+
+    const merged = mergeErrorCards(existing, [{
+      id: 'replay',
+      questionId: 'q1',
+      sessionId: 's1',
+      repeatCount: 4,
+      occurrences: ['2026-08-01T09:00:00.000Z'],
+      occurrenceKeys: ['session:s1:question:q1'],
+      status: 'mastered',
+      verificationVariantId: 'variant-forged',
+      variantVerifiedAt: '2026-08-04T12:00:00.000Z',
+      variantVerification: {
+        variantId: 'variant-forged',
+        isCorrect: true,
+        verifiedAt: '2026-08-04T12:00:00.000Z',
+      },
+    }])
+
+    expect(merged[0]).toMatchObject({
+      id: 'e1',
+      repeatCount: 4,
+      status: 'mastered',
+      verificationVariantId: 'variant-current',
+      variantVerifiedAt: '2026-08-02T12:00:00.000Z',
+      variantVerification: trustedAudit,
+    })
+    expect(merged[0].variantVerification).not.toBe(trustedAudit)
+  })
+
+  test('rejects forged incoming verification audits for new and existing cards', () => {
+    const forgedAudit = {
+      variantId: 'variant-forged',
+      isCorrect: true,
+      verifiedAt: '2026-08-04T12:00:00.000Z',
+    }
+    const newCard = mergeErrorCards([], [{
+      id: 'e1',
+      questionId: 'q1',
+      status: 'mastered',
+      verificationVariantId: 'variant-forged',
+      variantVerifiedAt: '2026-08-04T12:00:00.000Z',
+      variantVerification: forgedAudit,
+    }])[0]
+    const existingCard = mergeErrorCards([{
+      id: 'e2',
+      questionId: 'q2',
+      repeatCount: 1,
+      status: 'reviewing',
+    }], [{
+      id: 'e2',
+      questionId: 'q2',
+      repeatCount: 1,
+      status: 'mastered',
+      variantVerification: forgedAudit,
+    }])[0]
+
+    expect(newCard).toMatchObject({
+      status: 'pending_review',
+      verificationVariantId: null,
+      variantVerifiedAt: null,
+      variantVerification: null,
+    })
+    expect(existingCard).toMatchObject({
+      status: 'reviewing',
+      variantVerification: null,
+    })
+  })
+
+  test('drops a structurally incomplete verification audit from persisted cards', () => {
+    const merged = mergeErrorCards([{
+      id: 'e1',
+      questionId: 'q1',
+      status: 'mastered',
+      variantVerification: { variantId: 'variant-1', isCorrect: true },
+    }], [])
+
+    expect(merged[0].variantVerification).toBeNull()
   })
 })
