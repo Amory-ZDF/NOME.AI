@@ -20,6 +20,13 @@ const wrongRedo = {
   timeSpent: 35,
 }
 
+const redoAt = (attemptedAt, isCorrect = true) => ({
+  attemptedAt,
+  answer: isCorrect ? '42' : '41',
+  isCorrect,
+  timeSpent: 20,
+})
+
 const verifiedItem = () => {
   const redone = applyRedoAttempt({
     id: 'error-1',
@@ -77,8 +84,9 @@ describe('applyRedoAttempt', () => {
   test('a wrong redo increments recurrence, returns to pending review, and clears stale verification', () => {
     const item = verifiedItem()
     const before = structuredClone(item)
+    const laterWrongRedo = { ...wrongRedo, attemptedAt: '2026-08-06T10:35:00.000Z' }
 
-    const next = applyRedoAttempt(item, wrongRedo)
+    const next = applyRedoAttempt(item, laterWrongRedo)
 
     expect(next).toMatchObject({
       status: 'pending_review',
@@ -87,7 +95,7 @@ describe('applyRedoAttempt', () => {
       variantVerifiedAt: null,
       variantVerification: null,
     })
-    expect(next.redoHistory.at(-1)).toEqual(wrongRedo)
+    expect(next.redoHistory.at(-1)).toEqual(laterWrongRedo)
     expect(canMarkMastered(next)).toBe(false)
     expect(item).toEqual(before)
   })
@@ -95,10 +103,11 @@ describe('applyRedoAttempt', () => {
   test('normalizes empty or malformed histories and appends every repeated attempt', () => {
     const malformed = { status: 'reviewing', repeatCount: '2', redoHistory: { isCorrect: true } }
     const first = applyRedoAttempt(malformed, correctRedo)
-    const second = applyRedoAttempt(first, correctRedo)
+    const laterRepeat = { ...correctRedo, attemptedAt: '2026-08-06T10:31:00.000Z' }
+    const second = applyRedoAttempt(first, laterRepeat)
 
     expect(first.redoHistory).toEqual([correctRedo])
-    expect(second.redoHistory).toEqual([correctRedo, correctRedo])
+    expect(second.redoHistory).toEqual([correctRedo, laterRepeat])
     expect(second.repeatCount).toBe(0)
     expect(malformed.redoHistory).toEqual({ isCorrect: true })
   })
@@ -141,6 +150,59 @@ describe('applyRedoAttempt', () => {
     const before = structuredClone(item)
 
     expect(() => applyRedoAttempt(item, attempt)).toThrow(TypeError)
+    expect(item).toEqual(before)
+  })
+
+  test.each([
+    ['an older', '2026-08-01T09:00:00Z'],
+    ['an equal-time', '2026-08-10T09:00:00Z'],
+  ])('rejects %s redo against the maximum persisted evidence time', (_, attemptedAt) => {
+    const item = {
+      status: 'verification_due',
+      repeatCount: 2,
+      redoHistory: [
+        redoAt('2026-08-10T09:00:00Z'),
+        redoAt('2026-08-01T09:00:00Z'),
+      ],
+      verificationVariantId: 'variant-1',
+      variantVerifiedAt: '2026-08-11T09:00:00Z',
+    }
+    const attempt = redoAt(attemptedAt)
+    const beforeItem = structuredClone(item)
+    const beforeAttempt = structuredClone(attempt)
+    let thrown
+
+    try {
+      applyRedoAttempt(item, attempt)
+    } catch (error) {
+      thrown = error
+    }
+
+    expect(thrown).toBeInstanceOf(RangeError)
+    expect(thrown).toMatchObject({
+      name: 'RedoChronologyError',
+      code: 'REDO_CHRONOLOGY_CONFLICT',
+      message: 'Redo attempt must be later than all persisted redo evidence',
+    })
+    expect(item).toEqual(beforeItem)
+    expect(attempt).toEqual(beforeAttempt)
+  })
+
+  test('accepts a semantically later redo across RFC3339 timezone offsets', () => {
+    const item = {
+      status: 'verification_due',
+      repeatCount: 2,
+      redoHistory: [redoAt('2026-08-10T10:00:00+08:00')],
+    }
+    const before = structuredClone(item)
+
+    const next = applyRedoAttempt(item, redoAt('2026-08-10T02:00:01Z', false))
+
+    expect(next).toMatchObject({ status: 'pending_review', repeatCount: 3 })
+    expect(next.redoHistory).toEqual([
+      redoAt('2026-08-10T10:00:00+08:00'),
+      redoAt('2026-08-10T02:00:01Z', false),
+    ])
     expect(item).toEqual(before)
   })
 })
@@ -187,7 +249,7 @@ describe('verification lifecycle', () => {
   ])('requires a complete correct latest redo before attaching or recording %#', (latestRedo) => {
     const item = {
       status: 'verification_due',
-      redoHistory: [correctRedo, latestRedo],
+      redoHistory: [latestRedo],
       verificationVariantId: 'variant-1',
       variantVerifiedAt: null,
       variantVerification: null,
@@ -206,6 +268,22 @@ describe('verification lifecycle', () => {
       variantVerifiedAt: verification.verifiedAt,
       variantVerification: verification,
     })).toBe(false)
+    expect(item).toEqual(before)
+  })
+
+  test('ignores a malformed array tail when selecting the latest complete redo evidence', () => {
+    const item = {
+      status: 'verification_due',
+      redoHistory: [correctRedo, { attemptedAt: '2099-01-01', isCorrect: false }],
+      verificationVariantId: null,
+      variantVerifiedAt: null,
+      variantVerification: null,
+    }
+    const before = structuredClone(item)
+
+    const attached = attachVerificationVariant(item, 'variant-1')
+
+    expect(attached.verificationVariantId).toBe('variant-1')
     expect(item).toEqual(before)
   })
 
@@ -376,6 +454,62 @@ describe('verification lifecycle', () => {
     })
     expect(canMarkMastered(later)).toBe(true)
     expect(due).toEqual(before)
+  })
+
+  test('uses the maximum redo time even when an older correct redo is the array tail', () => {
+    const item = {
+      status: 'verification_due',
+      redoHistory: [
+        redoAt('2026-08-10T09:00:00Z'),
+        redoAt('2026-08-01T09:00:00Z'),
+      ],
+      verificationVariantId: null,
+      variantVerifiedAt: null,
+      variantVerification: null,
+    }
+    const before = structuredClone(item)
+    const attached = attachVerificationVariant(item, 'variant-1')
+    const staleProof = { variantId: 'variant-1', isCorrect: true, verifiedAt: '2026-08-02T09:00:00Z' }
+
+    expect(attached.verificationVariantId).toBe('variant-1')
+    expect(recordVariantVerification(attached, staleProof)).toEqual(attached)
+    expect(canMarkMastered({
+      ...attached,
+      variantVerifiedAt: staleProof.verifiedAt,
+      variantVerification: staleProof,
+    })).toBe(false)
+
+    const verified = recordVariantVerification(attached, {
+      variantId: 'variant-1',
+      isCorrect: true,
+      verifiedAt: '2026-08-11T09:00:00Z',
+    })
+    expect(canMarkMastered(verified)).toBe(true)
+    expect(item).toEqual(before)
+  })
+
+  test('denies attach, verification, and mastery when the maximum-time redo is wrong', () => {
+    const item = {
+      status: 'verification_due',
+      redoHistory: [
+        redoAt('2026-08-10T09:00:00Z', false),
+        redoAt('2026-08-01T09:00:00Z'),
+      ],
+      verificationVariantId: 'variant-1',
+      variantVerifiedAt: null,
+      variantVerification: null,
+    }
+    const before = structuredClone(item)
+    const proof = { variantId: 'variant-1', isCorrect: true, verifiedAt: '2026-08-11T09:00:00Z' }
+
+    expect(attachVerificationVariant(item, 'variant-2')).toEqual(before)
+    expect(recordVariantVerification(item, proof)).toEqual(before)
+    expect(canMarkMastered({
+      ...item,
+      variantVerifiedAt: proof.verifiedAt,
+      variantVerification: proof,
+    })).toBe(false)
+    expect(item).toEqual(before)
   })
 
   test('a mismatched verification result makes no trusted transition', () => {

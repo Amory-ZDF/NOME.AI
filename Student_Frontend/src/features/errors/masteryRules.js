@@ -89,10 +89,26 @@ const normalizeRedoHistory = (value) => (
 const normalizeRepeatCount = (value) => (Number.isInteger(value) && value >= 0 ? value : 0)
 const latestCompleteRedo = (errorItem) => {
   const history = Array.isArray(errorItem?.redoHistory) ? errorItem.redoHistory : []
-  const latest = history.at(-1)
-  return isCompleteRedoEvidence(latest) ? latest : null
+  return history.reduce((latest, candidate) => {
+    if (!isCompleteRedoEvidence(candidate)) return latest
+    if (!latest) return candidate
+
+    const candidateTime = evidenceTimeValue(candidate.attemptedAt)
+    const latestTime = evidenceTimeValue(latest.attemptedAt)
+    if (candidateTime > latestTime) return candidate
+    if (candidateTime === latestTime && candidate.isCorrect === false) return candidate
+    return latest
+  }, null)
 }
 const latestRedoIsCompleteAndCorrect = (errorItem) => latestCompleteRedo(errorItem)?.isCorrect === true
+
+export class RedoChronologyError extends RangeError {
+  constructor() {
+    super('Redo attempt must be later than all persisted redo evidence')
+    this.name = 'RedoChronologyError'
+    this.code = 'REDO_CHRONOLOGY_CONFLICT'
+  }
+}
 
 const normalizeRedoAttempt = (attempt) => {
   if (!isCompleteRedoEvidence(attempt)) throw new TypeError('redo attempt must contain complete valid evidence')
@@ -118,6 +134,12 @@ const clearVerification = (item) => ({
 export function applyRedoAttempt(errorItem, attempt) {
   const normalizedAttempt = normalizeRedoAttempt(attempt)
   const current = cloneItem(errorItem)
+  const latestRedo = latestCompleteRedo(current)
+  if (
+    latestRedo
+    && evidenceTimeValue(normalizedAttempt.attemptedAt) <= evidenceTimeValue(latestRedo.attemptedAt)
+  ) throw new RedoChronologyError()
+
   const redoHistory = [...normalizeRedoHistory(current.redoHistory), normalizedAttempt]
   const repeatCount = normalizeRepeatCount(current.repeatCount)
 
