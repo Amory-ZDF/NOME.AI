@@ -673,3 +673,27 @@ export const defaultSettings = {
   reminderErrorReview: true,
   reminderStudyTime: false,
 }
+
+export function createSeedState() {
+  return structuredClone({
+    student,
+    tasks: initialTasks,
+    greeting: greetingData,
+    exerciseSets,
+    bankExerciseSets,
+    errors: initialErrors,
+    errorTypeMeta: ERROR_TYPE_META,
+    noteFolders: initialNoteFolders,
+    notes: initialNotes,
+    bankQuestions,
+    bankRecommendations,
+    profileOverview,
+    knowledgeGraphData,
+    progressTimeline,
+    errorPatternData,
+    achievements,
+    moduleStats,
+    learningSummary,
+    settings: defaultSettings,
+  })
+}
