@@ -13,7 +13,7 @@ export default function ErrorRedo() {
 
 function ErrorRedoContent({ id }) {
   const navigate = useNavigate()
-  const { errors, recordRedo, scheduleErrorVariant, showToast, isActionPending } = useApp()
+  const { errors, tasks, recordRedo, scheduleErrorVariant, showToast, isActionPending } = useApp()
   const item = errors.find((e) => e.id === id)
   const attemptStartedAt = useRef(Date.now())
 
@@ -31,6 +31,13 @@ function ErrorRedoContent({ id }) {
 
   const recording = isActionPending(`error:redo:${item?.id}`)
   const scheduling = isActionPending(`error:variant:${item?.id}`)
+  const isVerificationDue = item.status === 'verification_due' || result?.isCorrect === true
+  const linkedTask = item.verificationVariantId
+    ? tasks.find((task) => (
+        task.verificationForErrorId === item.id
+        && task.exerciseSetId === item.verificationVariantId
+      ))
+    : null
 
   const submit = async () => {
     const validation = validateAttempt(answer)
@@ -73,7 +80,7 @@ function ErrorRedoContent({ id }) {
           </div>
           <div className="text-[15px] leading-7 mb-5"><MathHTML html={item.questionContent} /></div>
 
-          {!result ? (
+          {!result && !isVerificationDue ? (
             <>
               {item.options ? (
                 <fieldset>
@@ -123,7 +130,7 @@ function ErrorRedoContent({ id }) {
             <Icon name="self_improvement" size={18} className="text-deep-teal" /> Work Independently
           </h3>
 
-          {!result && (
+          {!result && !isVerificationDue && (
             <div className="text-sm text-warm-stone leading-7">
               <p className="italic mb-3">"No hints this time. Rely entirely on your own recall of the method — it's the best way to test real mastery."</p>
               <div className="bg-warm-paper rounded-comp p-3 text-xs leading-6">
@@ -133,7 +140,7 @@ function ErrorRedoContent({ id }) {
             </div>
           )}
 
-          {result?.isCorrect && (
+          {isVerificationDue && (
             <motion.div initial={{ opacity: 0, scale: 0.96 }} animate={{ opacity: 1, scale: 1 }} className="text-center">
               <motion.div
                 initial={{ scale: 0.5, opacity: 0 }} animate={{ scale: 1, opacity: 1 }}
@@ -142,25 +149,39 @@ function ErrorRedoContent({ id }) {
               >
                 <Icon name="check_circle" size={36} className="text-success-green" filled />
               </motion.div>
-              <p className="font-semibold text-success-green mb-2">Correct this time!</p>
+              <p className="font-semibold text-success-green mb-2">
+                {result?.isCorrect ? 'Correct this time!' : 'Ready for independent verification'}
+              </p>
               <p className="text-sm text-warm-stone leading-6 mb-4">
                 Compared to last time, you fixed: {item.errorDescription}
               </p>
-              <button className="zb-btn-primary w-full mb-2" disabled={scheduling} onClick={async () => {
-                try {
-                  const scheduled = await scheduleErrorVariant(item.id)
-                  navigate(`/exercise/${scheduled.task.id}`)
-                } catch {
-                  // AppStore displays the write failure and the page remains in place.
-                }
-              }}>
-                <Icon name="science" size={16} /> Start variant verification
-              </button>
+              {!item.verificationVariantId && (
+                <button className="zb-btn-primary w-full mb-2" disabled={scheduling} onClick={async () => {
+                  try {
+                    const scheduled = await scheduleErrorVariant(item.id)
+                    navigate(`/exercise/${scheduled.task.id}`)
+                  } catch {
+                    // AppStore displays the write failure and the page remains in place.
+                  }
+                }}>
+                  <Icon name="science" size={16} /> Start variant verification
+                </button>
+              )}
+              {item.verificationVariantId && linkedTask && (
+                <button className="zb-btn-primary w-full mb-2" onClick={() => navigate(`/exercise/${linkedTask.id}`)}>
+                  <Icon name="science" size={16} /> Continue variant verification
+                </button>
+              )}
+              {item.verificationVariantId && !linkedTask && (
+                <button className="zb-btn-primary w-full mb-2" disabled>
+                  <Icon name="error_outline" size={16} /> Verification task unavailable
+                </button>
+              )}
               <button className="zb-btn-ghost w-full" onClick={() => navigate('/errors')}>Back to Error Book</button>
             </motion.div>
           )}
 
-          {result && !result.isCorrect && (
+          {result && !result.isCorrect && !isVerificationDue && (
             <motion.div initial={{ opacity: 0, scale: 0.96 }} animate={{ opacity: 1, scale: 1 }}>
               <p className="font-semibold text-alert-amber mb-2 flex items-center gap-1.5">
                 <Icon name="error" size={18} /> Still incorrect

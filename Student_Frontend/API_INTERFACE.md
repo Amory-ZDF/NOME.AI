@@ -389,8 +389,8 @@ Task adjustments are submitted through `requestTaskAdjustment(task, draft)`; the
 | Submit adjustment request | `POST /api/tasks/{id}/adjustment-request` | `requestTaskAdjustment(task, draft)` |
 | Add wrong Qs to error book | `POST /api/errors/batch` | `Summary.jsx` → `addSessionErrors` |
 | Schedule independent verification | `POST /api/errors/{id}/variant` | `ErrorRedo.jsx` → `scheduleErrorVariant` |
-| Record independent verification | `POST /api/errors/{id}/verification` | `ErrorRedo.jsx` → `verifyErrorVariant` |
-| Mark error mastered | `PATCH /api/errors/{id}` | `Errors.jsx / ErrorRedo.jsx` after the mastery gate |
+| Record independent verification | `POST /api/errors/{id}/verification` | `Exercise.jsx` → `verifyErrorVariant` after the linked one-question set is persisted |
+| Mark error mastered | `PATCH /api/errors/{id}` | `Errors.jsx` after the mastery gate |
 | Submit redo | `POST /api/errors/{id}/redo` | `ErrorRedo.jsx` → `recordRedo` |
 | Create / edit note | `POST`/`PATCH /api/notes...` | `Notes.jsx` |
 | Submit exercise set | `POST /api/sessions` | `Exercise.jsx` → `saveSession` |

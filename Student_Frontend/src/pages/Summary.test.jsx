@@ -1,6 +1,6 @@
 import { useEffect, useRef } from 'react'
 import { Route, Routes } from 'react-router-dom'
-import { screen, waitFor } from '@testing-library/react'
+import { screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { expect, test, vi } from 'vitest'
 import App from '../App'
@@ -143,6 +143,59 @@ test('reports assisted solutions without turning corrected questions into unreso
   expect(screen.queryByText(/all solved independently/i)).not.toBeInTheDocument()
   expect(screen.queryByRole('heading', { name: /Error Cards/i })).not.toBeInTheDocument()
   expect(addErrors).not.toHaveBeenCalled()
+})
+
+test('uses normalized expression, habit, and execution types in each error detail badge', async () => {
+  const session = {
+    sessionId: 'normalized-types',
+    taskId: null,
+    taskTitle: 'Normalized diagnosis',
+    subject: 'A-Level Math',
+    completedAt: '2026-08-06T12:34:56.000Z',
+    timeSpent: 3,
+    questions: [
+      {
+        id: 'expression-q', order: 1, topic: 'Proof', errorType: 'method',
+        content: 'Complete the proof.', correctDisplay: 'Therefore proved.', acceptKeywords: ['proved'],
+        result: {
+          status: 'wrong',
+          attempts: [{ answer: 'The method is complete.', isCorrect: false, methodCorrect: true }],
+          methodCorrect: true,
+          missingMarkSchemePhrases: ['therefore'],
+          hintsUsed: 0,
+        },
+      },
+      {
+        id: 'habit-q', order: 2, topic: 'Arithmetic', errorType: 'calculation',
+        content: 'Calculate carefully.', correctDisplay: '42', acceptKeywords: ['42'],
+        result: {
+          status: 'wrong',
+          attempts: [1, 2, 3].map((attempt) => ({
+            answer: String(38 + attempt), isCorrect: false, avoidablePattern: 'drops the final sign',
+          })),
+          hintsUsed: 0,
+        },
+      },
+      {
+        id: 'execution-q', order: 3, topic: 'Planning', errorType: 'knowledge',
+        content: 'Attempt the final step.', correctDisplay: 'Completed step', acceptKeywords: ['completed'],
+        result: { status: 'unanswered', attempts: [], hintsUsed: 0 },
+      },
+    ],
+  }
+
+  renderStudentApp(
+    <App services={appServices({}, { 'normalized-types': session })} />,
+    { route: '/summary/normalized-types' },
+  )
+
+  await screen.findByText('Error Analysis')
+  const expressionCard = screen.getByText('Question 1').closest('.border')
+  const habitCard = screen.getByText('Question 2').closest('.border')
+  const executionCard = screen.getByText('Question 3').closest('.border')
+  expect(within(expressionCard).getByText('Expression')).toBeInTheDocument()
+  expect(within(habitCard).getByText('Habit')).toBeInTheDocument()
+  expect(within(executionCard).getByText('Execution')).toBeInTheDocument()
 })
 
 test('reloads the route session and adds all of its error cards only once', async () => {

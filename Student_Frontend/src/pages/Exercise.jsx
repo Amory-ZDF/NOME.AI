@@ -294,19 +294,26 @@ export default function Exercise({ bankMode = false }) {
   const { taskId, qId } = useParams()
   const navigate = useNavigate()
   const {
+    tasks,
     showToast,
     loadExerciseSet,
     saveSession,
+    verifyErrorVariant,
     generateVariant,
     isActionPending,
   } = useApp()
   const loadKey = bankMode ? `bank:${qId}` : `task:${taskId}`
   const timer = useTimer(loadKey)
   const mountedRef = useRef(false)
-  const currentLoadKeyRef = useRef(loadKey)
-  currentLoadKeyRef.current = loadKey
+  const pageGenerationRef = useRef(0)
+  const currentPageRef = useRef({ loadKey, generation: 0 })
+  if (currentPageRef.current.loadKey !== loadKey) {
+    pageGenerationRef.current += 1
+    currentPageRef.current = { loadKey, generation: pageGenerationRef.current }
+  }
   const secondsRef = useRef(0)
   const submitTransactionRef = useRef(false)
+  const persistedSubmissionRef = useRef(null)
   const [submitTransactionPending, setSubmitTransactionPending] = useState(false)
   const [loadStatus, setLoadStatus] = useState('loading')
   const [loadError, setLoadError] = useState(null)
@@ -322,10 +329,17 @@ export default function Exercise({ bankMode = false }) {
     return () => { mountedRef.current = false }
   }, [])
 
-  const isCurrentPage = (key) => mountedRef.current && currentLoadKeyRef.current === key
+  const isCurrentPage = (page) => (
+    mountedRef.current
+    && currentPageRef.current.loadKey === page.loadKey
+    && currentPageRef.current.generation === page.generation
+  )
 
   useEffect(() => {
     let active = true
+    pageGenerationRef.current += 1
+    const loadPage = { loadKey, generation: pageGenerationRef.current }
+    currentPageRef.current = loadPage
     setLoadStatus('loading')
     setLoadError(null)
     setExerciseSet(null)
@@ -335,6 +349,7 @@ export default function Exercise({ bankMode = false }) {
     setVariantTasks({})
     secondsRef.current = 0
     submitTransactionRef.current = false
+    persistedSubmissionRef.current = null
     setSubmitTransactionPending(false)
 
     const request = bankMode
@@ -342,7 +357,7 @@ export default function Exercise({ bankMode = false }) {
       : loadExerciseSet({ taskId })
 
     request.then((loadedSet) => {
-      if (!active || !isCurrentPage(loadKey)) return
+      if (!active || !isCurrentPage(loadPage)) return
       if (!isRenderableExerciseSet(loadedSet)) {
         setSettledLoadKey(loadKey)
         setLoadStatus('error')
@@ -356,7 +371,7 @@ export default function Exercise({ bankMode = false }) {
       setSettledLoadKey(loadKey)
       setLoadStatus('ready')
     }).catch((error) => {
-      if (!active || !isCurrentPage(loadKey)) return
+      if (!active || !isCurrentPage(loadPage)) return
       setLoadError(error)
       setSettledLoadKey(loadKey)
       setLoadStatus('error')
@@ -387,6 +402,20 @@ export default function Exercise({ bankMode = false }) {
   const attemptedAll = canSubmitSession(progressById)
   const wholeSetSubmitting = submitTransactionPending
   const variantPending = isActionPending(`exercise:variant:${q.id}`)
+  const verificationTask = bankMode
+    ? null
+    : tasks.find((task) => task.id === taskId)
+  const verificationErrorId = typeof verificationTask?.verificationForErrorId === 'string'
+    ? verificationTask.verificationForErrorId.trim()
+    : ''
+  const isLinkedVerificationSet = Boolean(
+    verificationErrorId
+    && typeof set.id === 'string'
+    && set.id
+    && verificationTask.exerciseSetId === set.id
+    && set.taskId === taskId
+    && questions.length === 1,
+  )
 
   const updateProgress = (id, update) => {
     setProgressById((currentProgress) => {
@@ -426,26 +455,54 @@ export default function Exercise({ bankMode = false }) {
       return
     }
     if (submitTransactionRef.current) return
-    const actionLoadKey = loadKey
+    const actionPage = currentPageRef.current
+    const cachedSubmission = persistedSubmissionRef.current?.loadKey === actionPage.loadKey
+      && persistedSubmissionRef.current?.generation === actionPage.generation
+      ? persistedSubmissionRef.current
+      : null
+    const currentVerification = isLinkedVerificationSet
+      ? {
+          errorId: verificationErrorId,
+          variantId: set.id,
+          isCorrect: progressById[questions[0].id]?.status === 'correct',
+        }
+      : null
+    const actionVerification = cachedSubmission?.verification ?? currentVerification
     submitTransactionRef.current = true
     setSubmitTransactionPending(true)
     try {
-      const persisted = await saveSession(buildSession({
-        set,
-        progressById,
-        elapsedSeconds: secondsRef.current,
-      }))
-      if (!isCurrentPage(actionLoadKey)) return
+      let persisted = cachedSubmission?.result ?? null
+      if (!persisted) {
+        persisted = await saveSession(buildSession({
+          set,
+          progressById,
+          elapsedSeconds: secondsRef.current,
+        }))
+        if (!isCurrentPage(actionPage)) return
+      }
       const persistedId = typeof persisted?.sessionId === 'string' ? persisted.sessionId.trim() : ''
       if (!persistedId) {
         showToast('Session saved without a valid reference. Please try submitting again.', 'error')
         return
       }
+      persistedSubmissionRef.current = {
+        loadKey: actionPage.loadKey,
+        generation: actionPage.generation,
+        result: persisted,
+        verification: actionVerification,
+      }
+      if (actionVerification) {
+        await verifyErrorVariant(actionVerification.errorId, {
+          variantId: actionVerification.variantId,
+          isCorrect: actionVerification.isCorrect,
+        })
+        if (!isCurrentPage(actionPage)) return
+      }
       navigate(`/summary/${encodeURIComponent(persistedId)}`)
     } catch {
       // AppStore displays persistence failures; retaining local progress allows a retry.
     } finally {
-      if (!isCurrentPage(actionLoadKey)) return
+      if (!isCurrentPage(actionPage)) return
       submitTransactionRef.current = false
       setSubmitTransactionPending(false)
     }
@@ -457,10 +514,10 @@ export default function Exercise({ bankMode = false }) {
   }
 
   const createIndependentVariant = async () => {
-    const actionLoadKey = loadKey
+    const actionPage = currentPageRef.current
     try {
       const result = await generateVariant(q)
-      if (!isCurrentPage(actionLoadKey)) return
+      if (!isCurrentPage(actionPage)) return
       if (!isCompleteVariantResult(result, q.id)) {
         showToast('The generated variant is incomplete. Please try again.', 'error')
         return

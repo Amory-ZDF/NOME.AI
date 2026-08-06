@@ -107,7 +107,8 @@ function ErrorCard({ item }) {
       <div className="flex items-center gap-2 mt-4">
         {item.status !== 'mastered' && (
           <button className="zb-btn-primary !h-9" onClick={() => navigate(`/errors/review/${item.id}`)}>
-            <Icon name="replay" size={16} /> Redo it
+            <Icon name={item.status === 'verification_due' ? 'science' : 'replay'} size={16} />
+            {item.status === 'verification_due' ? 'Continue verification' : 'Redo it'}
           </button>
         )}
         <button className="zb-btn-ghost !h-9" onClick={() => setExpanded(!expanded)}>

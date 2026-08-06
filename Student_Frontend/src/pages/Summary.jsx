@@ -149,7 +149,7 @@ export default function Summary() {
               {wrongQuestions.map((q, i) => (
                 <motion.div key={q.id} variants={fadeUpItem} className="border border-whisper-line rounded-comp p-4">
                   <div className="flex items-center gap-2 mb-2 flex-wrap">
-                    <Badge tone="amber">{ERROR_TYPE_META[q.errorType]?.label}</Badge>
+                    <Badge tone="amber">{ERROR_TYPE_META[errorCards[i]?.errorType]?.label}</Badge>
                     <span className="text-sm font-medium">Question {q.order}</span>
                     {q.result.attempts.length > 1 && <Badge tone="red">{q.result.attempts.length} attempts</Badge>}
                   </div>

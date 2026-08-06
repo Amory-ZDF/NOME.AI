@@ -218,3 +218,110 @@ test('groups choice answers under the Your solution legend', async () => {
   expect(radios).toHaveLength(2)
   expect(radios[0]).toHaveAttribute('name', radios[1].getAttribute('name'))
 })
+
+test('resumes an unlinked persisted verification-due error without showing the redo form', async () => {
+  const dueError = {
+    ...baseError,
+    status: 'verification_due',
+    redoHistory: [{ attemptedAt: '2026-08-06T12:00:00.000Z', answer: '5', isCorrect: true, timeSpent: 12 }],
+  }
+  const scheduled = {
+    exerciseSet: verificationSet,
+    task: {
+      id: verificationSet.taskId,
+      title: verificationSet.title,
+      exerciseSetId: verificationSet.id,
+      type: 'ai_recommended',
+      status: 'pending',
+      sourceQuestionId: 'q-err-1',
+      verificationForErrorId: 'e1',
+    },
+    error: { ...dueError, verificationVariantId: verificationSet.id },
+  }
+  const scheduleErrorVariant = vi.fn(() => Promise.resolve(scheduled))
+  const services = createAppServices({
+    apiClient: {
+      bootstrap: () => Promise.resolve({
+        tasks: [], taskAdjustments: [], sessions: {}, errors: [dueError], notes: [], noteFolders: [], settings: {},
+      }),
+      scheduleErrorVariant,
+      getExerciseSet: () => Promise.resolve(verificationSet),
+    },
+  })
+
+  renderStudentApp(<App services={services} />, { route: '/errors/review/e1' })
+
+  expect(await screen.findByRole('button', { name: /Start variant verification/i })).toBeInTheDocument()
+  expect(screen.queryByRole('textbox', { name: /Your solution/i })).not.toBeInTheDocument()
+  await userEvent.click(screen.getByRole('button', { name: /Start variant verification/i }))
+  await waitFor(() => expect(scheduleErrorVariant).toHaveBeenCalledWith('e1'))
+})
+
+test('continues only the exact persisted verification task without scheduling another variant', async () => {
+  const dueError = {
+    ...baseError,
+    status: 'verification_due',
+    redoHistory: [{ attemptedAt: '2026-08-06T12:00:00.000Z', answer: '5', isCorrect: true, timeSpent: 12 }],
+    verificationVariantId: verificationSet.id,
+  }
+  const exactTask = {
+    id: verificationSet.taskId,
+    title: verificationSet.title,
+    exerciseSetId: verificationSet.id,
+    type: 'ai_recommended',
+    status: 'pending',
+    sourceQuestionId: 'q-err-1',
+    verificationForErrorId: 'e1',
+  }
+  const tasks = [
+    { ...exactTask, id: 'wrong-set-task', exerciseSetId: 'wrong-set' },
+    { ...exactTask, id: 'wrong-error-task', verificationForErrorId: 'another-error' },
+    exactTask,
+  ]
+  const scheduleErrorVariant = vi.fn()
+  const getExerciseSet = vi.fn(() => Promise.resolve(verificationSet))
+  const services = createAppServices({
+    apiClient: {
+      bootstrap: () => Promise.resolve({
+        tasks, taskAdjustments: [], sessions: {}, errors: [dueError], notes: [], noteFolders: [], settings: {},
+      }),
+      scheduleErrorVariant,
+      getExerciseSet,
+    },
+  })
+
+  renderStudentApp(<App services={services} />, { route: '/errors/review/e1' })
+
+  expect(await screen.findByRole('button', { name: /Continue variant verification/i })).toBeInTheDocument()
+  expect(screen.queryByRole('textbox', { name: /Your solution/i })).not.toBeInTheDocument()
+  await userEvent.click(screen.getByRole('button', { name: /Continue variant verification/i }))
+  await waitFor(() => expect(getExerciseSet).toHaveBeenCalledWith(exactTask.id))
+  expect(scheduleErrorVariant).not.toHaveBeenCalled()
+})
+
+test('does not use a non-exact task or reopen the redo form for a linked due error', async () => {
+  const dueError = {
+    ...baseError,
+    status: 'verification_due',
+    redoHistory: [{ attemptedAt: '2026-08-06T12:00:00.000Z', answer: '5', isCorrect: true, timeSpent: 12 }],
+    verificationVariantId: verificationSet.id,
+  }
+  const services = createAppServices({
+    apiClient: {
+      bootstrap: () => Promise.resolve({
+        tasks: [{
+          id: 'near-match',
+          exerciseSetId: verificationSet.id,
+          verificationForErrorId: 'another-error',
+        }],
+        taskAdjustments: [], sessions: {}, errors: [dueError], notes: [], noteFolders: [], settings: {},
+      }),
+    },
+  })
+
+  renderStudentApp(<App services={services} />, { route: '/errors/review/e1' })
+
+  expect(await screen.findByRole('button', { name: /Verification task unavailable/i })).toBeDisabled()
+  expect(screen.queryByRole('button', { name: /Continue variant verification/i })).not.toBeInTheDocument()
+  expect(screen.queryByRole('textbox', { name: /Your solution/i })).not.toBeInTheDocument()
+})

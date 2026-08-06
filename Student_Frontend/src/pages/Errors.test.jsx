@@ -123,3 +123,12 @@ test('does not show IELTS Reading diagnosis layers for another IELTS subject', a
   expect(within(writingCard).queryByText('Repeated pattern')).not.toBeInTheDocument()
   expect(within(writingCard).queryByText('Micro-training')).not.toBeInTheDocument()
 })
+
+test('labels a verification-due card as a continuation instead of another redo', async () => {
+  const due = errorItem('expression', 0)
+  renderStudentApp(<App services={servicesFor([due])} />, { route: '/errors' })
+
+  const card = (await screen.findByText('expression diagnostic card')).closest('.zb-card')
+  expect(within(card).getByRole('button', { name: /Continue verification/i })).toBeInTheDocument()
+  expect(within(card).queryByRole('button', { name: /Redo it/i })).not.toBeInTheDocument()
+})

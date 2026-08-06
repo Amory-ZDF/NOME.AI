@@ -40,6 +40,54 @@ function exerciseSet(overrides = {}) {
   }
 }
 
+function linkedVerificationFixture() {
+  const task = {
+    id: 'verification-task',
+    title: 'Independent verification',
+    exerciseSetId: 'verification-set',
+    type: 'ai_recommended',
+    status: 'pending',
+    sourceQuestionId: 'source-question',
+    verificationForErrorId: 'verification-error',
+  }
+  const error = {
+    id: 'verification-error',
+    questionId: 'source-question',
+    subject: 'A-Level Math',
+    errorType: 'calculation',
+    questionSummary: 'Source error',
+    questionContent: 'What is 5 + 5?',
+    errorDescription: 'Calculation slip',
+    relatedTopic: 'Addition',
+    topicId: 'addition',
+    firstOccurredAt: '2026-08-01T10:00:00.000Z',
+    lastOccurredAt: '2026-08-01T10:00:00.000Z',
+    repeatCount: 1,
+    status: 'verification_due',
+    studentAnswer: '9',
+    correctAnswer: '10',
+    analysis: 'Check the arithmetic.',
+    acceptKeywords: ['10'],
+    redoHistory: [{
+      attemptedAt: '2026-08-06T12:00:00.000Z',
+      answer: '10',
+      isCorrect: true,
+      timeSpent: 20,
+    }],
+    verificationVariantId: 'verification-set',
+    variantVerifiedAt: null,
+    variantVerification: null,
+  }
+  const set = exerciseSet({
+    id: 'verification-set',
+    taskId: task.id,
+    title: task.title,
+    sourceQuestionId: 'source-question',
+    questions: [question({ id: 'verification-question', variantOf: 'source-question' })],
+  })
+  return { task, error, set }
+}
+
 function generatedVariant(overrides = {}, sourceQuestionId = 'flow-q1') {
   const generatedSet = exerciseSet({
     id: 'variant-set',
@@ -112,6 +160,7 @@ function RouteControls() {
     <>
       <button onClick={() => navigate('/bank/exercise/bank-next')}>Open bank route</button>
       <button onClick={() => navigate('/exercise/cache-task')}>Open task route</button>
+      <button onClick={() => navigate('/exercise/verification-task')}>Open verification route</button>
     </>
   )
 }
@@ -299,6 +348,213 @@ test('does not navigate when a session from the previous route resolves late', a
   await act(async () => { sessionWrite.resolve({ sessionId: 'late-session' }) })
   await waitFor(() => expect(screen.getByTestId('location')).toHaveTextContent('/bank/exercise/bank-next'))
   expect(screen.getByTestId('location')).not.toHaveTextContent('/summary/')
+})
+
+test.each([
+  ['correct', '42', true],
+  ['wrong', '41', false],
+])('persists then records a %s linked verification before opening its summary', async (_label, answer, isCorrect) => {
+  const fixture = linkedVerificationFixture()
+  const submitSession = vi.fn((session) => Promise.resolve({ sessionId: session.sessionId }))
+  const verifyErrorVariant = vi.fn(() => Promise.resolve({}))
+  const initial = createSeedState()
+  renderStudentApp(
+    <>
+      <App services={servicesFor(createApi({
+        bootstrap: () => Promise.resolve({ ...initial, tasks: [fixture.task], errors: [fixture.error] }),
+        getExerciseSet: () => Promise.resolve(fixture.set),
+        submitSession,
+        verifyErrorVariant,
+      }))} />
+      <LocationProbe />
+    </>,
+    { route: '/exercise/verification-task' },
+  )
+
+  await solve(answer)
+  await userEvent.click(screen.getByRole('button', { name: 'Submit' }))
+
+  await waitFor(() => expect(screen.getByTestId('location')).toHaveTextContent('/summary/page-session'))
+  expect(submitSession).toHaveBeenCalledTimes(1)
+  expect(verifyErrorVariant).toHaveBeenCalledWith('verification-error', {
+    variantId: 'verification-set',
+    isCorrect,
+    verifiedAt: '2026-08-06T12:34:56.000Z',
+  })
+  expect(submitSession.mock.invocationCallOrder[0]).toBeLessThan(verifyErrorVariant.mock.invocationCallOrder[0])
+})
+
+test('retries a failed linked verification without writing the persisted session twice', async () => {
+  const fixture = linkedVerificationFixture()
+  const submitSession = vi.fn((session) => Promise.resolve({ sessionId: session.sessionId }))
+  const verifyErrorVariant = vi.fn()
+    .mockRejectedValueOnce(new Error('verification offline'))
+    .mockResolvedValueOnce({})
+  const initial = createSeedState()
+  renderStudentApp(
+    <>
+      <App services={servicesFor(createApi({
+        bootstrap: () => Promise.resolve({ ...initial, tasks: [fixture.task], errors: [fixture.error] }),
+        getExerciseSet: () => Promise.resolve(fixture.set),
+        submitSession,
+        verifyErrorVariant,
+      }))} />
+      <LocationProbe />
+    </>,
+    { route: '/exercise/verification-task' },
+  )
+
+  await solve('42')
+  const submit = screen.getByRole('button', { name: 'Submit' })
+  await userEvent.click(submit)
+  expect(await screen.findByText('verification offline')).toBeInTheDocument()
+  expect(screen.getByTestId('location')).toHaveTextContent('/exercise/verification-task')
+  await waitFor(() => expect(submit).toBeEnabled())
+
+  await userEvent.click(submit)
+  await waitFor(() => expect(screen.getByTestId('location')).toHaveTextContent('/summary/page-session'))
+  expect(submitSession).toHaveBeenCalledTimes(1)
+  expect(verifyErrorVariant).toHaveBeenCalledTimes(2)
+})
+
+test('retries verification with the outcome already stored in the cached session', async () => {
+  const fixture = linkedVerificationFixture()
+  const submitSession = vi.fn((session) => Promise.resolve({ sessionId: session.sessionId }))
+  const verifyErrorVariant = vi.fn()
+    .mockRejectedValueOnce(new Error('verification offline'))
+    .mockResolvedValueOnce({})
+  const initial = createSeedState()
+  renderStudentApp(
+    <>
+      <App services={servicesFor(createApi({
+        bootstrap: () => Promise.resolve({ ...initial, tasks: [fixture.task], errors: [fixture.error] }),
+        getExerciseSet: () => Promise.resolve(fixture.set),
+        submitSession,
+        verifyErrorVariant,
+      }))} />
+      <LocationProbe />
+    </>,
+    { route: '/exercise/verification-task' },
+  )
+
+  await solve('41')
+  const submit = screen.getByRole('button', { name: 'Submit' })
+  await userEvent.click(submit)
+  expect(await screen.findByText('verification offline')).toBeInTheDocument()
+  await waitFor(() => expect(submit).toBeEnabled())
+
+  await solve('42')
+  await userEvent.click(submit)
+  await waitFor(() => expect(screen.getByTestId('location')).toHaveTextContent('/summary/page-session'))
+  expect(submitSession).toHaveBeenCalledTimes(1)
+  expect(verifyErrorVariant).toHaveBeenNthCalledWith(2, 'verification-error', expect.objectContaining({
+    variantId: 'verification-set',
+    isCorrect: false,
+  }))
+})
+
+test('does not record verification for an ordinary exercise submission', async () => {
+  const verifyErrorVariant = vi.fn(() => Promise.resolve({}))
+  renderStudentApp(
+    <>
+      <App services={servicesFor(createApi({ verifyErrorVariant }))} />
+      <LocationProbe />
+    </>,
+    { route: '/exercise/t-flow' },
+  )
+
+  await solve('42')
+  await userEvent.click(screen.getByRole('button', { name: 'Submit' }))
+
+  await waitFor(() => expect(screen.getByTestId('location')).toHaveTextContent('/summary/page-session'))
+  expect(verifyErrorVariant).not.toHaveBeenCalled()
+})
+
+test('ignores a linked verification completion after the exercise route changes', async () => {
+  const fixture = linkedVerificationFixture()
+  const verificationWrite = deferred()
+  const verifyErrorVariant = vi.fn(() => verificationWrite.promise)
+  const initial = createSeedState()
+  renderStudentApp(
+    <>
+      <App services={servicesFor(createApi({
+        bootstrap: () => Promise.resolve({ ...initial, tasks: [fixture.task], errors: [fixture.error] }),
+        getExerciseSet: (id) => Promise.resolve(id === fixture.task.id
+          ? fixture.set
+          : exerciseSet({ taskId: id, title: 'Current route exercise' })),
+        verifyErrorVariant,
+      }))} />
+      <RouteControls />
+      <LocationProbe />
+    </>,
+    { route: '/exercise/verification-task' },
+  )
+
+  await solve('42')
+  await userEvent.click(screen.getByRole('button', { name: 'Submit' }))
+  await waitFor(() => expect(verifyErrorVariant).toHaveBeenCalledTimes(1))
+  await userEvent.click(screen.getByRole('button', { name: 'Open task route' }))
+  expect(await screen.findByText('Current route exercise')).toBeInTheDocument()
+
+  await act(async () => { verificationWrite.resolve({}) })
+  await waitFor(() => expect(screen.getByTestId('location')).toHaveTextContent('/exercise/cache-task'))
+  expect(screen.getByTestId('location')).not.toHaveTextContent('/summary/')
+})
+
+test('does not let an A-B-A route cycle consume an old verification or unlock the new submission', async () => {
+  const fixture = linkedVerificationFixture()
+  const oldVerification = deferred()
+  const newCompletion = deferred()
+  const verifyErrorVariant = vi.fn()
+    .mockImplementationOnce(() => oldVerification.promise)
+    .mockResolvedValueOnce({})
+  const completeTask = vi.fn()
+    .mockResolvedValueOnce({ task: { id: fixture.task.id, status: 'completed' } })
+    .mockImplementationOnce(() => newCompletion.promise)
+  const submitSession = vi.fn((session) => Promise.resolve({ sessionId: session.sessionId }))
+  const initial = createSeedState()
+  renderStudentApp(
+    <>
+      <App services={servicesFor(createApi({
+        bootstrap: () => Promise.resolve({ ...initial, tasks: [fixture.task], errors: [fixture.error] }),
+        getExerciseSet: (id) => Promise.resolve(id === fixture.task.id
+          ? fixture.set
+          : exerciseSet({ taskId: id, title: 'Middle route exercise' })),
+        submitSession,
+        completeTask,
+        verifyErrorVariant,
+      }))} />
+      <RouteControls />
+      <LocationProbe />
+    </>,
+    { route: '/exercise/verification-task' },
+  )
+
+  await solve('42')
+  await userEvent.click(screen.getByRole('button', { name: 'Submit' }))
+  await waitFor(() => expect(verifyErrorVariant).toHaveBeenCalledTimes(1))
+
+  await userEvent.click(screen.getByRole('button', { name: 'Open task route' }))
+  expect(await screen.findByText('Middle route exercise')).toBeInTheDocument()
+  await userEvent.click(screen.getByRole('button', { name: 'Open verification route' }))
+  expect(await screen.findByText('Independent verification')).toBeInTheDocument()
+
+  await solve('42')
+  const newSubmit = screen.getByRole('button', { name: 'Submit' })
+  await userEvent.click(newSubmit)
+  await waitFor(() => expect(completeTask).toHaveBeenCalledTimes(2))
+  expect(newSubmit).toBeDisabled()
+
+  await act(async () => { oldVerification.resolve({}) })
+  expect(screen.getByTestId('location')).toHaveTextContent('/exercise/verification-task')
+  expect(newSubmit).toBeDisabled()
+
+  await act(async () => {
+    newCompletion.resolve({ task: { id: fixture.task.id, status: 'completed' } })
+  })
+  await waitFor(() => expect(screen.getByTestId('location')).toHaveTextContent('/summary/page-session'))
+  expect(submitSession).toHaveBeenCalledTimes(1)
+  expect(verifyErrorVariant).toHaveBeenCalledTimes(2)
 })
 
 test('does not show a generated variant from the previous route when it resolves late', async () => {
