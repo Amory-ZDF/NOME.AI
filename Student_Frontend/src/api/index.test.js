@@ -41,14 +41,24 @@ const makeNote = (overrides = {}) => ({
   content: [{ t: 'p', v: 'New content' }], aiSuggestions: [], ...overrides,
 })
 
-const makeError = (overrides = {}) => ({
-  id: 'e-new', questionId: 'q-new', subject: 'A-Level Math', errorType: 'calculation',
-  questionSummary: 'Differentiate f(x)', questionContent: '<p>Differentiate f(x)</p>',
-  errorDescription: 'Sign error', relatedTopic: 'Differentiation', topicId: 'calculus-deriv',
-  firstOccurredAt: '2026-08-06', lastOccurredAt: '2026-08-06', repeatCount: 1,
-  status: 'pending_review', studentAnswer: 'x', correctAnswer: '2x', analysis: 'Check signs',
-  acceptKeywords: ['2x'], redoHistory: [], ...overrides,
-})
+const makeError = (overrides = {}) => {
+  const id = overrides.id ?? 'e-new'
+  const questionId = overrides.questionId ?? 'q-new'
+  const occurrenceKey = `card:${id}:question:${questionId}`
+  return {
+    id, questionId, subject: 'A-Level Math', errorType: 'calculation',
+    questionSummary: 'Differentiate f(x)', questionContent: '<p>Differentiate f(x)</p>',
+    errorDescription: 'Sign error', relatedTopic: 'Differentiation', topicId: 'calculus-deriv',
+    firstOccurredAt: '2026-08-06', lastOccurredAt: '2026-08-06',
+    occurrences: ['2026-08-06'],
+    occurrenceKeys: [occurrenceKey],
+    occurrenceRecords: [{ key: occurrenceKey, occurredAt: '2026-08-06' }],
+    hasIncompleteOccurrenceHistory: false,
+    repeatCount: 1,
+    status: 'pending_review', studentAnswer: 'x', correctAnswer: '2x', analysis: 'Check signs',
+    acceptKeywords: ['2x'], redoHistory: [], ...overrides,
+  }
+}
 
 const makeSessionQuestion = (overrides = {}) => ({
   id: 'q-session', order: 1, type: 'choice', topic: 'Algebra', difficulty: 2,
@@ -635,6 +645,58 @@ test('rejects malformed or colliding error upserts atomically', async () => {
   ])).rejects.toMatchObject({ code: 'DUPLICATE_ID' })
 
   expect((await bootstrap()).errors).toEqual(before)
+})
+
+test.each([
+  ['missing occurrence keys', { occurrenceKeys: undefined }],
+  ['missing occurrence records', { occurrenceRecords: undefined }],
+  ['repeat count above the unique identity count', { repeatCount: 2 }],
+  ['repeat count below the unique identity count', {
+    occurrenceKeys: ['occurrence-a', 'occurrence-b'],
+    occurrenceRecords: [
+      { key: 'occurrence-a', occurredAt: '2026-08-05' },
+      { key: 'occurrence-b', occurredAt: '2026-08-06' },
+    ],
+    repeatCount: 1,
+  }],
+  ['a forged legacy aggregate marker', { hasIncompleteOccurrenceHistory: true }],
+])('rejects an untrusted occurrence aggregate atomically: %s', async (_, patch) => {
+  // Catches incoming cards claiming recurrence totals that cannot be derived from stable identities.
+  await resetMockState()
+  const before = (await bootstrap()).errors
+  const validBeforeFailure = makeError({
+    id: 'strict-identity-valid',
+    questionId: 'strict-identity-valid-question',
+  })
+  const invalid = makeError({
+    id: 'strict-identity-invalid',
+    questionId: 'strict-identity-invalid-question',
+    ...patch,
+  })
+
+  await expect(upsertErrors([validBeforeFailure, invalid]))
+    .rejects.toMatchObject({ code: 'INVALID_INPUT' })
+  expect((await bootstrap()).errors).toEqual(before)
+})
+
+test('keeps legacy addErrors callers compatible without trusting them as recurrence upserts', async () => {
+  await resetMockState()
+  const legacy = makeError({
+    id: 'legacy-add-error',
+    questionId: 'legacy-add-question',
+    occurrences: undefined,
+    occurrenceKeys: undefined,
+    occurrenceRecords: undefined,
+    hasIncompleteOccurrenceHistory: true,
+    repeatCount: 4,
+  })
+
+  await expect(addErrors([legacy])).resolves.toEqual({ errors: [legacy] })
+  await expect(bootstrap()).resolves.toMatchObject({
+    errors: expect.arrayContaining([
+      expect.objectContaining({ id: legacy.id, repeatCount: 4 }),
+    ]),
+  })
 })
 
 test('persists the redo, scheduled variant, correct verification, and guarded mastery as one provenance chain', async () => {

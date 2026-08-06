@@ -116,6 +116,26 @@ const taskFailureCases = [
   })],
 ]
 
+const errorFailureCases = [
+  ['redo', 'submitRedo', (app) => app.recordRedo('e1', {
+    attemptedAt: '2026-08-07T00:00:00.000Z',
+    answer: '2x',
+    isCorrect: true,
+    timeSpent: 20,
+  })],
+  ['session-error upsert', 'upsertErrors', (app) => app.addSessionErrors([validError({
+    id: 'incoming-error',
+    firstOccurredAt: '2026-08-07T00:00:00.000Z',
+    lastOccurredAt: '2026-08-07T00:00:00.000Z',
+    occurrences: ['2026-08-07T00:00:00.000Z'],
+    occurrenceKeys: ['session:s-new:question:q-error'],
+    occurrenceRecords: [{
+      key: 'session:s-new:question:q-error',
+      occurredAt: '2026-08-07T00:00:00.000Z',
+    }],
+  })])],
+]
+
 function createApi(overrides = {}) {
   return {
     bootstrap: () => Promise.resolve(bootData),
@@ -1470,6 +1490,104 @@ test.each(taskFailureCases)(
     expect(harness.app.taskAdjustments).toEqual([])
     expect(harness.app.exerciseCache[`set:${scheduled.exerciseSet.id}`]).toEqual(scheduled.exerciseSet)
     expect(harness.app.errors).toEqual([scheduled.error])
+  },
+)
+
+test.each(errorFailureCases)(
+  'preserves a scheduled verification link when a later concurrent %s fails and rolls back',
+  async (_, apiMethod, startErrorAction) => {
+    // Catches schedule claiming only the tasks queue while an errors rollback restores a pre-link snapshot.
+    const due = validError({
+      status: 'verification_due',
+      redoHistory: [{ attemptedAt: '2026-08-06T00:00:00.000Z', answer: '2x', isCorrect: true, timeSpent: 20 }],
+    })
+    const scheduled = scheduledErrorVariant(due)
+    const events = []
+    let resolveSchedule
+    let rejectErrorAction
+    const harness = await renderApp(createApi({
+      bootstrap: () => Promise.resolve({ ...bootData, errors: [due] }),
+      scheduleErrorVariant: () => new Promise((resolve) => {
+        events.push('schedule')
+        resolveSchedule = resolve
+      }),
+      [apiMethod]: () => new Promise((_, reject) => {
+        events.push('error-action')
+        rejectErrorAction = reject
+      }),
+    }))
+    let scheduleOperation
+    let errorSettlement
+
+    act(() => {
+      scheduleOperation = harness.app.scheduleErrorVariant('e1')
+      errorSettlement = startErrorAction(harness.app).catch((error) => error)
+    })
+    expect(events).toEqual(['schedule'])
+
+    await act(async () => {
+      resolveSchedule(scheduled)
+      await scheduleOperation
+    })
+    await waitFor(() => expect(events).toEqual(['schedule', 'error-action']))
+    await act(async () => {
+      rejectErrorAction(new Error(`${apiMethod} failed`))
+      await errorSettlement
+    })
+
+    expect(harness.app.errors.find((error) => error.id === 'e1'))
+      .toMatchObject({ verificationVariantId: scheduled.exerciseSet.id })
+    expect(harness.app.tasks).toContainEqual(scheduled.task)
+    expect(harness.app.exerciseCache[`set:${scheduled.exerciseSet.id}`]).toEqual(scheduled.exerciseSet)
+  },
+)
+
+test.each(errorFailureCases)(
+  'runs a successful scheduled verification after an earlier concurrent %s fails and rolls back',
+  async (_, apiMethod, startErrorAction) => {
+    // Catches a multi-collection action starting before every claimed queue has settled.
+    const due = validError({
+      status: 'verification_due',
+      redoHistory: [{ attemptedAt: '2026-08-06T00:00:00.000Z', answer: '2x', isCorrect: true, timeSpent: 20 }],
+    })
+    const scheduled = scheduledErrorVariant(due)
+    const events = []
+    let resolveSchedule
+    let rejectErrorAction
+    const harness = await renderApp(createApi({
+      bootstrap: () => Promise.resolve({ ...bootData, errors: [due] }),
+      scheduleErrorVariant: () => new Promise((resolve) => {
+        events.push('schedule')
+        resolveSchedule = resolve
+      }),
+      [apiMethod]: () => new Promise((_, reject) => {
+        events.push('error-action')
+        rejectErrorAction = reject
+      }),
+    }))
+    let scheduleOperation
+    let errorSettlement
+
+    act(() => {
+      errorSettlement = startErrorAction(harness.app).catch((error) => error)
+      scheduleOperation = harness.app.scheduleErrorVariant('e1')
+    })
+    expect(events).toEqual(['error-action'])
+
+    await act(async () => {
+      rejectErrorAction(new Error(`${apiMethod} failed`))
+      await errorSettlement
+    })
+    await waitFor(() => expect(events).toEqual(['error-action', 'schedule']))
+    await act(async () => {
+      resolveSchedule(scheduled)
+      await scheduleOperation
+    })
+
+    expect(harness.app.errors.find((error) => error.id === 'e1'))
+      .toMatchObject({ verificationVariantId: scheduled.exerciseSet.id })
+    expect(harness.app.tasks).toContainEqual(scheduled.task)
+    expect(harness.app.exerciseCache[`set:${scheduled.exerciseSet.id}`]).toEqual(scheduled.exerciseSet)
   },
 )
 

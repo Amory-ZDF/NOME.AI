@@ -170,8 +170,13 @@ export function AppProvider({ children, services = defaultAppServices }) {
         },
       })
     }
-    const previous = collectionQueues.current.get(collection)
-    const operation = previous ? previous.catch(() => undefined).then(start) : start()
+    const collections = [...new Set(Array.isArray(collection) ? collection : [collection])]
+    const previous = collections
+      .map((name) => collectionQueues.current.get(name))
+      .filter(Boolean)
+    const operation = previous.length > 0
+      ? Promise.all(previous.map((queuedOperation) => queuedOperation.catch(() => undefined))).then(start)
+      : start()
     let queued
     queued = operation.finally(() => {
       const remaining = (actionCounts.current.get(operationKey) || 1) - 1
@@ -193,9 +198,11 @@ export function AppProvider({ children, services = defaultAppServices }) {
           })
         }
       }
-      if (collectionQueues.current.get(collection) === queued) collectionQueues.current.delete(collection)
+      collections.forEach((name) => {
+        if (collectionQueues.current.get(name) === queued) collectionQueues.current.delete(name)
+      })
     })
-    collectionQueues.current.set(collection, queued)
+    collections.forEach((name) => collectionQueues.current.set(name, queued))
     return queued
   }, [showToast])
 
@@ -347,7 +354,7 @@ export function AppProvider({ children, services = defaultAppServices }) {
   const scheduleErrorVariant = useCallback((id) => {
     const sourceError = errorsRef.current.find((error) => error.id === id)
     if (!sourceError) return Promise.reject(new Error('Error item was not found.'))
-    return runAction(`error:variant:${id}`, 'tasks', () => ({
+    return runAction(`error:variant:${id}`, ['errors', 'tasks'], () => ({
       snapshot: null,
       optimistic: () => {},
       request: async () => {

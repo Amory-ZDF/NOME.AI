@@ -206,6 +206,10 @@ const assertError = (error) => {
       || error.occurrenceKeys.some((key, index) => error.occurrenceRecords[index].key !== key))) {
     throw invalid('Error occurrence identities are inconsistent')
   }
+  if (error.hasIncompleteOccurrenceHistory !== undefined
+    && typeof error.hasIncompleteOccurrenceHistory !== 'boolean') {
+    throw invalid('Error.hasIncompleteOccurrenceHistory is invalid')
+  }
   if (error.verificationVariantId !== undefined && !isNullableNonemptyString(error.verificationVariantId)) {
     throw invalid('Error.verificationVariantId is invalid')
   }
@@ -324,9 +328,25 @@ const updateError = async (id, recipe) => {
   return state.errors.find((error) => error.id === id)
 }
 
-const assertErrorBatch = (items) => {
+const assertStableOccurrenceIdentity = (error) => {
+  if (!Array.isArray(error.occurrenceKeys) || error.occurrenceKeys.length === 0
+    || !Array.isArray(error.occurrenceRecords) || error.occurrenceRecords.length === 0) {
+    throw invalid('Error occurrence identities are required')
+  }
+  if (error.repeatCount !== new Set(error.occurrenceKeys).size) {
+    throw invalid('Error.repeatCount must match its stable occurrence identities')
+  }
+  if (error.hasIncompleteOccurrenceHistory === true) {
+    throw invalid('Incoming errors cannot claim incomplete legacy occurrence history')
+  }
+}
+
+const assertErrorBatch = (items, { strictIdentity = false } = {}) => {
   if (!Array.isArray(items)) throw invalid('Error batch must be an array')
-  items.forEach(assertError)
+  items.forEach((item) => {
+    assertError(item)
+    if (strictIdentity) assertStableOccurrenceIdentity(item)
+  })
 }
 
 const assertNoErrorIdCollisions = (current, items) => {
@@ -498,7 +518,7 @@ export const addErrors = async (items) => {
 
 export const upsertErrors = async (items) => {
   if (!isMockMode) return http.post('/api/errors/batch', { items })
-  assertErrorBatch(items)
+  assertErrorBatch(items, { strictIdentity: true })
   const state = await repository.update((current) => {
     assertNoErrorIdCollisions(current, items)
     return { ...current, errors: mergeErrorCards(current.errors, items) }

@@ -174,6 +174,7 @@ One-shot load of everything the student shell needs. Frontend calls it once on m
 | `occurrenceKeys` | string[] | Unique non-empty stable identities, normally `session:{sessionId}:question:{questionId}` |
 | `occurrenceRecords` | `{ key, occurredAt }[]` | Unique non-empty keys with valid timestamps; when keys and records are both supplied, they must align exactly |
 | `repeatCount` | positive integer | Number of distinct recurrence identities |
+| `hasIncompleteOccurrenceHistory` | boolean? | Server-owned legacy migration marker; incoming upserts must omit it or send `false` |
 | `status` | enum | `pending_review` \| `reviewing` \| `verification_due` \| `mastered` |
 | `studentAnswer` | string | |
 | `correctAnswer` | string | |
@@ -282,7 +283,11 @@ One-shot load of everything the student shell needs. Frontend calls it once on m
 Error batches are validated atomically. In addition to the field constraints above, each redo entry
 must contain all four `RedoAttempt` fields, every verification audit must be internally consistent,
 and `passageEvidence` must be a string or an array of strings. An invalid item rejects the whole
-batch without changing persisted state. `expression` and `habit` are valid normalized error types.
+batch without changing persisted state. Upserts must include non-empty `occurrenceKeys` and matching
+`occurrenceRecords`; the unique identity count must equal `repeatCount`. Clients cannot set
+`hasIncompleteOccurrenceHistory: true` to claim a larger legacy aggregate. That marker is retained
+only while normalizing already persisted legacy cards. `expression` and `habit` are valid normalized
+error types.
 
 Mastery chronology is strict: a correct redo alone is not mastery. It first moves the item to
 `verification_due`; the backend then schedules one independent variant. A correct verification
