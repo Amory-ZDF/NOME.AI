@@ -104,12 +104,38 @@ describe('applyRedoAttempt', () => {
   })
 
   test.each([
+    ['2026-08-06'],
+    ['2026-08-06T10:30:00Z'],
+    ['2026-08-06T10:30:00.123+08:00'],
+  ])('accepts a valid ISO calendar date or RFC3339 timestamp %s', (attemptedAt) => {
+    const next = applyRedoAttempt({ status: 'reviewing', redoHistory: [] }, {
+      ...correctRedo,
+      attemptedAt,
+    })
+
+    expect(next.redoHistory.at(-1).attemptedAt).toBe(attemptedAt)
+    expect(next.status).toBe('verification_due')
+  })
+
+  test.each([
     [null],
     [{}],
+    [{ answer: '42', isCorrect: true, timeSpent: 50 }],
+    [{ attemptedAt: '2026-08-06', isCorrect: true, timeSpent: 50 }],
+    [{ attemptedAt: '2026-08-06', answer: '42', timeSpent: 50 }],
+    [{ attemptedAt: '2026-08-06', answer: '42', isCorrect: true }],
     [{ ...correctRedo, attemptedAt: '  ' }],
+    [{ ...correctRedo, attemptedAt: '2026-02-29' }],
+    [{ ...correctRedo, attemptedAt: '2026-02-30' }],
+    [{ ...correctRedo, attemptedAt: '2026-13-01' }],
+    [{ ...correctRedo, attemptedAt: '2026-02-30T10:30:00Z' }],
+    [{ ...correctRedo, attemptedAt: '2026-08-06T25:30:00Z' }],
+    [{ ...correctRedo, attemptedAt: '2026-08-06T10:30:00' }],
+    [{ ...correctRedo, attemptedAt: 'yesterday' }],
     [{ ...correctRedo, answer: null }],
     [{ ...correctRedo, isCorrect: 'true' }],
     [{ ...correctRedo, timeSpent: -1 }],
+    [{ ...correctRedo, timeSpent: Number.POSITIVE_INFINITY }],
   ])('rejects incomplete redo evidence %# without mutating the card', (attempt) => {
     const item = { status: 'reviewing', repeatCount: 1, redoHistory: [] }
     const before = structuredClone(item)
@@ -123,7 +149,7 @@ describe('verification lifecycle', () => {
   test('attaches a valid variant only after a correct redo and resets prior verification', () => {
     const due = {
       status: 'verification_due',
-      redoHistory: [{ isCorrect: true }],
+      redoHistory: [correctRedo],
       verificationVariantId: 'variant-old',
       variantVerifiedAt: '2026-08-01',
       variantVerification: { variantId: 'variant-old', isCorrect: true, verifiedAt: '2026-08-01' },
@@ -143,13 +169,43 @@ describe('verification lifecycle', () => {
   })
 
   test.each([
-    [{ status: 'reviewing', redoHistory: [{ isCorrect: true }] }, 'variant-1'],
-    [{ status: 'verification_due', redoHistory: [{ isCorrect: false }] }, 'variant-1'],
+    [{ status: 'reviewing', redoHistory: [correctRedo] }, 'variant-1'],
+    [{ status: 'verification_due', redoHistory: [wrongRedo] }, 'variant-1'],
     [{ status: 'verification_due', redoHistory: 'malformed' }, 'variant-1'],
-    [{ status: 'verification_due', redoHistory: [{ isCorrect: true }] }, '   '],
+    [{ status: 'verification_due', redoHistory: [correctRedo] }, '   '],
   ])('does not attach an ineligible or invalid verification variant %#', (item, variantId) => {
     const before = structuredClone(item)
     expect(attachVerificationVariant(item, variantId)).toEqual(before)
+    expect(item).toEqual(before)
+  })
+
+  test.each([
+    [{}],
+    [{ attemptedAt: '2026-08-06', answer: '42', isCorrect: true }],
+    [{ attemptedAt: 'not-a-date', answer: '42', isCorrect: true, timeSpent: 50 }],
+    [{ ...correctRedo, isCorrect: 'true' }],
+  ])('requires a complete correct latest redo before attaching or recording %#', (latestRedo) => {
+    const item = {
+      status: 'verification_due',
+      redoHistory: [correctRedo, latestRedo],
+      verificationVariantId: 'variant-1',
+      variantVerifiedAt: null,
+      variantVerification: null,
+    }
+    const before = structuredClone(item)
+    const verification = {
+      variantId: 'variant-1',
+      isCorrect: true,
+      verifiedAt: '2026-08-07T09:00:00Z',
+    }
+
+    expect(attachVerificationVariant(item, 'variant-2')).toEqual(before)
+    expect(recordVariantVerification(item, verification)).toEqual(before)
+    expect(canMarkMastered({
+      ...item,
+      variantVerifiedAt: verification.verifiedAt,
+      variantVerification: verification,
+    })).toBe(false)
     expect(item).toEqual(before)
   })
 
@@ -169,6 +225,23 @@ describe('verification lifecycle', () => {
     expect(item.status).not.toBe('mastered')
     expect(canMarkMastered(item)).toBe(true)
     expect(canMarkMastered({ ...item, status: 'mastered' })).toBe(true)
+  })
+
+  test('accepts date-only verification evidence used by the documented lifecycle', () => {
+    const due = attachVerificationVariant(applyRedoAttempt({
+      status: 'reviewing',
+      repeatCount: 1,
+      redoHistory: [],
+    }, { ...correctRedo, attemptedAt: '2026-08-06' }), 'variant-1')
+
+    const verified = recordVariantVerification(due, {
+      variantId: 'variant-1',
+      isCorrect: true,
+      verifiedAt: '2026-08-07',
+    })
+
+    expect(verified.variantVerifiedAt).toBe('2026-08-07')
+    expect(canMarkMastered(verified)).toBe(true)
   })
 
   test('a mismatched verification result makes no trusted transition', () => {
@@ -214,6 +287,26 @@ describe('verification lifecycle', () => {
     expect(item).toEqual(before)
   })
 
+  test.each([
+    ['2026-02-30'],
+    ['2026-08-07T24:00:00Z'],
+    ['2026-08-07T09:00:00'],
+    ['tomorrow'],
+  ])('does not record an invalid verification timestamp %s', (verifiedAt) => {
+    const due = attachVerificationVariant(applyRedoAttempt({
+      status: 'reviewing',
+      repeatCount: 1,
+      redoHistory: [],
+    }, correctRedo), 'variant-1')
+    const result = { variantId: 'variant-1', isCorrect: true, verifiedAt }
+    const beforeItem = structuredClone(due)
+    const beforeResult = structuredClone(result)
+
+    expect(recordVariantVerification(due, result)).toEqual(beforeItem)
+    expect(due).toEqual(beforeItem)
+    expect(result).toEqual(beforeResult)
+  })
+
   test('rejects stale, mismatched, malformed, or invalid-lifecycle evidence as mastery proof', () => {
     const valid = verifiedItem()
     const candidates = [
@@ -224,6 +317,8 @@ describe('verification lifecycle', () => {
       { ...valid, variantVerifiedAt: '2026-08-08T09:00:00.000Z' },
       { ...valid, variantVerification: { ...valid.variantVerification, variantId: 'variant-stale' } },
       { ...valid, variantVerification: { ...valid.variantVerification, isCorrect: false } },
+      { ...valid, variantVerifiedAt: '2026-02-30', variantVerification: { ...valid.variantVerification, verifiedAt: '2026-02-30' } },
+      { ...valid, variantVerifiedAt: 'tomorrow', variantVerification: { ...valid.variantVerification, verifiedAt: 'tomorrow' } },
       { ...valid, variantVerification: null },
       null,
     ]

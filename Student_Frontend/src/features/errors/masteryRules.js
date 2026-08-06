@@ -1,5 +1,49 @@
 const isRecord = (value) => value !== null && typeof value === 'object' && !Array.isArray(value)
 const nonemptyString = (value) => (typeof value === 'string' && value.trim() ? value.trim() : null)
+const ISO_CALENDAR_DATE = /^(\d{4})-(\d{2})-(\d{2})$/
+const RFC3339_TIMESTAMP = /^(\d{4})-(\d{2})-(\d{2})[Tt](\d{2}):(\d{2}):(\d{2})(?:\.\d+)?([Zz]|[+-](\d{2}):(\d{2}))$/
+
+const isLeapYear = (year) => year % 4 === 0 && (year % 100 !== 0 || year % 400 === 0)
+const daysInMonth = (year, month) => {
+  if (month === 2) return isLeapYear(year) ? 29 : 28
+  return [4, 6, 9, 11].includes(month) ? 30 : 31
+}
+const isValidCalendarDate = (year, month, day) => (
+  year >= 1
+  && month >= 1
+  && month <= 12
+  && day >= 1
+  && day <= daysInMonth(year, month)
+)
+
+const normalizeEvidenceTime = (value) => {
+  const candidate = nonemptyString(value)
+  if (!candidate) return null
+
+  const calendarMatch = ISO_CALENDAR_DATE.exec(candidate)
+  if (calendarMatch) {
+    const [, year, month, day] = calendarMatch.map(Number)
+    return isValidCalendarDate(year, month, day) ? candidate : null
+  }
+
+  const timestampMatch = RFC3339_TIMESTAMP.exec(candidate)
+  if (!timestampMatch) return null
+
+  const [, year, month, day, hour, minute, second, zone, offsetHour, offsetMinute] = timestampMatch
+  if (!isValidCalendarDate(Number(year), Number(month), Number(day))) return null
+  if (Number(hour) > 23 || Number(minute) > 59 || Number(second) > 59) return null
+  if (zone.toUpperCase() !== 'Z' && (Number(offsetHour) > 23 || Number(offsetMinute) > 59)) return null
+  return candidate
+}
+
+const isCompleteRedoEvidence = (attempt) => (
+  isRecord(attempt)
+  && normalizeEvidenceTime(attempt.attemptedAt) !== null
+  && typeof attempt.answer === 'string'
+  && typeof attempt.isCorrect === 'boolean'
+  && Number.isFinite(attempt.timeSpent)
+  && attempt.timeSpent >= 0
+)
 
 const cloneData = (value) => {
   if (Array.isArray(value)) return value.map(cloneData)
@@ -14,22 +58,16 @@ const normalizeRedoHistory = (value) => (
   Array.isArray(value) ? value.filter(isRecord).map(cloneData) : []
 )
 const normalizeRepeatCount = (value) => (Number.isInteger(value) && value >= 0 ? value : 0)
-const latestRedoIsCorrect = (errorItem) => {
+const latestRedoIsCompleteAndCorrect = (errorItem) => {
   const history = Array.isArray(errorItem?.redoHistory) ? errorItem.redoHistory : []
   const latest = history.at(-1)
-  return isRecord(latest) && latest.isCorrect === true
+  return isCompleteRedoEvidence(latest) && latest.isCorrect === true
 }
 
 const normalizeRedoAttempt = (attempt) => {
-  if (!isRecord(attempt)) throw new TypeError('redo attempt must be an object')
+  if (!isCompleteRedoEvidence(attempt)) throw new TypeError('redo attempt must contain complete valid evidence')
 
-  const attemptedAt = nonemptyString(attempt.attemptedAt)
-  if (!attemptedAt) throw new TypeError('attempt.attemptedAt must be a non-empty string')
-  if (typeof attempt.answer !== 'string') throw new TypeError('attempt.answer must be a string')
-  if (typeof attempt.isCorrect !== 'boolean') throw new TypeError('attempt.isCorrect must be a boolean')
-  if (!Number.isFinite(attempt.timeSpent) || attempt.timeSpent < 0) {
-    throw new TypeError('attempt.timeSpent must be a non-negative finite number')
-  }
+  const attemptedAt = normalizeEvidenceTime(attempt.attemptedAt)
 
   return {
     ...cloneData(attempt),
@@ -67,7 +105,7 @@ export function attachVerificationVariant(errorItem, variantId) {
   if (
     !normalizedVariantId
     || current.status !== 'verification_due'
-    || !latestRedoIsCorrect(current)
+    || !latestRedoIsCompleteAndCorrect(current)
   ) return current
 
   return {
@@ -83,13 +121,13 @@ export function recordVariantVerification(errorItem, result) {
   if (!isRecord(result)) return current
 
   const variantId = nonemptyString(result.variantId)
-  const verifiedAt = nonemptyString(result.verifiedAt)
+  const verifiedAt = normalizeEvidenceTime(result.verifiedAt)
   if (!variantId || !verifiedAt || typeof result.isCorrect !== 'boolean') return current
 
   const linkedVariantId = nonemptyString(current.verificationVariantId)
   if (
     current.status !== 'verification_due'
-    || !latestRedoIsCorrect(current)
+    || !latestRedoIsCompleteAndCorrect(current)
     || !linkedVariantId
     || variantId !== linkedVariantId
   ) return current
@@ -120,11 +158,12 @@ export function recordVariantVerification(errorItem, result) {
 export function canMarkMastered(errorItem) {
   if (!isRecord(errorItem)) return false
   if (errorItem.status !== 'verification_due' && errorItem.status !== 'mastered') return false
-  if (!latestRedoIsCorrect(errorItem)) return false
+  if (!latestRedoIsCompleteAndCorrect(errorItem)) return false
 
   const linkedVariantId = nonemptyString(errorItem.verificationVariantId)
-  const variantVerifiedAt = nonemptyString(errorItem.variantVerifiedAt)
+  const variantVerifiedAt = normalizeEvidenceTime(errorItem.variantVerifiedAt)
   const verification = errorItem.variantVerification
+  const verificationTime = normalizeEvidenceTime(verification?.verifiedAt)
 
   return Boolean(
     linkedVariantId
@@ -132,6 +171,6 @@ export function canMarkMastered(errorItem) {
     && isRecord(verification)
     && nonemptyString(verification.variantId) === linkedVariantId
     && verification.isCorrect === true
-    && nonemptyString(verification.verifiedAt) === variantVerifiedAt
+    && verificationTime === variantVerifiedAt
   )
 }
