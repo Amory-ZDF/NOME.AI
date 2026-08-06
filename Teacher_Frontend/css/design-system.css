@@ -197,6 +197,12 @@ ul, ol {
   transform: translateY(-1px);
 }
 
+.btn svg {
+  width: 1.125rem;
+  height: 1.125rem;
+  flex-shrink: 0;
+}
+
 .btn-primary {
   background: var(--deep-teal);
   color: white;
@@ -297,6 +303,24 @@ ul, ol {
   display: flex;
   align-items: center;
   gap: 0.5rem;
+  flex-shrink: 0;
+}
+
+/* Fix: SVG icons inside card-title must not expand and push text vertically */
+.card-title svg {
+  width: 1.125rem;
+  height: 1.125rem;
+  flex-shrink: 0;
+}
+
+/* Global safeguard: any SVG without explicit size defaults to icon dimensions */
+.card-header svg:not([width]):not([height]),
+.card svg:not([width]):not([height]),
+.list-row svg:not([width]):not([height]),
+.alert-item svg:not([width]):not([height]) {
+  width: 1.125rem;
+  height: 1.125rem;
+  flex-shrink: 0;
 }
 
 .card-link {

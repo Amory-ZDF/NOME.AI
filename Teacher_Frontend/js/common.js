@@ -132,11 +132,11 @@ const App = {
 
   renderSidebar() {
     const navItems = [
-      { id: 'dashboard', label: '工作台', icon: Icons.dashboard },
-      { id: 'calendar', label: '课程日历', icon: Icons.calendar },
-      { id: 'students', label: '学生档案', icon: Icons.users },
-      { id: 'assignments', label: '作业管理', icon: Icons.assignment },
-      { id: 'reports', label: '数据报告', icon: Icons.report },
+      { id: 'dashboard', label: t('common.nav_dashboard'), icon: Icons.dashboard },
+      { id: 'calendar', label: t('common.nav_calendar'), icon: Icons.calendar },
+      { id: 'students', label: t('common.nav_students'), icon: Icons.users },
+      { id: 'assignments', label: t('common.nav_assignments'), icon: Icons.assignment },
+      { id: 'reports', label: t('common.nav_reports'), icon: Icons.report },
     ];
 
     return `
@@ -156,7 +156,7 @@ const App = {
         <div class="sidebar-footer">
           <a href="#settings" class="nav-item" data-nav="settings">
             ${Icons.settings}
-            <span class="nav-label">设置</span>
+            <span class="nav-label">${t('common.nav_settings')}</span>
           </a>
           <div class="user-info">
             <div class="avatar avatar-sm">王</div>
@@ -171,6 +171,15 @@ const App = {
   },
 
   handleRoute(route) {
+    // 语言切换时需要重新渲染整个 app（包括 sidebar）
+    // 检查 sidebar 是否需要更新（导航标签语言变化）
+    const existingSidebar = $('.sidebar');
+    if (existingSidebar && this._lastLang !== I18n.current()) {
+      // 重新渲染整个 app
+      this.render();
+      this._lastLang = I18n.current();
+    }
+
     // 更新侧边栏 active
     $$('.nav-item').forEach(item => {
       const isActive = item.dataset.nav === route;
@@ -190,8 +199,45 @@ const App = {
     } else {
       main.innerHTML = Pages.notFound();
     }
-  }
+  },
+
+  // 语言切换按钮（可插入到任何 topbar-right）
+  renderLangToggle() {
+    const isZh = I18n.isZh();
+    return `
+      <div class="lang-toggle" onclick="I18n.toggle()" title="${t('common.lang_label')}">
+        <span class="${isZh ? 'lang-active' : ''}">中</span>
+        <span style="color:var(--gray-300);font-size:0.75rem">/</span>
+        <span class="${!isZh ? 'lang-active' : ''}">EN</span>
+      </div>
+    `;
+  },
 };
+
+// 语言切换按钮样式（注入一次）
+if (!document.getElementById('lang-toggle-style')) {
+  const style = document.createElement('style');
+  style.id = 'lang-toggle-style';
+  style.textContent = `
+    .lang-toggle {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.25rem;
+      padding: 0.375rem 0.625rem;
+      border-radius: var(--r-md);
+      background: var(--gray-100);
+      cursor: pointer;
+      transition: background var(--duration-fast) var(--ease-out);
+      font-size: 0.8125rem;
+      font-weight: 500;
+      user-select: none;
+    }
+    .lang-toggle:hover { background: var(--teal-tint); }
+    .lang-toggle span { color: var(--warm-stone); transition: color var(--duration-fast); }
+    .lang-toggle .lang-active { color: var(--deep-teal); font-weight: 600; }
+  `;
+  document.head.appendChild(style);
+}
 
 // ===== 侧滑面板 =====
 const SlidePanel = {
