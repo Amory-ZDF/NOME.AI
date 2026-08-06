@@ -27,7 +27,14 @@ export function createVariantExercise(input) {
     throw new TypeError('factory input must be an object')
   }
 
-  const { sourceQuestion, templateIndex, variantId, taskId, createdAt } = input
+  const {
+    sourceQuestion,
+    templateIndex,
+    variantId,
+    taskId,
+    createdAt,
+    verificationForErrorId,
+  } = input
   validateSourceQuestion(sourceQuestion)
   if (!Number.isInteger(templateIndex) || templateIndex < 0) {
     throw new TypeError('templateIndex must be a non-negative integer')
@@ -35,6 +42,9 @@ export function createVariantExercise(input) {
   requireNonemptyString(variantId, 'variantId')
   requireNonemptyString(taskId, 'taskId')
   requireNonemptyString(createdAt, 'createdAt')
+  if (verificationForErrorId !== undefined) {
+    requireNonemptyString(verificationForErrorId, 'verificationForErrorId')
+  }
 
   const topic = sourceQuestion.topic
   const templates = VARIANT_TEMPLATES[topic]
@@ -82,6 +92,9 @@ export function createVariantExercise(input) {
       reason: 'Independent transfer check',
       sourceQuestionId: sourceQuestion.id,
       createdAt,
+      ...(verificationForErrorId === undefined
+        ? {}
+        : { verificationForErrorId: verificationForErrorId.trim() }),
     },
   }
 }

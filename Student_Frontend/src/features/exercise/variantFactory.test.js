@@ -116,6 +116,20 @@ describe('createVariantExercise', () => {
     })
   })
 
+  test('adds error-book verification metadata only to a variant task created from that context', () => {
+    const input = { ...factoryArgs, verificationForErrorId: '  error-1  ' }
+    const before = structuredClone(input)
+
+    const fromErrorBook = createVariantExercise(input)
+    const ordinaryVariant = createVariantExercise(factoryArgs)
+
+    expect(fromErrorBook.task.verificationForErrorId).toBe('error-1')
+    expect(fromErrorBook.exerciseSet).not.toHaveProperty('verificationForErrorId')
+    expect(ordinaryVariant.task).not.toHaveProperty('verificationForErrorId')
+    expect(ordinaryVariant.exerciseSet).not.toHaveProperty('verificationForErrorId')
+    expect(input).toEqual(before)
+  })
+
   test('is deterministic without mutating the source question', () => {
     const before = structuredClone(sourceQuestion)
 
@@ -202,5 +216,10 @@ describe('createVariantExercise', () => {
   ])('rejects invalid %s', (field, value) => {
     expect(() => createVariantExercise({ ...factoryArgs, [field]: value }))
       .toThrow(new TypeError(`${field} must be a non-empty string`))
+  })
+
+  test.each([null, '', '   ', 42, {}])('rejects invalid optional verificationForErrorId %j', (verificationForErrorId) => {
+    expect(() => createVariantExercise({ ...factoryArgs, verificationForErrorId }))
+      .toThrow(new TypeError('verificationForErrorId must be a non-empty string'))
   })
 })
