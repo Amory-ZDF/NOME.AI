@@ -29,6 +29,20 @@ test('recovers from corrupt persisted JSON with seed data', async () => {
   expect((await repository.bootstrap()).tasks).toEqual([{ id: 'seed' }])
 })
 
+test.each([
+  ['missing data', { version: 1 }],
+  ['null data', { version: 1, data: null }],
+  ['string data', { version: 1, data: 'bad' }],
+  ['array data', { version: 1, data: [] }],
+])('replaces a current-version envelope with %s with seed data', async (_, envelope) => {
+  // Catches a production mutation that accepts a versioned envelope without a plain state object.
+  const storage = createMemoryStorage({ [STORAGE_KEY]: JSON.stringify(envelope) })
+  const repository = createMockRepository({ storage, latencyMs: 0, seedFactory: () => ({ tasks: [{ id: 'seed' }] }) })
+
+  expect(await repository.bootstrap()).toEqual({ tasks: [{ id: 'seed' }] })
+  expect(JSON.parse(storage.getItem(STORAGE_KEY))).toEqual({ version: 1, data: { tasks: [{ id: 'seed' }] } })
+})
+
 test('returns cloned read results so callers cannot mutate stored state', async () => {
   // Catches a production mutation that returns a reference to persisted state.
   const repository = createMockRepository({ storage: createMemoryStorage(), latencyMs: 0, seedFactory: () => ({ tasks: [{ id: 't1', status: 'pending' }] }) })

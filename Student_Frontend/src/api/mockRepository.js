@@ -2,6 +2,10 @@ export const STORAGE_KEY = 'nome-ai.student-state.v1'
 export const STORAGE_VERSION = 1
 
 const clone = (value) => structuredClone(value)
+const isPlainStateObject = (value) => value !== null
+  && typeof value === 'object'
+  && !Array.isArray(value)
+  && Object.getPrototypeOf(value) === Object.prototype
 
 export function createMockRepository({ storage = window.localStorage, latencyMs = 60, seedFactory }) {
   const wait = () => new Promise((resolve) => setTimeout(resolve, latencyMs))
@@ -12,7 +16,7 @@ export function createMockRepository({ storage = window.localStorage, latencyMs 
 
     try {
       const envelope = JSON.parse(raw)
-      return envelope.version === STORAGE_VERSION ? envelope.data : seed()
+      return envelope.version === STORAGE_VERSION && isPlainStateObject(envelope.data) ? envelope.data : seed()
     } catch {
       return seed()
     }
