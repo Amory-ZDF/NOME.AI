@@ -67,6 +67,44 @@ const validVariant = (overrides = {}) => {
   return { exerciseSet, task }
 }
 
+const validError = (overrides = {}) => ({
+  id: 'e1',
+  questionId: 'q-error',
+  subject: 'A-Level Math',
+  errorType: 'calculation',
+  questionSummary: 'Differentiate the function.',
+  questionContent: 'Differentiate x squared.',
+  errorDescription: 'A calculation slip.',
+  relatedTopic: 'Calculus - Differentiation',
+  topicId: 'calculus-differentiation',
+  firstOccurredAt: '2026-08-01T00:00:00.000Z',
+  lastOccurredAt: '2026-08-01T00:00:00.000Z',
+  repeatCount: 1,
+  status: 'pending_review',
+  studentAnswer: 'x',
+  correctAnswer: '2x',
+  analysis: 'Apply the power rule.',
+  acceptKeywords: ['2x'],
+  redoHistory: [],
+  verificationVariantId: null,
+  variantVerifiedAt: null,
+  ...overrides,
+})
+
+const scheduledErrorVariant = (error = validError({
+  status: 'verification_due',
+  redoHistory: [{ attemptedAt: '2026-08-06T00:00:00.000Z', answer: '2x', isCorrect: true, timeSpent: 20 }],
+})) => {
+  const generated = validVariant({
+    sourceQuestionId: error.questionId,
+    task: { verificationForErrorId: error.id },
+  })
+  return {
+    ...generated,
+    error: { ...error, verificationVariantId: generated.exerciseSet.id, variantVerifiedAt: null },
+  }
+}
+
 function createApi(overrides = {}) {
   return {
     bootstrap: () => Promise.resolve(bootData),
@@ -74,8 +112,20 @@ function createApi(overrides = {}) {
     reportTaskAdjustment: (_, request) => Promise.resolve({ request, task: { id: 't1', status: 'pending', adjustmentStatus: 'submitted' } }),
     createTask: (task) => Promise.resolve({ task }),
     addErrors: (items) => Promise.resolve({ errors: items }),
+    upsertErrors: (items) => Promise.resolve({ errors: items }),
+    getSessionSummary: () => Promise.resolve({ accuracy: 50, errorDistribution: { calculation: 1 } }),
     markErrorMastered: () => Promise.resolve({ error: { id: 'e1', status: 'mastered' } }),
     submitRedo: () => Promise.resolve({ error: { id: 'e1' } }),
+    scheduleErrorVariant: () => Promise.resolve(scheduledErrorVariant()),
+    verifyErrorVariant: (_, result) => Promise.resolve({
+      error: validError({
+        status: result.isCorrect ? 'verification_due' : 'reviewing',
+        redoHistory: [{ attemptedAt: '2026-08-06T00:00:00.000Z', answer: '2x', isCorrect: true, timeSpent: 20 }],
+        verificationVariantId: result.variantId,
+        variantVerifiedAt: result.isCorrect ? result.verifiedAt : null,
+        variantVerification: result,
+      }),
+    }),
     createNote: (note) => Promise.resolve({ note }),
     updateNote: () => Promise.resolve({ note: { id: 'n1' } }),
     getExerciseSet: (taskId) => Promise.resolve(validExerciseSet({ taskId })),
@@ -1101,4 +1151,255 @@ test('rejects a second adjustment after the first submitted request settles', as
   expect(reportTaskAdjustment).toHaveBeenCalledTimes(1)
   expect(actions.tasks[0]).toMatchObject({ status: 'pending', adjustmentStatus: 'submitted' })
   expect(actions.taskAdjustments).toHaveLength(1)
+})
+
+test('loads and caches one exact session summary under its required pending key', async () => {
+  // Catches duplicate summary reads, the wrong cache key, or pending state clearing before the request settles.
+  let resolveSummary
+  const getSessionSummary = vi.fn(() => new Promise((resolve) => { resolveSummary = resolve }))
+  const harness = await renderApp(createApi({ getSessionSummary }))
+  let first
+  let duplicate
+
+  act(() => {
+    first = harness.app.loadSessionSummary('session/one')
+    duplicate = harness.app.loadSessionSummary('session/one')
+  })
+  await expect(duplicate).rejects.toThrow('already in progress')
+  await waitFor(() => expect(harness.app.isActionPending('summary:session/one')).toBe(true))
+  const summary = { accuracy: 50, errorDistribution: { calculation: 1 }, wrongQuestions: [{ id: 'q1' }] }
+  await act(async () => {
+    resolveSummary(summary)
+    await first
+  })
+
+  expect(getSessionSummary).toHaveBeenCalledTimes(1)
+  expect(harness.app.sessionSummaries['session/one']).toEqual(summary)
+  expect(harness.app.isActionPending('summary:session/one')).toBe(false)
+  await expect(harness.app.loadSessionSummary('session/one')).resolves.toEqual(summary)
+  expect(getSessionSummary).toHaveBeenCalledTimes(1)
+})
+
+test('preserves an existing summary and clears pending when a refresh request fails', async () => {
+  // Catches a failed summary load erasing another session's cached diagnostic data.
+  const getSessionSummary = vi.fn((id) => (
+    id === 'session-ok'
+      ? Promise.resolve({ accuracy: 100, errorDistribution: {} })
+      : Promise.reject(new Error('summary offline'))
+  ))
+  const harness = await renderApp(createApi({ getSessionSummary }))
+  await act(async () => { await harness.app.loadSessionSummary('session-ok') })
+
+  await act(async () => {
+    await expect(harness.app.loadSessionSummary('session-fail')).rejects.toThrow('summary offline')
+  })
+  expect(harness.app.sessionSummaries).toEqual({
+    'session-ok': { accuracy: 100, errorDistribution: {} },
+  })
+  expect(harness.app.isActionPending('summary:session-fail')).toBe(false)
+})
+
+test('optimistically merges session errors idempotently and rolls back the whole merge on API failure', async () => {
+  // Catches recurrence retries duplicating cards or a failed batch leaving optimistic evidence behind.
+  let rejectUpsert
+  const existing = validError({
+    occurrenceKeys: ['session:s1:question:q-error'],
+    occurrenceRecords: [{ key: 'session:s1:question:q-error', occurredAt: '2026-08-01T00:00:00.000Z' }],
+    occurrences: ['2026-08-01T00:00:00.000Z'],
+  })
+  const incoming = validError({
+    id: 'incoming-id',
+    firstOccurredAt: '2026-08-06T00:00:00.000Z',
+    lastOccurredAt: '2026-08-06T00:00:00.000Z',
+    occurrenceKeys: ['session:s2:question:q-error'],
+    occurrenceRecords: [{ key: 'session:s2:question:q-error', occurredAt: '2026-08-06T00:00:00.000Z' }],
+    occurrences: ['2026-08-06T00:00:00.000Z'],
+  })
+  const upsertErrors = vi.fn(() => new Promise((_, reject) => { rejectUpsert = reject }))
+  const harness = await renderApp(createApi({
+    bootstrap: () => Promise.resolve({ ...bootData, errors: [existing] }),
+    upsertErrors,
+  }))
+  let operation
+
+  act(() => { operation = harness.app.addSessionErrors([incoming]) })
+  await waitFor(() => expect(harness.app.isActionPending('errors:add')).toBe(true))
+  expect(harness.app.errors).toHaveLength(1)
+  expect(harness.app.errors[0]).toMatchObject({ id: 'e1', repeatCount: 2 })
+  await expect(harness.app.addSessionErrors([incoming])).rejects.toThrow('already in progress')
+
+  await act(async () => {
+    rejectUpsert(new Error('errors offline'))
+    await operation.catch(() => undefined)
+  })
+  expect(harness.app.errors).toEqual([existing])
+  expect(harness.app.isActionPending('errors:add')).toBe(false)
+})
+
+test('commits the canonical persisted error collection returned by an upsert', async () => {
+  // Catches the store retaining an optimistic incoming ID instead of the server's canonical card identity.
+  const canonical = validError({ id: 'canonical-id', questionId: 'q-canonical' })
+  const harness = await renderApp(createApi({
+    upsertErrors: () => Promise.resolve({ errors: [canonical] }),
+  }))
+
+  await act(async () => {
+    await harness.app.addSessionErrors([validError({ id: 'temporary-id', questionId: 'q-canonical' })])
+  })
+  expect(harness.app.errors).toEqual([canonical])
+})
+
+test('records a redo with the injected clock, exact pending key, canonical commit, and rollback', async () => {
+  // Catches the store using legacy review transitions or failing to restore verification evidence after rejection.
+  let rejectRedo
+  const original = validError({ verificationVariantId: 'old-variant', variantVerifiedAt: '2026-08-02' })
+  const submitRedo = vi.fn(() => new Promise((_, reject) => { rejectRedo = reject }))
+  const harness = await renderApp(createApi({
+    bootstrap: () => Promise.resolve({ ...bootData, errors: [original] }),
+    submitRedo,
+  }))
+  let operation
+
+  act(() => {
+    operation = harness.app.recordRedo('e1', { answer: '2x', isCorrect: true, timeSpent: 20 })
+  })
+  await waitFor(() => expect(harness.app.isActionPending('error:redo:e1')).toBe(true))
+  expect(harness.app.errors[0]).toMatchObject({
+    status: 'verification_due',
+    verificationVariantId: null,
+    variantVerifiedAt: null,
+    redoHistory: [expect.objectContaining({ attemptedAt: '2026-08-06T00:00:00.000Z', isCorrect: true })],
+  })
+  await expect(harness.app.recordRedo('e1', { answer: '2x', isCorrect: true, timeSpent: 20 }))
+    .rejects.toThrow('already in progress')
+
+  await act(async () => {
+    rejectRedo(new Error('redo offline'))
+    await operation.catch(() => undefined)
+  })
+  expect(harness.app.errors).toEqual([original])
+  expect(harness.app.isActionPending('error:redo:e1')).toBe(false)
+})
+
+test('atomically consumes a provenance-checked scheduled variant and rolls back malformed or failed responses', async () => {
+  // Catches caching an unrelated task/set or linking the error before all three persisted entities agree.
+  const due = validError({
+    status: 'verification_due',
+    redoHistory: [{ attemptedAt: '2026-08-06T00:00:00.000Z', answer: '2x', isCorrect: true, timeSpent: 20 }],
+  })
+  const good = scheduledErrorVariant(due)
+  const scheduleErrorVariant = vi.fn()
+    .mockResolvedValueOnce({ ...good, task: { ...good.task, verificationForErrorId: 'another-error' } })
+    .mockResolvedValueOnce(good)
+  const harness = await renderApp(createApi({
+    bootstrap: () => Promise.resolve({ ...bootData, errors: [due] }),
+    scheduleErrorVariant,
+  }))
+
+  await act(async () => {
+    await expect(harness.app.scheduleErrorVariant('e1')).rejects.toThrow('The generated verification variant is incomplete. Please try again.')
+  })
+  expect(harness.app.errors).toEqual([due])
+  expect(harness.app.exerciseCache).toEqual({})
+  expect(harness.app.tasks).toEqual(bootData.tasks)
+  expect(harness.app.isActionPending('error:variant:e1')).toBe(false)
+
+  await act(async () => { await harness.app.scheduleErrorVariant('e1') })
+  expect(harness.app.errors).toEqual([good.error])
+  expect(harness.app.exerciseCache[`set:${good.exerciseSet.id}`]).toEqual(good.exerciseSet)
+  expect(harness.app.tasks).toContainEqual(good.task)
+  expect(harness.app.isActionPending('error:variant:e1')).toBe(false)
+})
+
+test('does not roll back an unrelated task write when scheduling a verification variant fails', async () => {
+  // Catches an error-collection request restoring a stale task snapshot even though it made no optimistic task edit.
+  const due = validError({
+    status: 'verification_due',
+    redoHistory: [{ attemptedAt: '2026-08-06T00:00:00.000Z', answer: '2x', isCorrect: true, timeSpent: 20 }],
+  })
+  let rejectSchedule
+  const scheduleErrorVariant = () => new Promise((_, reject) => { rejectSchedule = reject })
+  const harness = await renderApp(createApi({
+    bootstrap: () => Promise.resolve({ ...bootData, errors: [due] }),
+    scheduleErrorVariant,
+    completeTask: (id) => Promise.resolve({ task: { id, type: 'teacher_assigned', status: 'completed' } }),
+  }))
+  const schedule = harness.app.scheduleErrorVariant('e1').catch((error) => error)
+
+  await act(async () => { await harness.app.completeTask('t1') })
+  expect(harness.app.tasks[0].status).toBe('completed')
+  await act(async () => { rejectSchedule(new Error('variant offline')); await schedule })
+
+  expect(harness.app.tasks[0].status).toBe('completed')
+  expect(harness.app.errors).toEqual([due])
+})
+
+test('verifies the linked variant optimistically and rejects mastery until complete evidence exists', async () => {
+  // Catches mastery being reachable from a correct redo alone or the exact gate message being hidden.
+  const due = validError({
+    status: 'verification_due',
+    redoHistory: [{ attemptedAt: '2026-08-06T00:00:00.000Z', answer: '2x', isCorrect: true, timeSpent: 20 }],
+    verificationVariantId: 'variant-1',
+  })
+  const verifyErrorVariant = vi.fn((_, result) => Promise.resolve({
+    error: {
+      ...due,
+      variantVerifiedAt: result.verifiedAt,
+      variantVerification: result,
+    },
+  }))
+  const markErrorMastered = vi.fn(() => Promise.resolve({ error: { ...due, status: 'mastered' } }))
+  const harness = await renderApp(createApi({
+    bootstrap: () => Promise.resolve({ ...bootData, errors: [due] }),
+    verifyErrorVariant,
+    markErrorMastered,
+  }))
+
+  await expect(harness.app.markErrorMastered('e1')).rejects.toThrow('Complete the independent variant before marking this mastered')
+  expect(markErrorMastered).not.toHaveBeenCalled()
+
+  await act(async () => {
+    await harness.app.verifyErrorVariant('e1', { variantId: 'variant-1', isCorrect: true })
+  })
+  expect(verifyErrorVariant).toHaveBeenCalledWith('e1', {
+    variantId: 'variant-1',
+    isCorrect: true,
+    verifiedAt: '2026-08-06T00:00:00.000Z',
+  })
+  expect(harness.app.errors[0]).toMatchObject({
+    variantVerifiedAt: '2026-08-06T00:00:00.000Z',
+    variantVerification: { variantId: 'variant-1', isCorrect: true },
+  })
+  expect(harness.app.isActionPending('error:variant:e1')).toBe(false)
+
+  await act(async () => { await harness.app.markErrorMastered('e1') })
+  expect(markErrorMastered).toHaveBeenCalledTimes(1)
+  expect(harness.app.isActionPending('error:master:e1')).toBe(false)
+})
+
+test('rolls back a valid optimistic mastery transition when the API rejects it', async () => {
+  // Catches the UI displaying mastered after the backend rechecks and rejects the gate.
+  const verified = validError({
+    status: 'verification_due',
+    redoHistory: [{ attemptedAt: '2026-08-06T00:00:00.000Z', answer: '2x', isCorrect: true, timeSpent: 20 }],
+    verificationVariantId: 'variant-1',
+    variantVerifiedAt: '2026-08-06T00:01:00.000Z',
+    variantVerification: { variantId: 'variant-1', isCorrect: true, verifiedAt: '2026-08-06T00:01:00.000Z' },
+  })
+  let rejectMastery
+  const harness = await renderApp(createApi({
+    bootstrap: () => Promise.resolve({ ...bootData, errors: [verified] }),
+    markErrorMastered: () => new Promise((_, reject) => { rejectMastery = reject }),
+  }))
+  let operation
+
+  act(() => { operation = harness.app.markErrorMastered('e1') })
+  await waitFor(() => expect(harness.app.isActionPending('error:master:e1')).toBe(true))
+  expect(harness.app.errors[0].status).toBe('mastered')
+  await act(async () => {
+    rejectMastery(new Error('mastery rejected'))
+    await operation.catch(() => undefined)
+  })
+  expect(harness.app.errors).toEqual([verified])
+  expect(harness.app.isActionPending('error:master:e1')).toBe(false)
 })

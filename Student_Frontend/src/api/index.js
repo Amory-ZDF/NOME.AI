@@ -14,6 +14,14 @@ import { createMockRepository } from './mockRepository'
 import { isTaskAdjustmentEligible } from '../features/tasks/taskRules'
 import { createVariantExercise, normalizeVariantContent } from '../features/exercise/variantFactory'
 import { VARIANT_TEMPLATES } from '../data/variantTemplates'
+import { summarizeSession } from '../features/errors/sessionSummary'
+import { mergeErrorCards } from '../features/errors/errorCards'
+import {
+  applyRedoAttempt,
+  attachVerificationVariant,
+  canMarkMastered,
+  recordVariantVerification,
+} from '../features/errors/masteryRules'
 
 const repository = createMockRepository({ seedFactory: createSeedState })
 
@@ -22,10 +30,15 @@ const hasId = (value, field = 'id') => typeof value?.[field] === 'string' && val
 const invalid = (message) => new ApiError(message, { status: 400, code: 'INVALID_INPUT' })
 const notFound = (entity, id) => new ApiError(`${entity} ${id} was not found`, { status: 404, code: 'NOT_FOUND' })
 const duplicate = (entity, id) => new ApiError(`${entity} ${id} already exists`, { status: 409, code: 'DUPLICATE_ID' })
+const masteryGateNotMet = () => new ApiError('Complete the independent variant before marking this mastered', {
+  status: 409,
+  code: 'MASTERY_GATE_NOT_MET',
+})
 const hasOwn = (value, field) => Object.prototype.hasOwnProperty.call(value, field)
 const isNonemptyString = (value) => typeof value === 'string' && value.trim().length > 0
 const isString = (value) => typeof value === 'string'
 const isNullableString = (value) => value === null || typeof value === 'string'
+const isNullableNonemptyString = (value) => value === null || isNonemptyString(value)
 const isNumber = (value) => typeof value === 'number' && Number.isFinite(value)
 const isNonnegativeNumber = (value) => isNumber(value) && value >= 0
 const isStringArray = (value) => Array.isArray(value) && value.every(isString)
@@ -52,6 +65,16 @@ const isRedoAttempt = (attempt) => isRecord(attempt)
   && isString(attempt.answer)
   && typeof attempt.isCorrect === 'boolean'
   && isNonnegativeNumber(attempt.timeSpent)
+
+const isOccurrenceRecord = (record) => isRecord(record)
+  && isNonemptyString(record.key)
+  && isNullableNonemptyString(record.occurredAt)
+
+const isVerificationResult = (result) => isRecord(result)
+  && isNonemptyString(result.variantId)
+  && typeof result.isCorrect === 'boolean'
+  && isNonemptyString(result.verifiedAt)
+const isVariantVerification = (result) => result === null || isVerificationResult(result)
 
 const isSessionAttempt = (attempt) => isRecord(attempt)
   && isString(attempt.answer)
@@ -125,16 +148,16 @@ const assertError = (error) => {
     id: isNonemptyString,
     questionId: isNonemptyString,
     subject: isNonemptyString,
-    errorType: isOneOf('calculation', 'method', 'knowledge', 'reading', 'execution'),
+    errorType: isOneOf('calculation', 'method', 'knowledge', 'reading', 'execution', 'expression', 'habit'),
     questionSummary: isString,
     questionContent: isString,
     errorDescription: isString,
     relatedTopic: isNonemptyString,
-    topicId: isNonemptyString,
+    topicId: isNullableNonemptyString,
     firstOccurredAt: isNonemptyString,
     lastOccurredAt: isNonemptyString,
     repeatCount: isNonnegativeNumber,
-    status: isOneOf('pending_review', 'reviewing', 'mastered'),
+    status: isOneOf('pending_review', 'reviewing', 'verification_due', 'mastered'),
     studentAnswer: isString,
     correctAnswer: isString,
     analysis: isString,
@@ -143,6 +166,35 @@ const assertError = (error) => {
   })
   if (error.options !== undefined && !isStringArray(error.options)) throw invalid('Error.options is invalid')
   if (error.correctIndex !== undefined && !isNonnegativeNumber(error.correctIndex)) throw invalid('Error.correctIndex is invalid')
+  if (error.sessionId !== undefined && !isNullableNonemptyString(error.sessionId)) throw invalid('Error.sessionId is invalid')
+  if (error.type !== undefined && !isNullableNonemptyString(error.type)) throw invalid('Error.type is invalid')
+  if (error.difficulty !== undefined && error.difficulty !== null && !isNumber(error.difficulty)) throw invalid('Error.difficulty is invalid')
+  if (error.whereWrong !== undefined && !isString(error.whereWrong)) throw invalid('Error.whereWrong is invalid')
+  if (error.whyWrong !== undefined && !isString(error.whyWrong)) throw invalid('Error.whyWrong is invalid')
+  if (error.linkedAbility !== undefined && !isString(error.linkedAbility)) throw invalid('Error.linkedAbility is invalid')
+  if (error.hintDependency !== undefined && !isNonnegativeNumber(error.hintDependency)) throw invalid('Error.hintDependency is invalid')
+  if (error.occurrences !== undefined && !isStringArray(error.occurrences)) throw invalid('Error.occurrences is invalid')
+  if (error.occurrenceKeys !== undefined && !isStringArray(error.occurrenceKeys)) throw invalid('Error.occurrenceKeys is invalid')
+  if (error.occurrenceRecords !== undefined
+    && (!Array.isArray(error.occurrenceRecords) || !error.occurrenceRecords.every(isOccurrenceRecord))) {
+    throw invalid('Error.occurrenceRecords is invalid')
+  }
+  if (error.verificationVariantId !== undefined && !isNullableNonemptyString(error.verificationVariantId)) {
+    throw invalid('Error.verificationVariantId is invalid')
+  }
+  if (error.variantVerifiedAt !== undefined && !isNullableNonemptyString(error.variantVerifiedAt)) {
+    throw invalid('Error.variantVerifiedAt is invalid')
+  }
+  if (error.variantVerification !== undefined && !isVariantVerification(error.variantVerification)) {
+    throw invalid('Error.variantVerification is invalid')
+  }
+  for (const field of ['understandingExplanation', 'scoringExplanation', 'errorPattern']) {
+    if (error[field] !== undefined && !isString(error[field])) throw invalid(`Error.${field} is invalid`)
+  }
+  if (error.markSchemePoints !== undefined && !Array.isArray(error.markSchemePoints)) throw invalid('Error.markSchemePoints is invalid')
+  if (error.passageEvidence !== undefined
+    && !isString(error.passageEvidence)
+    && !isStringArray(error.passageEvidence)) throw invalid('Error.passageEvidence is invalid')
 }
 
 const isHint = (hint) => isRecord(hint)
@@ -161,7 +213,7 @@ const isSessionQuestion = (question) => isRecord(question)
   && (question.correctIndex === undefined || isNonnegativeNumber(question.correctIndex))
   && isStringArray(question.acceptKeywords)
   && isString(question.correctDisplay)
-  && isOneOf('calculation', 'method', 'knowledge', 'reading', 'execution')(question.errorType)
+  && isOneOf('calculation', 'method', 'knowledge', 'reading', 'execution', 'expression', 'habit')(question.errorType)
   && Array.isArray(question.hints)
   && question.hints.every(isHint)
   && isRecord(question.result)
@@ -229,6 +281,75 @@ const updateError = async (id, recipe) => {
     }
   })
   return state.errors.find((error) => error.id === id)
+}
+
+const assertErrorBatch = (items) => {
+  if (!Array.isArray(items)) throw invalid('Error batch must be an array')
+  items.forEach(assertError)
+}
+
+const assertNoErrorIdCollisions = (current, items) => {
+  const questionById = new Map(current.errors.map((error) => [error.id, error.questionId]))
+  items.forEach((item) => {
+    const knownQuestionId = questionById.get(item.id)
+    if (knownQuestionId !== undefined && knownQuestionId !== item.questionId) {
+      throw duplicate('Error', item.id)
+    }
+    questionById.set(item.id, item.questionId)
+  })
+}
+
+const findQuestion = (current, questionId) => {
+  const allSets = [...Object.values(current.exerciseSets), ...Object.values(current.bankExerciseSets)]
+  return allSets.flatMap((exerciseSet) => exerciseSet.questions || [])
+    .find((question) => question.id === questionId)
+}
+
+const questionFromError = (current, error) => findQuestion(current, error.questionId) ?? {
+  id: error.questionId,
+  topic: error.relatedTopic,
+  content: error.questionContent,
+  type: error.type,
+  difficulty: error.difficulty,
+  options: error.options,
+  correctIndex: error.correctIndex,
+  acceptKeywords: error.acceptKeywords,
+  correctDisplay: error.correctAnswer,
+  errorType: error.errorType,
+}
+
+const buildVariant = (current, sourceQuestion, verificationForErrorId) => {
+  const templates = VARIANT_TEMPLATES[sourceQuestion.topic]
+  if (!Array.isArray(templates) || templates.length === 0) {
+    throw invalid(`No variant templates are available for ${sourceQuestion.topic}`)
+  }
+  const distinctTemplateIndexes = templates
+    .map((template, index) => ({ index, content: normalizeVariantContent(template?.content) }))
+    .filter(({ content }) => content !== normalizeVariantContent(sourceQuestion.content))
+    .map(({ index }) => index)
+  if (distinctTemplateIndexes.length === 0) {
+    throw invalid(`No distinct variant template is available for ${sourceQuestion.topic}`)
+  }
+  const persistedVariantCount = Object.values(current.exerciseSets)
+    .filter((exerciseSet) => exerciseSet.sourceQuestionId === sourceQuestion.id)
+    .length
+  let ordinal = persistedVariantCount + 1
+  let variantId = `variant-${sourceQuestion.id}-${ordinal}`
+  let taskId = `task-variant-${sourceQuestion.id}-${ordinal}`
+  while (hasOwn(current.exerciseSets, variantId) || current.tasks.some((task) => task.id === taskId)) {
+    ordinal += 1
+    variantId = `variant-${sourceQuestion.id}-${ordinal}`
+    taskId = `task-variant-${sourceQuestion.id}-${ordinal}`
+  }
+
+  return createVariantExercise({
+    sourceQuestion,
+    templateIndex: distinctTemplateIndexes[persistedVariantCount % distinctTemplateIndexes.length],
+    variantId,
+    taskId,
+    createdAt: new Date().toISOString(),
+    ...(verificationForErrorId ? { verificationForErrorId } : {}),
+  })
 }
 
 const updateStoredNote = async (id, patch) => {
@@ -315,10 +436,7 @@ export const getBankExerciseSet = async (setId) => {
 // ---------- Error book ----------
 export const addErrors = async (items) => {
   if (!isMockMode) return http.post('/api/errors/batch', { items })
-  if (!Array.isArray(items)) throw invalid('Error batch must be an array')
-  items.forEach((item) => {
-    assertError(item)
-  })
+  assertErrorBatch(items)
   let added = []
   await repository.update((current) => {
     const entityIds = new Set(current.errors.map((error) => error.id))
@@ -336,22 +454,93 @@ export const addErrors = async (items) => {
   })
   return { errors: added }
 }
+
+export const upsertErrors = async (items) => {
+  if (!isMockMode) return http.post('/api/errors/batch', { items })
+  assertErrorBatch(items)
+  const state = await repository.update((current) => {
+    assertNoErrorIdCollisions(current, items)
+    return { ...current, errors: mergeErrorCards(current.errors, items) }
+  })
+  return { errors: state.errors }
+}
+
 export const markErrorMastered = async (id) => {
-  if (!isMockMode) return http.patch(`/api/errors/${id}`, { status: 'mastered' })
-  return { error: await updateError(id, (error) => ({ ...error, status: 'mastered' })) }
+  if (!isMockMode) return http.patch(`/api/errors/${encodeURIComponent(id)}`, { status: 'mastered' })
+  return {
+    error: await updateError(id, (error) => {
+      if (!canMarkMastered(error)) throw masteryGateNotMet()
+      return { ...error, status: 'mastered' }
+    }),
+  }
 }
 export const submitRedo = async (id, attempt) => {
-  if (!isMockMode) return http.post(`/api/errors/${id}/redo`, attempt)
+  if (!isMockMode) return http.post(`/api/errors/${encodeURIComponent(id)}/redo`, attempt)
   assertRedoAttempt(attempt)
-  return {
-    error: await updateError(id, (error) => ({
-      ...error,
-      redoHistory: [...error.redoHistory, attempt],
-      repeatCount: attempt.isCorrect ? error.repeatCount : error.repeatCount + 1,
-      lastOccurredAt: attempt.isCorrect ? error.lastOccurredAt : attempt.attemptedAt,
-      status: attempt.isCorrect ? (error.status === 'pending_review' ? 'reviewing' : error.status) : 'pending_review',
-    })),
-  }
+  return { error: await updateError(id, (error) => applyRedoAttempt(error, attempt)) }
+}
+
+export const scheduleErrorVariant = async (id) => {
+  if (!isMockMode) return http.post(`/api/errors/${encodeURIComponent(id)}/variant`)
+  if (!hasId({ id })) throw invalid('Error id is required')
+
+  let scheduled
+  await repository.update((current) => {
+    const error = current.errors.find((item) => item.id === id)
+    if (!error) throw notFound('Error', id)
+    if (error.verificationVariantId) throw invalid('A verification variant is already scheduled')
+    if (attachVerificationVariant(error, 'verification-gate-probe').verificationVariantId !== 'verification-gate-probe') {
+      throw invalid('Complete a correct redo before scheduling an independent variant')
+    }
+    const sourceQuestion = questionFromError(current, error)
+    const generated = buildVariant(current, sourceQuestion, id)
+    const linkedError = attachVerificationVariant(error, generated.exerciseSet.id)
+    if (linkedError.verificationVariantId !== generated.exerciseSet.id) {
+      throw invalid('Complete a correct redo before scheduling an independent variant')
+    }
+    scheduled = { ...generated, error: linkedError }
+    return {
+      ...current,
+      exerciseSets: { ...current.exerciseSets, [generated.exerciseSet.id]: generated.exerciseSet },
+      tasks: [...current.tasks, generated.task],
+      errors: current.errors.map((item) => (item.id === id ? linkedError : item)),
+    }
+  })
+  return structuredClone(scheduled)
+}
+
+export const verifyErrorVariant = async (id, result) => {
+  if (!isMockMode) return http.post(`/api/errors/${encodeURIComponent(id)}/verification`, result)
+  if (!hasId({ id })) throw invalid('Error id is required')
+  if (!isVerificationResult(result)) throw invalid('Variant verification is invalid')
+
+  const state = await repository.update((current) => {
+    const error = current.errors.find((item) => item.id === id)
+    if (!error) throw notFound('Error', id)
+    if (result.variantId !== error.verificationVariantId) {
+      throw invalid('Verification result does not match the linked variant')
+    }
+    const exerciseSet = current.exerciseSets[result.variantId]
+    const hasExactTask = current.tasks.some((task) => (
+      task.exerciseSetId === result.variantId
+      && task.sourceQuestionId === error.questionId
+      && task.verificationForErrorId === id
+    ))
+    const hasExactSet = exerciseSet?.sourceQuestionId === error.questionId
+      && exerciseSet.questions?.every((question) => question.variantOf === error.questionId)
+    if (!hasExactTask || !hasExactSet) throw invalid('Verification variant provenance is invalid')
+
+    const verified = recordVariantVerification(error, result)
+    if (verified.variantVerification?.variantId !== result.variantId
+      || verified.variantVerification?.verifiedAt !== result.verifiedAt) {
+      throw invalid('Verification result is invalid or out of order')
+    }
+    return {
+      ...current,
+      errors: current.errors.map((item) => (item.id === id ? verified : item)),
+    }
+  })
+  return { error: state.errors.find((error) => error.id === id) }
 }
 
 // ---------- Notes ----------
@@ -378,6 +567,14 @@ export const submitSession = async (session) => {
     return { ...current, sessions: { ...current.sessions, [session.sessionId]: session } }
   })
   return { sessionId: session.sessionId }
+}
+
+export const getSessionSummary = async (sessionId) => {
+  if (!isNonemptyString(sessionId)) throw invalid('Session id is required')
+  if (!isMockMode) return http.get(`/api/summary/${encodeURIComponent(sessionId)}`)
+  const session = await repository.read((current) => current.sessions[sessionId])
+  if (!session || session.sessionId !== sessionId) throw notFound('Session', sessionId)
+  return summarizeSession(session)
 }
 
 export const generateVariant = async (sourceQuestionId) => {

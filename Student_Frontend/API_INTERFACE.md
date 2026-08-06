@@ -94,6 +94,7 @@ One-shot load of everything the student shell needs. Frontend calls it once on m
 | `completedAt` | string? | ISO datetime set when the task is completed |
 | `adjustmentStatus` | enum? | `submitted` when the student has requested an adjustment |
 | `sourceQuestionId` | string? | Source question for an independently generated variant task |
+| `verificationForErrorId` | string? | Error-book item whose independent transfer check this task verifies |
 | `reason` | string? | Variant tasks use `"Independent transfer check"` |
 | `createdAt` | string? | ISO datetime for generated tasks |
 
@@ -121,7 +122,7 @@ One-shot load of everything the student shell needs. Frontend calls it once on m
 | `correctIndex` | number? | Multiple choice only |
 | `acceptKeywords` | string[] | Grading keywords for open answers |
 | `correctDisplay` | string | Shown after solving |
-| `errorType` | enum | `calculation` \| `method` \| `knowledge` \| `reading` \| `execution` |
+| `errorType` | enum | `knowledge` \| `method` \| `calculation` \| `reading` \| `execution` \| `expression` \| `habit` |
 | `hints` | Hint[] | L1–L5 progressive hints |
 | `variantOf` | string? | Source question id when this is an L6 transfer variant |
 | `sourceQuestionId` | string? | Optional explicit source reference carried by an API payload |
@@ -155,16 +156,25 @@ One-shot load of everything the student shell needs. Frontend calls it once on m
 |---|---|---|
 | `id` | string | |
 | `questionId` | string | Dedupe key |
+| `sessionId` | string \| null | Session that produced this diagnostic occurrence, when available |
 | `subject` | string | |
-| `errorType` | enum | Same as Question.errorType |
+| `errorType` | enum | `knowledge` \| `method` \| `calculation` \| `reading` \| `execution` \| `expression` \| `habit` |
 | `questionSummary` | string | Plain-text excerpt |
 | `questionContent` | string | HTML |
+| `type` | Question.type \| null | Original question type, when available |
+| `difficulty` | number \| null | Original difficulty, when available |
 | `errorDescription` | string | AI explanation of the mistake |
 | `relatedTopic` | string | |
-| `topicId` | string | |
+| `topicId` | string \| null | |
+| `whereWrong` / `whyWrong` | string | Concrete diagnostic location and root-cause evidence |
+| `linkedAbility` | string | Ability targeted by the normalized error type |
+| `hintDependency` | number | Hints consumed in the source session |
 | `firstOccurredAt` / `lastOccurredAt` | string | ISO date |
-| `repeatCount` | number | |
-| `status` | enum | `pending_review` \| `reviewing` \| `mastered` |
+| `occurrences` | string[] | Chronological occurrence timestamps |
+| `occurrenceKeys` | string[] | Stable identities, normally `session:{sessionId}:question:{questionId}` |
+| `occurrenceRecords` | `{ key, occurredAt }[]` | Auditable key/timestamp pairs; replaying the same key is idempotent |
+| `repeatCount` | number | Number of distinct recurrence identities |
+| `status` | enum | `pending_review` \| `reviewing` \| `verification_due` \| `mastered` |
 | `studentAnswer` | string | |
 | `correctAnswer` | string | |
 | `analysis` | string | |
@@ -172,6 +182,13 @@ One-shot load of everything the student shell needs. Frontend calls it once on m
 | `options` | string[]? | For choice-type redos |
 | `correctIndex` | number? | |
 | `redoHistory` | RedoAttempt[] | |
+| `verificationVariantId` | string \| null | Exact generated exercise-set id linked for independent verification |
+| `variantVerifiedAt` | string \| null | Timestamp of the latest accepted correct verification |
+| `variantVerification` | VariantVerification \| null | Full audit result for the linked variant |
+| `understandingExplanation` / `scoringExplanation` | string? | Preserved A-Level diagnostic evidence |
+| `markSchemePoints` | object[]? | Preserved A-Level mark-scheme evidence |
+| `passageEvidence` | string \| string[]? | Preserved IELTS passage evidence |
+| `errorPattern` | string? | Preserved reading/habit evidence |
 
 ### RedoAttempt
 | Field | Type |
@@ -180,6 +197,13 @@ One-shot load of everything the student shell needs. Frontend calls it once on m
 | `answer` | string |
 | `isCorrect` | boolean |
 | `timeSpent` | number (seconds) |
+
+### VariantVerification
+| Field | Type | Notes |
+|---|---|---|
+| `variantId` | string | Must equal `ErrorItem.verificationVariantId` |
+| `isCorrect` | boolean | A wrong verification returns the item to `reviewing` |
+| `verifiedAt` | string | ISO date/datetime; cannot precede the latest correct redo or replay older evidence |
 
 ### Note
 | Field | Type | Notes |
@@ -249,9 +273,18 @@ One-shot load of everything the student shell needs. Frontend calls it once on m
 ### Error book
 | Endpoint | Body | Notes |
 |---|---|---|
-| `POST /api/errors/batch` | `{ "items": ErrorItem[] }` | Add wrong questions from a session |
-| `PATCH /api/errors/{id}` | `{ "status": "mastered" }` | Only valid after ≥1 correct redo (PRD §4.3) |
-| `POST /api/errors/{id}/redo` | RedoAttempt | Independent redo, no hints (PRD §4.4) |
+| `POST /api/errors/batch` | `{ "items": ErrorItem[] }` | Upsert by `questionId`; count only distinct occurrence identities |
+| `POST /api/errors/{id}/redo` | RedoAttempt | Correct sets `verification_due`; wrong sets `pending_review`; both clear stale verification evidence |
+| `POST /api/errors/{id}/variant` | none | Atomically create the independent variant set/task and link both to the exact error id |
+| `POST /api/errors/{id}/verification` | VariantVerification | Accept only the exact linked task/set/error provenance and chronological evidence |
+| `PATCH /api/errors/{id}` | `{ "status": "mastered" }` | Valid only after a correct redo followed by a correct linked independent variant |
+
+Mastery chronology is strict: a correct redo alone is not mastery. It first moves the item to
+`verification_due`; the backend then schedules one independent variant. A correct verification
+whose `variantId` matches the persisted error/task/set chain and whose `verifiedAt` is not earlier
+than the latest correct redo permits the final mastery patch. Otherwise the patch rejects with code
+`MASTERY_GATE_NOT_MET` and message `Complete the independent variant before marking this mastered`.
+A new recurrence or redo clears stale verification evidence.
 
 ### Notes
 | Endpoint | Body | Notes |
@@ -334,10 +367,13 @@ Task adjustments are submitted through `requestTaskAdjustment(task, draft)`; the
 | App mount | `GET /api/student/bootstrap` | `AppStore.jsx` → `api.bootstrap()` |
 | Open assigned exercise | `GET /api/exercise-sets/{taskId}` | `Exercise.jsx` → `loadExerciseSet({ taskId })` |
 | Open bank exercise | `GET /api/bank/exercise/{setId}` | `Exercise.jsx` → `loadExerciseSet({ bankSetId })` |
+| Open a persisted session summary | `GET /api/summary/{sessionId}` | `Summary.jsx` → `loadSessionSummary(sessionId)` |
 | Check a task done | `PATCH /api/tasks/{id}` | `Home.jsx / Tasks.jsx` → `completeTask` |
 | Submit adjustment request | `POST /api/tasks/{id}/adjustment-request` | `requestTaskAdjustment(task, draft)` |
-| Add wrong Qs to error book | `POST /api/errors/batch` | `Summary.jsx` → `addErrors` |
-| Mark error mastered | `PATCH /api/errors/{id}` | `Errors.jsx / ErrorRedo.jsx` |
+| Add wrong Qs to error book | `POST /api/errors/batch` | `Summary.jsx` → `addSessionErrors` |
+| Schedule independent verification | `POST /api/errors/{id}/variant` | `ErrorRedo.jsx` → `scheduleErrorVariant` |
+| Record independent verification | `POST /api/errors/{id}/verification` | `ErrorRedo.jsx` → `verifyErrorVariant` |
+| Mark error mastered | `PATCH /api/errors/{id}` | `Errors.jsx / ErrorRedo.jsx` after the mastery gate |
 | Submit redo | `POST /api/errors/{id}/redo` | `ErrorRedo.jsx` → `recordRedo` |
 | Create / edit note | `POST`/`PATCH /api/notes...` | `Notes.jsx` |
 | Submit exercise set | `POST /api/sessions` | `Exercise.jsx` → `saveSession` |

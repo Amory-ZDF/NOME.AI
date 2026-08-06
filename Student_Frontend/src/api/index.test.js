@@ -8,13 +8,17 @@ import {
   generateVariant,
   getBankExerciseSet,
   getExerciseSet,
+  getSessionSummary,
   markErrorMastered,
   reportTaskAdjustment,
   resetMockState,
+  scheduleErrorVariant,
   submitRedo,
   submitSession,
+  upsertErrors,
   updateNote,
   updateSettings,
+  verifyErrorVariant,
 } from './index'
 import { isCompleteVariantResult } from '../features/exercise/exerciseContracts'
 
@@ -168,16 +172,6 @@ test('addErrors returns and persists the submitted errors', async () => {
 
   await expect(addErrors(items)).resolves.toEqual({ errors: items })
   await expect(bootstrap()).resolves.toMatchObject({ errors: expect.arrayContaining(items) })
-})
-
-test('markErrorMastered persists the new error status', async () => {
-  // Catches a mock adapter mutation that acknowledges mastering without changing stored status.
-  await resetMockState()
-
-  await expect(markErrorMastered('e1')).resolves.toMatchObject({ error: { id: 'e1', status: 'mastered' } })
-  await expect(bootstrap()).resolves.toMatchObject({
-    errors: expect.arrayContaining([expect.objectContaining({ id: 'e1', status: 'mastered' })]),
-  })
 })
 
 test('submitRedo persists redo history and error review state', async () => {
@@ -381,6 +375,15 @@ test('accepts documented optional question metadata and rejects mistyped metadat
   }
 })
 
+test.each(['expression', 'habit'])('accepts the documented %s session error type', async (errorType) => {
+  // Catches the session boundary lagging behind the seven-type diagnostic contract.
+  await resetMockState()
+  const question = makeSessionQuestion({ id: `q-${errorType}`, errorType })
+
+  await expect(submitSession(makeSession({ sessionId: `s-${errorType}`, questions: [question] })))
+    .resolves.toEqual({ sessionId: `s-${errorType}` })
+})
+
 test('updateSettings returns and persists the merged settings', async () => {
   // Catches a mock adapter mutation that acknowledges settings changes without merging them into storage.
   await resetMockState()
@@ -518,4 +521,250 @@ test('session and error commands reject incomplete critical shapes without chang
   const after = await bootstrap()
   expect(after.sessions).toEqual(before.sessions)
   expect(after.errors).toEqual(before.errors)
+})
+
+test('computes a cloned summary from the exact persisted session and rejects unknown identifiers', async () => {
+  // Catches summaries being derived from seed data, a different session, or a caller-mutable cached object.
+  await resetMockState()
+  const session = makeSession({
+    sessionId: 'summary/session',
+    questions: [
+      makeSessionQuestion(),
+      makeSessionQuestion({
+        id: 'q-summary-wrong',
+        topic: 'Calculus',
+        errorType: 'calculation',
+        result: {
+          status: 'wrong',
+          attempts: [{ answer: '41', submittedAt: '2026-08-06T12:00:00.000Z', isCorrect: false }],
+          hintsUsed: 2,
+          solvedAtHintLevel: null,
+        },
+      }),
+    ],
+  })
+  await submitSession(session)
+
+  const summary = await getSessionSummary('summary/session')
+  expect(summary).toMatchObject({
+    accuracy: 50,
+    correctCount: 1,
+    wrongCount: 1,
+    errorDistribution: { calculation: 1 },
+    wrongQuestions: [expect.objectContaining({ id: 'q-summary-wrong' })],
+  })
+  summary.wrongQuestions[0].id = 'caller-mutation'
+  await expect(getSessionSummary('summary/session')).resolves.toMatchObject({
+    wrongQuestions: [expect.objectContaining({ id: 'q-summary-wrong' })],
+  })
+  await expect(getSessionSummary('missing')).rejects.toMatchObject({ status: 404, code: 'NOT_FOUND' })
+  await expect(getSessionSummary('   ')).rejects.toMatchObject({ status: 400, code: 'INVALID_INPUT' })
+})
+
+test('upserts recurring errors idempotently by occurrence identity and preserves one canonical card ID', async () => {
+  // Catches retrying the same session occurrence inflating recurrence or replacing the durable card identity.
+  await resetMockState()
+  const first = makeError({
+    id: 'error-first',
+    questionId: 'question-recurring',
+    firstOccurredAt: '2026-08-01T10:00:00.000Z',
+    lastOccurredAt: '2026-08-01T10:00:00.000Z',
+    occurrences: ['2026-08-01T10:00:00.000Z'],
+    occurrenceKeys: ['session:s-one:question:question-recurring'],
+    occurrenceRecords: [{ key: 'session:s-one:question:question-recurring', occurredAt: '2026-08-01T10:00:00.000Z' }],
+  })
+  const repeated = makeError({
+    id: 'error-retry-id',
+    questionId: 'question-recurring',
+    errorDescription: 'Second diagnosis',
+    firstOccurredAt: '2026-08-06T10:00:00.000Z',
+    lastOccurredAt: '2026-08-06T10:00:00.000Z',
+    occurrences: ['2026-08-06T10:00:00.000Z'],
+    occurrenceKeys: ['session:s-two:question:question-recurring'],
+    occurrenceRecords: [{ key: 'session:s-two:question:question-recurring', occurredAt: '2026-08-06T10:00:00.000Z' }],
+  })
+
+  await upsertErrors([first])
+  await upsertErrors([first])
+  const { errors } = await upsertErrors([repeated])
+  const merged = errors.find((item) => item.questionId === 'question-recurring')
+
+  expect(merged).toMatchObject({
+    id: 'error-first',
+    repeatCount: 2,
+    firstOccurredAt: '2026-08-01T10:00:00.000Z',
+    lastOccurredAt: '2026-08-06T10:00:00.000Z',
+    errorDescription: 'Second diagnosis',
+    occurrenceKeys: [
+      'session:s-one:question:question-recurring',
+      'session:s-two:question:question-recurring',
+    ],
+  })
+  expect((await bootstrap()).errors.filter((item) => item.questionId === 'question-recurring')).toEqual([merged])
+})
+
+test('rejects malformed or colliding error upserts atomically', async () => {
+  // Catches a partially merged batch or duplicate entity ID corrupting a different question's identity.
+  await resetMockState()
+  const before = (await bootstrap()).errors
+
+  await expect(upsertErrors([
+    makeError({ id: 'valid-before-failure', questionId: 'q-valid-before-failure' }),
+    makeError({ id: '', questionId: 'q-invalid' }),
+  ])).rejects.toMatchObject({ code: 'INVALID_INPUT' })
+  await expect(upsertErrors([
+    makeError({ id: before[0].id, questionId: 'different-question' }),
+  ])).rejects.toMatchObject({ code: 'DUPLICATE_ID' })
+
+  expect((await bootstrap()).errors).toEqual(before)
+})
+
+test('persists the redo, scheduled variant, correct verification, and guarded mastery as one provenance chain', async () => {
+  // Catches lifecycle transitions that save only a task/set/error fragment or accept an unrelated verification.
+  await resetMockState()
+  const attempt = { attemptedAt: '2026-08-06T10:00:00.000Z', answer: '5', isCorrect: true, timeSpent: 45 }
+  await expect(submitRedo('e1', attempt)).resolves.toMatchObject({
+    error: { id: 'e1', status: 'verification_due', redoHistory: [expect.objectContaining(attempt)] },
+  })
+
+  const scheduled = await scheduleErrorVariant('e1')
+  expect(scheduled).toMatchObject({
+    error: { id: 'e1', questionId: 'q-err-1', status: 'verification_due', verificationVariantId: 'variant-q-err-1-1' },
+    exerciseSet: {
+      id: 'variant-q-err-1-1',
+      sourceQuestionId: 'q-err-1',
+      questions: [expect.objectContaining({ variantOf: 'q-err-1' })],
+    },
+    task: {
+      id: 'task-variant-q-err-1-1',
+      exerciseSetId: 'variant-q-err-1-1',
+      sourceQuestionId: 'q-err-1',
+      verificationForErrorId: 'e1',
+    },
+  })
+  const afterSchedule = await bootstrap()
+  expect(afterSchedule.exerciseSets[scheduled.exerciseSet.id]).toEqual(scheduled.exerciseSet)
+  expect(afterSchedule.tasks).toContainEqual(scheduled.task)
+  expect(afterSchedule.errors.find((item) => item.id === 'e1')).toEqual(scheduled.error)
+
+  await expect(verifyErrorVariant('e1', {
+    variantId: scheduled.exerciseSet.id,
+    isCorrect: true,
+    verifiedAt: '2026-08-06T11:00:00.000Z',
+  })).resolves.toMatchObject({
+    error: {
+      id: 'e1',
+      status: 'verification_due',
+      variantVerifiedAt: '2026-08-06T11:00:00.000Z',
+      variantVerification: { variantId: scheduled.exerciseSet.id, isCorrect: true },
+    },
+  })
+  await expect(markErrorMastered('e1')).resolves.toMatchObject({ error: { id: 'e1', status: 'mastered' } })
+  await expect(bootstrap()).resolves.toMatchObject({
+    errors: expect.arrayContaining([expect.objectContaining({ id: 'e1', status: 'mastered' })]),
+  })
+})
+
+test('rejects mastery and mismatched verification without changing persisted lifecycle evidence', async () => {
+  // Catches bypassing the independent-variant gate or accepting a forged variant ID.
+  await resetMockState()
+  await expect(markErrorMastered('e1')).rejects.toMatchObject({
+    status: 409,
+    code: 'MASTERY_GATE_NOT_MET',
+    message: 'Complete the independent variant before marking this mastered',
+  })
+  await submitRedo('e1', { attemptedAt: '2026-08-06T10:00:00.000Z', answer: '5', isCorrect: true, timeSpent: 45 })
+  const scheduled = await scheduleErrorVariant('e1')
+  const before = (await bootstrap()).errors.find((item) => item.id === 'e1')
+
+  await expect(verifyErrorVariant('e1', {
+    variantId: 'variant-for-another-error',
+    isCorrect: true,
+    verifiedAt: '2026-08-06T11:00:00.000Z',
+  })).rejects.toMatchObject({ code: 'INVALID_INPUT' })
+  expect((await bootstrap()).errors.find((item) => item.id === 'e1')).toEqual(before)
+  expect(scheduled.error.verificationVariantId).toBe(scheduled.exerciseSet.id)
+})
+
+test('rejects verification when the persisted variant task no longer proves the exact error provenance', async () => {
+  // Catches trusting only the caller's variant ID after the durable task/error relationship was corrupted.
+  await resetMockState()
+  await submitRedo('e1', { attemptedAt: '2026-08-06T10:00:00.000Z', answer: '5', isCorrect: true, timeSpent: 45 })
+  const scheduled = await scheduleErrorVariant('e1')
+  const envelope = JSON.parse(localStorage.getItem('nome-ai.student-state.v1'))
+  envelope.data.tasks = envelope.data.tasks.map((task) => (
+    task.id === scheduled.task.id ? { ...task, verificationForErrorId: 'another-error' } : task
+  ))
+  localStorage.setItem('nome-ai.student-state.v1', JSON.stringify(envelope))
+  const before = (await bootstrap()).errors.find((item) => item.id === 'e1')
+
+  await expect(verifyErrorVariant('e1', {
+    variantId: scheduled.exerciseSet.id,
+    isCorrect: true,
+    verifiedAt: '2026-08-06T11:00:00.000Z',
+  })).rejects.toMatchObject({ code: 'INVALID_INPUT' })
+
+  expect((await bootstrap()).errors.find((item) => item.id === 'e1')).toEqual(before)
+})
+
+test('rejects malformed verification evidence with a typed validation error', async () => {
+  // Catches null or partial audit evidence reaching the transition helper and throwing an untyped runtime error.
+  await resetMockState()
+
+  await expect(verifyErrorVariant('e1', null)).rejects.toMatchObject({ code: 'INVALID_INPUT' })
+  await expect(verifyErrorVariant('e1', { variantId: 'v1', isCorrect: true })).rejects.toMatchObject({ code: 'INVALID_INPUT' })
+})
+
+test('rejects invalid, missing, or out-of-order lifecycle targets without partial task/set writes', async () => {
+  // Catches target validation happening after a generated variant has already been persisted.
+  await resetMockState()
+  const before = await bootstrap()
+
+  await expect(scheduleErrorVariant('missing')).rejects.toMatchObject({ code: 'NOT_FOUND' })
+  await expect(scheduleErrorVariant('e1')).rejects.toMatchObject({ code: 'INVALID_INPUT' })
+  await expect(submitRedo('missing', { attemptedAt: '2026-08-06', answer: 'x', isCorrect: true, timeSpent: 1 }))
+    .rejects.toMatchObject({ code: 'NOT_FOUND' })
+  await expect(verifyErrorVariant('missing', { variantId: 'v1', isCorrect: true, verifiedAt: '2026-08-06' }))
+    .rejects.toMatchObject({ code: 'NOT_FOUND' })
+
+  const after = await bootstrap()
+  expect(after.tasks).toEqual(before.tasks)
+  expect(after.exerciseSets).toEqual(before.exerciseSets)
+  expect(after.errors).toEqual(before.errors)
+})
+
+test('uses the documented real diagnosis routes and request bodies', async () => {
+  // Catches the real adapter drifting while equivalent mock-mode lifecycle tests remain green.
+  const get = vi.fn((path) => Promise.resolve({ path }))
+  const post = vi.fn((path, body) => Promise.resolve({ path, body }))
+  const patch = vi.fn((path, body) => Promise.resolve({ path, body }))
+  vi.resetModules()
+  vi.doMock('./client', () => ({
+    ApiError: class ApiError extends Error {},
+    http: { get, post, patch },
+    isMockMode: false,
+  }))
+
+  try {
+    const realApi = await import('./index')
+    const items = [makeError()]
+    const attempt = { attemptedAt: '2026-08-06', answer: '2x', isCorrect: true, timeSpent: 12 }
+    const verification = { variantId: 'variant/1', isCorrect: true, verifiedAt: '2026-08-07' }
+    await realApi.getSessionSummary('session/id')
+    await realApi.upsertErrors(items)
+    await realApi.submitRedo('error/id', attempt)
+    await realApi.scheduleErrorVariant('error/id')
+    await realApi.verifyErrorVariant('error/id', verification)
+    await realApi.markErrorMastered('error/id')
+
+    expect(get).toHaveBeenCalledWith('/api/summary/session%2Fid')
+    expect(post).toHaveBeenNthCalledWith(1, '/api/errors/batch', { items })
+    expect(post).toHaveBeenNthCalledWith(2, '/api/errors/error%2Fid/redo', attempt)
+    expect(post).toHaveBeenNthCalledWith(3, '/api/errors/error%2Fid/variant')
+    expect(post).toHaveBeenNthCalledWith(4, '/api/errors/error%2Fid/verification', verification)
+    expect(patch).toHaveBeenCalledWith('/api/errors/error%2Fid', { status: 'mastered' })
+  } finally {
+    vi.doUnmock('./client')
+    vi.resetModules()
+  }
 })

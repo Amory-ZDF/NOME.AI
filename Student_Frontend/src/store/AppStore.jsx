@@ -4,6 +4,8 @@ import { defaultAppServices } from './services'
 import { buildAdjustmentRequest } from '../features/tasks/adjustmentRules'
 import { isTaskAdjustmentEligible } from '../features/tasks/taskRules'
 import { isCompleteVariantResult, isRenderableExerciseSet } from '../features/exercise/exerciseContracts'
+import { mergeErrorCards } from '../features/errors/errorCards'
+import { applyRedoAttempt, canMarkMastered, recordVariantVerification } from '../features/errors/masteryRules'
 
 const AppContext = createContext(null)
 
@@ -23,6 +25,7 @@ export function AppProvider({ children, services = defaultAppServices }) {
   const [settings, setSettings] = useState(null)
   const [exerciseCache, setExerciseCache] = useState({})
   const [sessions, setSessions] = useState({})
+  const [sessionSummaries, setSessionSummaries] = useState({})
   const [lastSession, setLastSession] = useState(null)
   const [toast, setToast] = useState(null)
   const [pendingActions, setPendingActions] = useState(() => new Set())
@@ -43,6 +46,7 @@ export function AppProvider({ children, services = defaultAppServices }) {
   const settingsRef = useRef(null)
   const exerciseCacheRef = useRef({})
   const sessionsRef = useRef({})
+  const sessionSummariesRef = useRef({})
   const lastSessionRef = useRef(null)
 
   const replaceTasks = useCallback((next) => {
@@ -72,6 +76,10 @@ export function AppProvider({ children, services = defaultAppServices }) {
   const replaceSessions = useCallback((next) => {
     sessionsRef.current = next
     setSessions(next)
+  }, [])
+  const replaceSessionSummaries = useCallback((next) => {
+    sessionSummariesRef.current = next
+    setSessionSummaries(next)
   }, [])
   const replaceLastSession = useCallback((next) => {
     lastSessionRef.current = next
@@ -106,6 +114,7 @@ export function AppProvider({ children, services = defaultAppServices }) {
       replaceExerciseCache({})
       const bootSessions = data.sessions || {}
       replaceSessions(bootSessions)
+      replaceSessionSummaries({})
       const persistedIds = Object.keys(bootSessions)
       persistedSessionIds.current = new Set(persistedIds)
       canonicalSessionIds.current = new Map(persistedIds.map((id) => [id, id]))
@@ -118,7 +127,7 @@ export function AppProvider({ children, services = defaultAppServices }) {
       }
       return undefined
     }
-  }, [replaceErrors, replaceExerciseCache, replaceNotes, replaceSessions, replaceSettings, replaceTaskAdjustments, replaceTasks, services])
+  }, [replaceErrors, replaceExerciseCache, replaceNotes, replaceSessionSummaries, replaceSessions, replaceSettings, replaceTaskAdjustments, replaceTasks, services])
 
   useEffect(() => {
     mounted.current = true
@@ -281,33 +290,128 @@ export function AppProvider({ children, services = defaultAppServices }) {
     }))
   }, [replaceErrors, runAction, services])
 
-  const markErrorMastered = useCallback((id) => runAction(`markErrorMastered:${id}`, 'errors', () => ({
+  const addSessionErrors = useCallback((items) => {
+    const actionNow = services.now()
+    const occurredAt = actionNow.toISOString()
+    const authoredItems = items.map((item) => ({
+      ...item,
+      id: item.id || services.createId(),
+      firstOccurredAt: item.firstOccurredAt || occurredAt,
+      lastOccurredAt: item.lastOccurredAt || occurredAt,
+    }))
+    return runAction('errors:add', 'errors', () => ({
+      snapshot: errorsRef.current,
+      optimistic: () => replaceErrors(mergeErrorCards(errorsRef.current, authoredItems)),
+      request: () => services.api.upsertErrors(authoredItems),
+      commit: (result) => {
+        if (Array.isArray(result?.errors)) replaceErrors(result.errors)
+      },
+      rollback: replaceErrors,
+    }))
+  }, [replaceErrors, runAction, services])
+
+  const markErrorMastered = useCallback((id) => {
+    const error = errorsRef.current.find((item) => item.id === id)
+    if (!canMarkMastered(error)) {
+      const gateError = new Error('Complete the independent variant before marking this mastered')
+      showToast(gateError.message, 'error')
+      return Promise.reject(gateError)
+    }
+    return runAction(`error:master:${id}`, 'errors', () => ({
     snapshot: errorsRef.current,
     optimistic: () => replaceErrors(errorsRef.current.map((error) => (error.id === id ? { ...error, status: 'mastered' } : error))),
     request: () => services.api.markErrorMastered(id),
     commit: () => showToast('Marked as mastered 鈥?keep it up!', 'success'),
     rollback: replaceErrors,
-  })), [replaceErrors, runAction, services, showToast])
+    }))
+  }, [replaceErrors, runAction, services, showToast])
 
   const recordRedo = useCallback((id, attempt) => {
     const actionNow = services.now()
     const recordedAttempt = attempt.attemptedAt ? attempt : { ...attempt, attemptedAt: actionNow.toISOString() }
-    return runAction(`recordRedo:${id}`, 'errors', () => ({
+    return runAction(`error:redo:${id}`, 'errors', () => ({
       snapshot: errorsRef.current,
       optimistic: () => replaceErrors(errorsRef.current.map((error) => (error.id === id
-        ? {
-            ...error,
-            redoHistory: [...error.redoHistory, recordedAttempt],
-            repeatCount: recordedAttempt.isCorrect ? error.repeatCount : error.repeatCount + 1,
-            lastOccurredAt: recordedAttempt.isCorrect ? error.lastOccurredAt : dateOnly(actionNow),
-            status: recordedAttempt.isCorrect ? (error.status === 'pending_review' ? 'reviewing' : error.status) : 'pending_review',
-          }
+        ? applyRedoAttempt(error, recordedAttempt)
         : error))),
       request: () => services.api.submitRedo(id, recordedAttempt),
-      commit: () => {},
+      commit: (result) => {
+        if (result?.error?.id === id) {
+          replaceErrors(errorsRef.current.map((error) => (error.id === id ? result.error : error)))
+        }
+      },
       rollback: replaceErrors,
     }))
   }, [replaceErrors, runAction, services])
+
+  const scheduleErrorVariant = useCallback((id) => {
+    const sourceError = errorsRef.current.find((error) => error.id === id)
+    if (!sourceError) return Promise.reject(new Error('Error item was not found.'))
+    return runAction(`error:variant:${id}`, 'errors', () => ({
+      snapshot: null,
+      optimistic: () => {},
+      request: async () => {
+        const result = await services.api.scheduleErrorVariant(id)
+        if (mounted.current && (
+          !isCompleteVariantResult(result, sourceError.questionId)
+          || result.task.verificationForErrorId !== id
+          || result.error?.id !== id
+          || result.error.questionId !== sourceError.questionId
+          || result.error.verificationVariantId !== result.exerciseSet.id
+        )) {
+          throw new Error('The generated verification variant is incomplete. Please try again.')
+        }
+        return result
+      },
+      commit: (result) => {
+        replaceErrors(errorsRef.current.map((error) => (error.id === id ? result.error : error)))
+        replaceExerciseCache({
+          ...exerciseCacheRef.current,
+          [`set:${result.exerciseSet.id}`]: result.exerciseSet,
+        })
+        if (!tasksRef.current.some((task) => task.id === result.task.id)) {
+          replaceTasks([...tasksRef.current, result.task])
+        }
+      },
+      rollback: () => {},
+    }))
+  }, [replaceErrors, replaceExerciseCache, replaceTasks, runAction, services])
+
+  const verifyErrorVariant = useCallback((id, result) => {
+    const actionNow = services.now()
+    const verification = result.verifiedAt
+      ? result
+      : { ...result, verifiedAt: actionNow.toISOString() }
+    return runAction(`error:variant:${id}`, 'errors', () => ({
+      snapshot: errorsRef.current,
+      optimistic: () => replaceErrors(errorsRef.current.map((error) => (
+        error.id === id ? recordVariantVerification(error, verification) : error
+      ))),
+      request: () => services.api.verifyErrorVariant(id, verification),
+      commit: (response) => {
+        if (response?.error?.id === id) {
+          replaceErrors(errorsRef.current.map((error) => (error.id === id ? response.error : error)))
+        }
+      },
+      rollback: replaceErrors,
+    }))
+  }, [replaceErrors, runAction, services])
+
+  const loadSessionSummary = useCallback((sessionId) => {
+    const cached = sessionSummariesRef.current[sessionId]
+    if (cached) return Promise.resolve(cached)
+    const actionKey = `summary:${sessionId}`
+    return runAction(actionKey, 'sessionSummaries', () => ({
+      snapshot: sessionSummariesRef.current,
+      optimistic: () => {},
+      request: () => services.api.getSessionSummary(sessionId),
+      commit: (summary) => replaceSessionSummaries({
+        ...sessionSummariesRef.current,
+        [sessionId]: summary,
+      }),
+      rollback: replaceSessionSummaries,
+    }))
+  }, [replaceSessionSummaries, runAction, services])
 
   const addNote = useCallback((note) => {
     const actionNow = services.now()
@@ -498,9 +602,9 @@ export function AppProvider({ children, services = defaultAppServices }) {
   return (
     <AppContext.Provider value={{
       booted: bootStatus === 'ready', bootStatus, bootError, pendingActions, retryBootstrap, isActionPending,
-      tasks, taskAdjustments, greeting, moduleStats, learningSummary, errors, notes, noteFolders, settings, exerciseCache, sessions, lastSession, toast,
+      tasks, taskAdjustments, greeting, moduleStats, learningSummary, errors, notes, noteFolders, settings, exerciseCache, sessions, sessionSummaries, lastSession, toast,
       showToast, completeTask, requestTaskAdjustment, addTask,
-      addErrors, markErrorMastered, recordRedo,
+      addErrors, addSessionErrors, markErrorMastered, recordRedo, scheduleErrorVariant, verifyErrorVariant, loadSessionSummary,
       addNote, updateNote, loadExerciseSet, saveSession, generateVariant, updateSettings,
     }}>
       {children}
