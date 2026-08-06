@@ -161,6 +161,7 @@ export function buildErrorCard({ question, session, id, occurredAt } = {}) {
     occurrences: occurrence ? [occurrence] : [],
     occurrenceKeys: occurrenceKey ? [occurrenceKey] : [],
     occurrenceRecords: occurrenceRecord ? [occurrenceRecord] : [],
+    hasIncompleteOccurrenceHistory: false,
     firstOccurredAt: occurrence,
     lastOccurredAt: occurrence,
     repeatCount: 1,
@@ -244,11 +245,31 @@ const normalizeOccurrenceRecords = (card, questionId, id) => {
   return deduplicateOccurrenceRecords(records)
 }
 
-const normalizeRepeatCount = (value, occurrenceRecords) => (
-  Number.isInteger(value) && value > 0
-    ? Math.max(value, occurrenceRecords.length)
-    : Math.max(1, occurrenceRecords.length)
+const hasExplicitOccurrenceIdentities = (card) => (
+  (Array.isArray(card.occurrenceRecords)
+    && card.occurrenceRecords.some((record) => (
+      isRecord(record) && nonemptyString(record.key)
+    )))
+  || (Array.isArray(card.occurrenceKeys)
+    && card.occurrenceKeys.some((key) => nonemptyString(key)))
 )
+
+const normalizeRepeatCount = (
+  value,
+  occurrenceRecords,
+  source,
+  hasIncompleteOccurrenceHistory,
+) => {
+  const identityCount = Math.max(1, occurrenceRecords.length)
+  const canPreserveLegacyAggregate = source === 'existing'
+    && hasIncompleteOccurrenceHistory
+    && Number.isInteger(value)
+    && value > 0
+
+  return canPreserveLegacyAggregate
+    ? Math.max(value, identityCount)
+    : identityCount
+}
 
 const normalizeRedoHistory = (value) => (
   Array.isArray(value) ? value.filter(isRecord).map(cloneData) : []
@@ -314,6 +335,16 @@ const normalizeCard = (card, source) => {
   const status = normalizeStatus(rawStatus, source)
   const lifecycleEvidenceAllowed = source === 'existing'
     && ERROR_CARD_STATUSES.has(rawStatus)
+  const hasExplicitOccurrenceIdentity = hasExplicitOccurrenceIdentities(card)
+  const hasExplicitCompletenessMarker = typeof card.hasIncompleteOccurrenceHistory === 'boolean'
+  const hasUnmarkedAggregateGap = !hasExplicitCompletenessMarker
+    && Number.isInteger(card.repeatCount)
+    && card.repeatCount > Math.max(1, occurrenceRecords.length)
+  const hasIncompleteOccurrenceHistory = source === 'existing'
+    ? card.hasIncompleteOccurrenceHistory === true
+      || !hasExplicitOccurrenceIdentity
+      || hasUnmarkedAggregateGap
+    : !hasExplicitOccurrenceIdentity
 
   return {
     ...cloneData(card),
@@ -324,7 +355,13 @@ const normalizeCard = (card, source) => {
     occurrenceRecords: occurrenceRecords.map(cloneData),
     firstOccurredAt,
     lastOccurredAt,
-    repeatCount: normalizeRepeatCount(card.repeatCount, occurrenceRecords),
+    repeatCount: normalizeRepeatCount(
+      card.repeatCount,
+      occurrenceRecords,
+      source,
+      hasIncompleteOccurrenceHistory,
+    ),
+    hasIncompleteOccurrenceHistory,
     status,
     redoHistory: normalizeRedoHistory(card.redoHistory),
     verificationVariantId: lifecycleEvidenceAllowed
@@ -372,6 +409,8 @@ const mergeRepeatedCard = (current, incoming) => {
       ?? incoming.lastOccurredAt
       ?? current.lastOccurredAt,
     repeatCount,
+    hasIncompleteOccurrenceHistory: current.hasIncompleteOccurrenceHistory
+      || incoming.hasIncompleteOccurrenceHistory,
     status: hasNewRecurrence ? 'pending_review' : current.status,
     redoHistory: mergeRedoHistory(current.redoHistory, incoming.redoHistory),
     verificationVariantId: hasNewRecurrence ? null : current.verificationVariantId,

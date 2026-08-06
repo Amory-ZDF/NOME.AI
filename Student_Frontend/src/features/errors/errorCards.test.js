@@ -414,7 +414,7 @@ describe('mergeErrorCards', () => {
     ])
   })
 
-  test('keeps an incoming aggregate repeat count monotonic when it also adds a new occurrence', () => {
+  test('increments a persisted legacy aggregate once for a new legacy-derived incoming identity', () => {
     const merged = mergeErrorCards([{
       id: 'e1',
       questionId: 'q1',
@@ -434,8 +434,9 @@ describe('mergeErrorCards', () => {
 
     expect(merged[0]).toMatchObject({
       id: 'e1',
-      repeatCount: 7,
+      repeatCount: 5,
       occurrences: ['2026-08-01', '2026-08-03'],
+      hasIncompleteOccurrenceHistory: true,
       status: 'pending_review',
       verificationVariantId: null,
       variantVerifiedAt: null,
@@ -443,11 +444,11 @@ describe('mergeErrorCards', () => {
     })
   })
 
-  test('treats a higher aggregate count as recurrence even when occurrence identity collides', () => {
+  test('ignores a higher incoming aggregate claim when its explicit occurrence identity collides', () => {
     const merged = mergeErrorCards([{
       id: 'e1',
       questionId: 'q1',
-      repeatCount: 4,
+      repeatCount: 1,
       occurrences: ['2026-08-01'],
       occurrenceKeys: ['legacy:q1:2026-08-01'],
       status: 'mastered',
@@ -465,11 +466,11 @@ describe('mergeErrorCards', () => {
 
     expect(merged[0]).toMatchObject({
       id: 'e1',
-      repeatCount: 7,
+      repeatCount: 1,
       occurrences: ['2026-08-01'],
-      status: 'pending_review',
-      verificationVariantId: null,
-      variantVerifiedAt: null,
+      status: 'mastered',
+      verificationVariantId: 'variant-old',
+      variantVerifiedAt: '2026-08-02',
       redoHistory: [{ attemptedAt: '2026-08-02', answer: '42', isCorrect: true }],
     })
   })
@@ -478,7 +479,7 @@ describe('mergeErrorCards', () => {
     const existing = [{
       id: 'e1',
       questionId: 'q1',
-      repeatCount: 7,
+      repeatCount: 1,
       occurrences: ['2026-08-01'],
       occurrenceKeys: ['legacy:q1:2026-08-01'],
       status: 'verification_due',
@@ -493,12 +494,12 @@ describe('mergeErrorCards', () => {
       status: 'reviewing',
     }
 
-    const equal = mergeErrorCards(existing, [{ ...sameOccurrence, repeatCount: 7 }])[0]
-    const lower = mergeErrorCards(existing, [{ ...sameOccurrence, repeatCount: 5 }])[0]
+    const equal = mergeErrorCards(existing, [{ ...sameOccurrence, repeatCount: 1 }])[0]
+    const lower = mergeErrorCards(existing, [{ ...sameOccurrence, repeatCount: 0 }])[0]
 
     for (const card of [equal, lower]) {
       expect(card).toMatchObject({
-        repeatCount: 7,
+        repeatCount: 1,
         status: 'verification_due',
         verificationVariantId: 'variant-current',
         variantVerifiedAt: '2026-08-02',
@@ -517,6 +518,135 @@ describe('mergeErrorCards', () => {
       status: 'pending_review',
       verificationVariantId: null,
       variantVerifiedAt: null,
+    })
+  })
+
+  test('increments exactly once for a genuinely new explicit identity despite a higher count claim', () => {
+    const merged = mergeErrorCards([{
+      id: 'e1',
+      questionId: 'q1',
+      repeatCount: 1,
+      occurrences: ['2026-08-01'],
+      occurrenceKeys: ['session:s1:question:q1'],
+      status: 'mastered',
+      verificationVariantId: 'variant-old',
+      variantVerifiedAt: '2026-08-02',
+      variantVerification: {
+        variantId: 'variant-old',
+        isCorrect: true,
+        verifiedAt: '2026-08-02',
+      },
+    }], [{
+      id: 'e2',
+      questionId: 'q1',
+      repeatCount: 7,
+      occurrences: ['2026-08-03'],
+      occurrenceKeys: ['session:s2:question:q1'],
+    }])
+
+    expect(merged[0]).toMatchObject({
+      id: 'e1',
+      repeatCount: 2,
+      occurrenceKeys: ['session:s1:question:q1', 'session:s2:question:q1'],
+      status: 'pending_review',
+      verificationVariantId: null,
+      variantVerifiedAt: null,
+      variantVerification: null,
+    })
+  })
+
+  test('derives a standalone incoming count from one explicit occurrence record', () => {
+    const merged = mergeErrorCards([], [{
+      id: 'e1',
+      questionId: 'q1',
+      repeatCount: 7,
+      occurrenceRecords: [{
+        key: 'session:s1:question:q1',
+        occurredAt: '2026-08-01T09:00:00.000Z',
+      }],
+      hasIncompleteOccurrenceHistory: true,
+      status: 'mastered',
+    }])
+
+    expect(merged[0]).toMatchObject({
+      repeatCount: 1,
+      occurrenceKeys: ['session:s1:question:q1'],
+      hasIncompleteOccurrenceHistory: false,
+      status: 'pending_review',
+    })
+  })
+
+  test('marks incoming legacy identities incomplete without trusting their aggregate count', () => {
+    const merged = mergeErrorCards([], [{
+      id: 'e1',
+      questionId: 'q1',
+      repeatCount: 7,
+      occurrences: ['2026-08-01'],
+      status: 'reviewing',
+    }])
+
+    expect(merged[0]).toMatchObject({
+      repeatCount: 1,
+      occurrenceKeys: ['legacy:q1:2026-08-01'],
+      hasIncompleteOccurrenceHistory: true,
+      status: 'pending_review',
+    })
+  })
+
+  test('preserves a persisted legacy aggregate across normalization and reload', () => {
+    const normalized = mergeErrorCards([{
+      id: 'e1',
+      questionId: 'q1',
+      repeatCount: 7,
+      occurrences: ['2026-08-01'],
+      status: 'pending_review',
+    }], [])[0]
+    const reloaded = mergeErrorCards([normalized], [])[0]
+
+    for (const card of [normalized, reloaded]) {
+      expect(card).toMatchObject({
+        repeatCount: 7,
+        occurrenceKeys: ['legacy:q1:2026-08-01'],
+        hasIncompleteOccurrenceHistory: true,
+      })
+    }
+  })
+
+  test('infers incomplete history for a pre-marker aggregate with partial stable identities', () => {
+    const normalized = mergeErrorCards([{
+      id: 'e1',
+      questionId: 'q1',
+      repeatCount: 7,
+      occurrences: ['2026-08-01'],
+      occurrenceKeys: ['session:s1:question:q1'],
+      status: 'pending_review',
+    }], [])[0]
+    const reloaded = mergeErrorCards([normalized], [])[0]
+
+    for (const card of [normalized, reloaded]) {
+      expect(card).toMatchObject({
+        repeatCount: 7,
+        occurrenceKeys: ['session:s1:question:q1'],
+        hasIncompleteOccurrenceHistory: true,
+      })
+    }
+  })
+
+  test('does not preserve an aggregate gap when existing history is explicitly complete', () => {
+    const normalized = mergeErrorCards([{
+      id: 'e1',
+      questionId: 'q1',
+      repeatCount: 7,
+      occurrences: ['2026-08-01'],
+      occurrenceKeys: ['session:s1:question:q1'],
+      hasIncompleteOccurrenceHistory: false,
+      status: 'pending_review',
+    }], [])[0]
+
+    expect(normalized).toMatchObject({
+      repeatCount: 1,
+      occurrenceKeys: ['session:s1:question:q1'],
+      hasIncompleteOccurrenceHistory: false,
     })
   })
 
@@ -563,11 +693,11 @@ describe('mergeErrorCards', () => {
     expect(existing).toEqual(snapshot)
   })
 
-  test('clears the complete verification audit when a same-key aggregate count increases', () => {
+  test('preserves the complete verification audit when only a same-key aggregate claim increases', () => {
     const merged = mergeErrorCards([{
       id: 'e1',
       questionId: 'q1',
-      repeatCount: 4,
+      repeatCount: 1,
       occurrences: ['2026-08-01'],
       occurrenceKeys: ['legacy:q1:2026-08-01'],
       status: 'mastered',
@@ -587,11 +717,15 @@ describe('mergeErrorCards', () => {
     }])
 
     expect(merged[0]).toMatchObject({
-      repeatCount: 7,
-      status: 'pending_review',
-      verificationVariantId: null,
-      variantVerifiedAt: null,
-      variantVerification: null,
+      repeatCount: 1,
+      status: 'mastered',
+      verificationVariantId: 'variant-old',
+      variantVerifiedAt: '2026-08-02',
+      variantVerification: {
+        variantId: 'variant-old',
+        isCorrect: true,
+        verifiedAt: '2026-08-02',
+      },
     })
   })
 
@@ -606,7 +740,7 @@ describe('mergeErrorCards', () => {
       id: 'e1',
       questionId: 'q1',
       sessionId: 's1',
-      repeatCount: 4,
+      repeatCount: 1,
       occurrences: ['2026-08-01T09:00:00.000Z'],
       occurrenceKeys: ['session:s1:question:q1'],
       status: 'mastered',
@@ -619,7 +753,7 @@ describe('mergeErrorCards', () => {
       id: 'replay',
       questionId: 'q1',
       sessionId: 's1',
-      repeatCount: 4,
+      repeatCount: 1,
       occurrences: ['2026-08-01T09:00:00.000Z'],
       occurrenceKeys: ['session:s1:question:q1'],
       status: 'mastered',
@@ -634,7 +768,7 @@ describe('mergeErrorCards', () => {
 
     expect(merged[0]).toMatchObject({
       id: 'e1',
-      repeatCount: 4,
+      repeatCount: 1,
       status: 'mastered',
       verificationVariantId: 'variant-current',
       variantVerifiedAt: '2026-08-02T12:00:00.000Z',
