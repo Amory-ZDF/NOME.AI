@@ -357,7 +357,8 @@ export function AppProvider({ children, services = defaultAppServices }) {
         const exerciseSet = await (taskId
           ? services.api.getExerciseSet(taskId)
           : services.api.getBankExerciseSet(bankSetId))
-        if (mounted.current && !isRenderableExerciseSet(exerciseSet)) {
+        if (mounted.current && (!isRenderableExerciseSet(exerciseSet)
+          || (taskId && exerciseSet.taskId !== taskId))) {
           throw new Error('Exercise data is incomplete or invalid.')
         }
         return exerciseSet
@@ -464,7 +465,7 @@ export function AppProvider({ children, services = defaultAppServices }) {
       optimistic: () => {},
       request: async () => {
         const result = await services.api.generateVariant(questionId)
-        if (mounted.current && !isCompleteVariantResult(result)) {
+        if (mounted.current && !isCompleteVariantResult(result, questionId)) {
           throw new Error('The generated variant is incomplete. Please try again.')
         }
         return result

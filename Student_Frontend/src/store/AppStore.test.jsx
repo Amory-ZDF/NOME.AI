@@ -42,8 +42,15 @@ const validExerciseSet = (overrides = {}) => ({
 })
 
 const validVariant = (overrides = {}) => {
+  const sourceQuestionId = overrides.sourceQuestionId || 'q-source'
   const exerciseSet = {
-    ...validExerciseSet({ id: 'variant-1', taskId: 'variant-task-1', title: 'Variant' }),
+    ...validExerciseSet({
+      id: 'variant-1',
+      taskId: 'variant-task-1',
+      title: 'Variant',
+      sourceQuestionId,
+      questions: [validQuestion({ id: 'variant-q1', variantOf: sourceQuestionId })],
+    }),
     ...overrides.exerciseSet,
   }
   const task = overrides.task === null
@@ -54,6 +61,7 @@ const validVariant = (overrides = {}) => {
         exerciseSetId: exerciseSet.id,
         type: 'ai_recommended',
         status: 'pending',
+        sourceQuestionId,
         ...overrides.task,
       }
   return { exerciseSet, task }
@@ -73,7 +81,7 @@ function createApi(overrides = {}) {
     getExerciseSet: (taskId) => Promise.resolve(validExerciseSet({ taskId })),
     getBankExerciseSet: (setId) => Promise.resolve(validExerciseSet({ id: setId, taskId: null, title: 'Bank set' })),
     submitSession: () => Promise.resolve({ sessionId: 's1' }),
-    generateVariant: () => Promise.resolve(validVariant()),
+    generateVariant: (sourceQuestionId) => Promise.resolve(validVariant({ sourceQuestionId })),
     updateSettings: () => Promise.resolve({ settings: bootData.settings }),
     ...overrides,
   }
@@ -204,6 +212,41 @@ test.each([
   })
   expect(getExerciseSet).toHaveBeenCalledTimes(2)
   expect(harness.app.exerciseCache['task:invalid-task']).toEqual(recoveredSet)
+})
+
+test.each([
+  ['a missing task ID', validExerciseSet({ taskId: undefined })],
+  ['a different task ID', validExerciseSet({ taskId: 'another-task' })],
+])('rejects a renderable task set with %s before caching, then retries the requested task', async (_, wrongSet) => {
+  const recoveredSet = validExerciseSet({ taskId: 'expected-task', title: 'Expected task set' })
+  const getExerciseSet = vi.fn()
+    .mockResolvedValueOnce(wrongSet)
+    .mockResolvedValueOnce(recoveredSet)
+  const harness = await renderApp(createApi({ getExerciseSet }))
+
+  await act(async () => {
+    await expect(harness.app.loadExerciseSet({ taskId: 'expected-task' }))
+      .rejects.toThrow('Exercise data is incomplete or invalid.')
+  })
+  expect(harness.app.exerciseCache['task:expected-task']).toBeUndefined()
+  expect(harness.app.isActionPending('exercise:load:expected-task')).toBe(false)
+
+  await act(async () => {
+    await expect(harness.app.loadExerciseSet({ taskId: 'expected-task' })).resolves.toEqual(recoveredSet)
+  })
+  expect(getExerciseSet).toHaveBeenCalledTimes(2)
+  expect(harness.app.exerciseCache['task:expected-task']).toEqual(recoveredSet)
+})
+
+test('accepts a renderable bank set without inventing a returned-ID provenance requirement', async () => {
+  const bankSet = validExerciseSet({ id: undefined, taskId: undefined, title: 'ID-free bank set' })
+  const getBankExerciseSet = vi.fn(() => Promise.resolve(bankSet))
+  const harness = await renderApp(createApi({ getBankExerciseSet }))
+
+  await act(async () => {
+    await expect(harness.app.loadExerciseSet({ bankSetId: 'bank-route-id' })).resolves.toEqual(bankSet)
+  })
+  expect(harness.app.exerciseCache['bank:bank-route-id']).toEqual(bankSet)
 })
 
 test.each([
@@ -609,15 +652,21 @@ test('stores generated variants in cache and adds their task only once', async (
 })
 
 test.each([
-  ['a missing task', () => validVariant({ task: null })],
-  ['a missing task ID', () => validVariant({ task: { id: '' } })],
-  ['a missing exercise-set ID', () => validVariant({ exerciseSet: { id: '' } })],
-  ['a mismatched exercise-set ID', () => validVariant({ task: { exerciseSetId: 'another-set' } })],
-  ['a non-recommended task type', () => validVariant({ task: { type: 'teacher_assigned' } })],
-  ['a non-pending task status', () => validVariant({ task: { status: 'completed' } })],
-  ['an empty generated question list', () => validVariant({ exerciseSet: { questions: [] } })],
+  ['a missing task', () => validVariant({ sourceQuestionId: 'q-invalid-variant', task: null })],
+  ['a missing task ID', () => validVariant({ sourceQuestionId: 'q-invalid-variant', task: { id: '' } })],
+  ['a missing exercise-set ID', () => validVariant({ sourceQuestionId: 'q-invalid-variant', exerciseSet: { id: '' } })],
+  ['a mismatched exercise-set ID', () => validVariant({ sourceQuestionId: 'q-invalid-variant', task: { exerciseSetId: 'another-set' } })],
+  ['a non-recommended task type', () => validVariant({ sourceQuestionId: 'q-invalid-variant', task: { type: 'teacher_assigned' } })],
+  ['a non-pending task status', () => validVariant({ sourceQuestionId: 'q-invalid-variant', task: { status: 'completed' } })],
+  ['an empty generated question list', () => validVariant({ sourceQuestionId: 'q-invalid-variant', exerciseSet: { questions: [] } })],
+  ['a missing set source', () => validVariant({ sourceQuestionId: 'q-invalid-variant', exerciseSet: { sourceQuestionId: undefined } })],
+  ['the wrong set source', () => validVariant({ sourceQuestionId: 'q-invalid-variant', exerciseSet: { sourceQuestionId: 'another-source' } })],
+  ['a missing task source', () => validVariant({ sourceQuestionId: 'q-invalid-variant', task: { sourceQuestionId: undefined } })],
+  ['the wrong task source', () => validVariant({ sourceQuestionId: 'q-invalid-variant', task: { sourceQuestionId: 'another-source' } })],
+  ['a missing question source', () => validVariant({ sourceQuestionId: 'q-invalid-variant', exerciseSet: { questions: [validQuestion({ id: 'variant-q1', variantOf: undefined })] } })],
+  ['the wrong question source', () => validVariant({ sourceQuestionId: 'q-invalid-variant', exerciseSet: { questions: [validQuestion({ id: 'variant-q1', variantOf: 'another-source' })] } })],
 ])('rejects a generated variant with %s without mutating cache or tasks, then retries', async (_, makeMalformedResult) => {
-  const recoveredResult = validVariant()
+  const recoveredResult = validVariant({ sourceQuestionId: 'q-invalid-variant' })
   const generateVariant = vi.fn()
     .mockResolvedValueOnce(makeMalformedResult())
     .mockResolvedValueOnce(recoveredResult)

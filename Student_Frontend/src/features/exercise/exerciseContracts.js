@@ -52,8 +52,11 @@ export function isRenderableExerciseSet(exerciseSet) {
   return new Set(ids).size === ids.length
 }
 
-export function isCompleteVariantResult(result) {
-  if (!isRecord(result) || !isRenderableExerciseSet(result.exerciseSet) || !isRecord(result.task)) return false
+export function isCompleteVariantResult(result, sourceQuestionId) {
+  if (!isNonemptyString(sourceQuestionId)
+    || !isRecord(result)
+    || !isRenderableExerciseSet(result.exerciseSet)
+    || !isRecord(result.task)) return false
   const { exerciseSet, task } = result
   return isNonemptyString(exerciseSet.id)
     && isNonemptyString(task.id)
@@ -61,4 +64,7 @@ export function isCompleteVariantResult(result) {
     && task.exerciseSetId === exerciseSet.id
     && task.type === 'ai_recommended'
     && task.status === 'pending'
+    && exerciseSet.sourceQuestionId === sourceQuestionId
+    && task.sourceQuestionId === sourceQuestionId
+    && exerciseSet.questions.every((question) => question.variantOf === sourceQuestionId)
 }

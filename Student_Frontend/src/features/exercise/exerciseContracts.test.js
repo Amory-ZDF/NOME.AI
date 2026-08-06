@@ -3,6 +3,8 @@ import { bankExerciseSets, exerciseSets } from '../../data/mockData'
 import { createVariantExercise } from './variantFactory'
 import { isCompleteVariantResult, isRenderableExerciseSet } from './exerciseContracts'
 
+const VARIANT_SOURCE_ID = 'source-q1'
+
 const completeHints = () => [1, 2, 3, 4, 5].map((level) => ({
   level,
   title: `Hint ${level}`,
@@ -33,7 +35,15 @@ const validSet = (overrides = {}) => ({
 })
 
 const validVariant = (overrides = {}) => {
-  const exerciseSet = { ...validSet({ id: 'variant-1', taskId: 'variant-task-1' }), ...overrides.exerciseSet }
+  const exerciseSet = {
+    ...validSet({
+      id: 'variant-1',
+      taskId: 'variant-task-1',
+      sourceQuestionId: VARIANT_SOURCE_ID,
+      questions: [validQuestion({ id: 'variant-q1', variantOf: VARIANT_SOURCE_ID })],
+    }),
+    ...overrides.exerciseSet,
+  }
   const task = overrides.task === null
     ? null
     : {
@@ -42,6 +52,7 @@ const validVariant = (overrides = {}) => {
         exerciseSetId: exerciseSet.id,
         type: 'ai_recommended',
         status: 'pending',
+        sourceQuestionId: VARIANT_SOURCE_ID,
         ...overrides.task,
       }
   return {
@@ -103,8 +114,12 @@ describe('isCompleteVariantResult', () => {
         taskId: `variant-task-${index}`,
         createdAt: '2026-08-06T10:00:00.000Z',
       })
-      expect(isCompleteVariantResult(result), sourceQuestion.topic).toBe(true)
+      expect(isCompleteVariantResult(result, sourceQuestion.id), sourceQuestion.topic).toBe(true)
     }
+  })
+
+  test('requires an expected source question ID', () => {
+    expect(isCompleteVariantResult(validVariant())).toBe(false)
   })
 
   test.each([
@@ -116,7 +131,13 @@ describe('isCompleteVariantResult', () => {
     ['the wrong task type', { task: { type: 'teacher_assigned' } }],
     ['the wrong task status', { task: { status: 'completed' } }],
     ['an invalid exercise set', { exerciseSet: { questions: [] } }],
+    ['a missing set source', { exerciseSet: { sourceQuestionId: undefined } }],
+    ['the wrong set source', { exerciseSet: { sourceQuestionId: 'another-source' } }],
+    ['a missing task source', { task: { sourceQuestionId: undefined } }],
+    ['the wrong task source', { task: { sourceQuestionId: 'another-source' } }],
+    ['a missing question source', { exerciseSet: { questions: [validQuestion({ id: 'variant-q1', variantOf: undefined })] } }],
+    ['the wrong question source', { exerciseSet: { questions: [validQuestion({ id: 'variant-q1', variantOf: 'another-source' })] } }],
   ])('rejects a generated result with %s', (_, overrides) => {
-    expect(isCompleteVariantResult(validVariant(overrides))).toBe(false)
+    expect(isCompleteVariantResult(validVariant(overrides), VARIANT_SOURCE_ID)).toBe(false)
   })
 })

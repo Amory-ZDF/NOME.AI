@@ -461,7 +461,7 @@ export default function Exercise({ bankMode = false }) {
     try {
       const result = await generateVariant(q)
       if (!isCurrentPage(actionLoadKey)) return
-      if (!isCompleteVariantResult(result)) {
+      if (!isCompleteVariantResult(result, q.id)) {
         showToast('The generated variant is incomplete. Please try again.', 'error')
         return
       }

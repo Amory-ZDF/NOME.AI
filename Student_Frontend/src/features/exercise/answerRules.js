@@ -1,4 +1,20 @@
 const normalize = (answer) => String(answer ?? '').trim().toLowerCase().replace(/\s+/g, ' ')
+const numericKeywordPattern = /^([+-]?(?:\d+(?:\.\d+)?|\.\d+))(?:%| percent)?$/
+const numericTokenPattern = /(?:^|[^a-z0-9_.%+*/^\-])([+-]?(?:\d+(?:\.\d+)?|\.\d+)(?:%| percent)?)(?![a-z0-9_%+*/^\-]|\.(?=[a-z0-9_]))/g
+
+const canonicalNumeric = (value) => {
+  const match = value.match(numericKeywordPattern)
+  if (!match) return null
+  return `${match[1]}${value.endsWith('%') || value.endsWith(' percent') ? '%' : ''}`
+}
+
+const matchesKeyword = (normalizedAnswer, keyword) => {
+  const normalizedKeyword = normalize(keyword)
+  const canonicalKeyword = canonicalNumeric(normalizedKeyword)
+  if (canonicalKeyword === null) return normalizedAnswer.includes(normalizedKeyword)
+  return [...normalizedAnswer.matchAll(numericTokenPattern)]
+    .some((match) => canonicalNumeric(match[1]) === canonicalKeyword)
+}
 
 export function validateAttempt(answer) {
   const value = String(answer ?? '').trim()
@@ -15,5 +31,5 @@ export function gradeAnswer(question, answer) {
     const optionText = normalize(question.options[question.correctIndex].replace(/^[A-D][.、\s]*/, ''))
     return { isCorrect: normalizedAnswer === letter || normalizedAnswer === optionText || normalizedAnswer.startsWith(`${letter}.`), normalizedAnswer }
   }
-  return { isCorrect: (question.acceptKeywords ?? []).some((keyword) => normalizedAnswer.includes(normalize(keyword))), normalizedAnswer }
+  return { isCorrect: (question.acceptKeywords ?? []).some((keyword) => matchesKeyword(normalizedAnswer, keyword)), normalizedAnswer }
 }

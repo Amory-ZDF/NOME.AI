@@ -12,7 +12,7 @@ import { ApiError, http, isMockMode } from './client'
 import { createSeedState } from '../data/mockData'
 import { createMockRepository } from './mockRepository'
 import { isTaskAdjustmentEligible } from '../features/tasks/taskRules'
-import { createVariantExercise } from '../features/exercise/variantFactory'
+import { createVariantExercise, normalizeVariantContent } from '../features/exercise/variantFactory'
 import { VARIANT_TEMPLATES } from '../data/variantTemplates'
 
 const repository = createMockRepository({ seedFactory: createSeedState })
@@ -396,6 +396,13 @@ export const generateVariant = async (sourceQuestionId) => {
     if (!Array.isArray(templates) || templates.length === 0) {
       throw invalid(`No variant templates are available for ${sourceQuestion.topic}`)
     }
+    const distinctTemplateIndexes = templates
+      .map((template, index) => ({ index, content: normalizeVariantContent(template?.content) }))
+      .filter(({ content }) => content !== normalizeVariantContent(sourceQuestion.content))
+      .map(({ index }) => index)
+    if (distinctTemplateIndexes.length === 0) {
+      throw invalid(`No distinct variant template is available for ${sourceQuestion.topic}`)
+    }
     const persistedVariantCount = Object.values(current.exerciseSets)
       .filter((exerciseSet) => exerciseSet.sourceQuestionId === sourceQuestionId)
       .length
@@ -410,7 +417,7 @@ export const generateVariant = async (sourceQuestionId) => {
 
     generated = createVariantExercise({
       sourceQuestion,
-      templateIndex: persistedVariantCount % templates.length,
+      templateIndex: distinctTemplateIndexes[persistedVariantCount % distinctTemplateIndexes.length],
       variantId,
       taskId,
       createdAt: new Date().toISOString(),

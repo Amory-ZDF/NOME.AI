@@ -16,6 +16,7 @@ import {
   updateNote,
   updateSettings,
 } from './index'
+import { isCompleteVariantResult } from '../features/exercise/exerciseContracts'
 
 const makeTask = (overrides = {}) => ({
   id: 't-new', title: 'New task', type: 'ai_recommended', subject: 'A-Level Math',
@@ -257,6 +258,60 @@ test('persists sessions and cycles deterministic variants atomically', async () 
   for (const generated of [first, second, third]) {
     expect(data.exerciseSets[generated.exerciseSet.id]).toEqual(generated.exerciseSet)
     expect(data.tasks).toContainEqual(generated.task)
+  }
+})
+
+test('chains variants through a different template while preserving source provenance', async () => {
+  await resetMockState()
+  const sourceSet = await getExerciseSet('t1')
+  const first = await generateVariant(sourceSet.questions[0].id)
+  const firstQuestion = first.exerciseSet.questions[0]
+
+  const second = await generateVariant(firstQuestion.id)
+  const secondQuestion = second.exerciseSet.questions[0]
+  const data = await bootstrap()
+
+  expect(secondQuestion.content).not.toBe(firstQuestion.content)
+  expect(isCompleteVariantResult(second, firstQuestion.id)).toBe(true)
+  expect(second.exerciseSet.sourceQuestionId).toBe(firstQuestion.id)
+  expect(second.task.sourceQuestionId).toBe(firstQuestion.id)
+  expect(secondQuestion.variantOf).toBe(firstQuestion.id)
+  expect(data.exerciseSets[first.exerciseSet.id]).toEqual(first.exerciseSet)
+  expect(data.exerciseSets[second.exerciseSet.id]).toEqual(second.exerciseSet)
+  expect(data.tasks).toEqual(expect.arrayContaining([first.task, second.task]))
+})
+
+test('rejects a source with no distinct template without persisting a partial variant', async () => {
+  await resetMockState()
+  const sourceQuestion = (await getExerciseSet('t1')).questions[0]
+  vi.resetModules()
+  vi.doMock('../data/variantTemplates', () => ({
+    VARIANT_TEMPLATES: {
+      [sourceQuestion.topic]: [{
+        ...structuredClone(sourceQuestion),
+        content: `  \n${sourceQuestion.content.toUpperCase()}\t `,
+      }],
+    },
+  }))
+
+  try {
+    const isolatedApi = await import('./index')
+    await isolatedApi.resetMockState()
+    const before = await isolatedApi.bootstrap()
+
+    await expect(isolatedApi.generateVariant(sourceQuestion.id)).rejects.toMatchObject({
+      name: 'ApiError',
+      status: 400,
+      code: 'INVALID_INPUT',
+      message: `No distinct variant template is available for ${sourceQuestion.topic}`,
+    })
+
+    const after = await isolatedApi.bootstrap()
+    expect(after.exerciseSets).toEqual(before.exerciseSets)
+    expect(after.tasks).toEqual(before.tasks)
+  } finally {
+    vi.doUnmock('../data/variantTemplates')
+    vi.resetModules()
   }
 })
 

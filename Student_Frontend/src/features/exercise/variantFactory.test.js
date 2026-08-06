@@ -146,6 +146,17 @@ describe('createVariantExercise', () => {
     expect(second.exerciseSet.questions[0].content).not.toBe(first.exerciseSet.questions[0].content)
   })
 
+  test('rejects a selected template whose normalized content matches the source question', () => {
+    const selectedContent = VARIANT_TEMPLATES[sourceQuestion.topic][0].content
+    const sameContentSource = {
+      ...sourceQuestion,
+      content: `  \n${selectedContent.toUpperCase()}\t `,
+    }
+
+    expect(() => createVariantExercise({ ...factoryArgs, sourceQuestion: sameContentSource }))
+      .toThrow(new RangeError('Selected variant template must differ from the source question'))
+  })
+
   test('derives IELTS Reading as the subject for reading variants', () => {
     const readingSource = {
       ...sourceQuestion,

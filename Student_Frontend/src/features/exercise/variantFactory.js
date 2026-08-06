@@ -1,6 +1,9 @@
 import { VARIANT_TEMPLATES } from '../../data/variantTemplates'
 
 const isNonemptyString = (value) => typeof value === 'string' && value.trim().length > 0
+export const normalizeVariantContent = (value) => typeof value === 'string'
+  ? value.trim().toLowerCase().replace(/\s+/g, ' ')
+  : ''
 
 const requireNonemptyString = (value, field) => {
   if (!isNonemptyString(value)) throw new TypeError(`${field} must be a non-empty string`)
@@ -40,6 +43,9 @@ export function createVariantExercise(input) {
   const selectedTemplate = templates[templateIndex]
   if (!selectedTemplate) {
     throw new RangeError(`No variant template for topic "${topic}" at index ${templateIndex}`)
+  }
+  if (normalizeVariantContent(selectedTemplate.content) === normalizeVariantContent(sourceQuestion.content)) {
+    throw new RangeError('Selected variant template must differ from the source question')
   }
 
   const title = `Transfer Practice · ${topic}`

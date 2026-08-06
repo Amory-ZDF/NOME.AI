@@ -40,8 +40,13 @@ function exerciseSet(overrides = {}) {
   }
 }
 
-function generatedVariant(overrides = {}) {
-  const generatedSet = exerciseSet({ id: 'variant-set', taskId: 'variant-task' })
+function generatedVariant(overrides = {}, sourceQuestionId = 'flow-q1') {
+  const generatedSet = exerciseSet({
+    id: 'variant-set',
+    taskId: 'variant-task',
+    sourceQuestionId,
+    questions: [question({ id: 'variant-q1', variantOf: sourceQuestionId })],
+  })
   return {
     exerciseSet: generatedSet,
     task: {
@@ -50,6 +55,7 @@ function generatedVariant(overrides = {}) {
       exerciseSetId: 'variant-set',
       type: 'ai_recommended',
       status: 'pending',
+      sourceQuestionId,
     },
     ...overrides,
   }
@@ -68,10 +74,10 @@ function createApi(overrides = {}) {
     submitRedo: () => Promise.resolve({}),
     createNote: (note) => Promise.resolve({ note }),
     updateNote: () => Promise.resolve({}),
-    getExerciseSet: () => Promise.resolve(taskSet),
+    getExerciseSet: (taskId) => Promise.resolve({ ...taskSet, taskId }),
     getBankExerciseSet: () => Promise.resolve(bankSet),
     submitSession: (session) => Promise.resolve({ sessionId: session.sessionId }),
-    generateVariant: () => Promise.resolve(generatedVariant()),
+    generateVariant: (sourceQuestionId) => Promise.resolve(generatedVariant({}, sourceQuestionId)),
     updateSettings: (patch) => Promise.resolve({ settings: patch }),
     ...overrides,
   }
@@ -129,7 +135,7 @@ async function solve(answer = '42') {
 }
 
 test('loads task and bank routes through their store-backed API boundaries', async () => {
-  const getExerciseSet = vi.fn(() => Promise.resolve(exerciseSet()))
+  const getExerciseSet = vi.fn((taskId) => Promise.resolve(exerciseSet({ taskId })))
   const getBankExerciseSet = vi.fn(() => Promise.resolve(exerciseSet({ taskId: null, title: 'Loaded bank route' })))
 
   const taskView = renderStudentApp(<App services={servicesFor(createApi({ getExerciseSet, getBankExerciseSet }))} />, { route: '/exercise/task-route' })
@@ -157,7 +163,7 @@ test('shows loading and the existing missing-exercise treatment when loading fai
 test('retries a failed load for the same route and renders the recovered set', async () => {
   const getExerciseSet = vi.fn()
     .mockRejectedValueOnce(new Error('temporary exercise outage'))
-    .mockResolvedValueOnce(exerciseSet({ title: 'Recovered exercise set' }))
+    .mockResolvedValueOnce(exerciseSet({ taskId: 'retry-task', title: 'Recovered exercise set' }))
   renderStudentApp(<App services={servicesFor(createApi({ getExerciseSet }))} />, { route: '/exercise/retry-task' })
 
   expect(await screen.findByText(/doesn't exist or has expired/i)).toBeInTheDocument()
@@ -169,8 +175,8 @@ test('retries a failed load for the same route and renders the recovered set', a
 
 test('does not cache a malformed load and recovers when the same route is retried', async () => {
   const getExerciseSet = vi.fn()
-    .mockResolvedValueOnce(exerciseSet({ questions: [null] }))
-    .mockResolvedValueOnce(exerciseSet({ title: 'Recovered after invalid data' }))
+    .mockResolvedValueOnce(exerciseSet({ taskId: 'retry-invalid-task', questions: [null] }))
+    .mockResolvedValueOnce(exerciseSet({ taskId: 'retry-invalid-task', title: 'Recovered after invalid data' }))
   renderStudentApp(<App services={servicesFor(createApi({ getExerciseSet }))} />, { route: '/exercise/retry-invalid-task' })
 
   expect(await screen.findByText(/doesn't exist or has expired/i)).toBeInTheDocument()
@@ -192,7 +198,7 @@ test.each([
   ['a missing error type', exerciseSet({ questions: [question({ errorType: '' })] })],
 ])('rejects malformed loaded sets with %s before rendering a question', async (_label, malformedSet) => {
   renderStudentApp(
-    <App services={servicesFor(createApi({ getExerciseSet: () => Promise.resolve(malformedSet) }))} />,
+    <App services={servicesFor(createApi({ getExerciseSet: () => Promise.resolve({ ...malformedSet, taskId: 'malformed' }) }))} />,
     { route: '/exercise/malformed' },
   )
 
@@ -202,6 +208,7 @@ test.each([
 
 test('accepts an API-supported IELTS reading question and renders its answer area', async () => {
   const readingSet = exerciseSet({
+    taskId: 'reading-type',
     subject: 'IELTS Reading',
     questions: [question({ type: 'reading', topic: 'Reading Skills - Evidence' })],
   })
@@ -440,6 +447,12 @@ test.each([
   ['an empty generated question list', () => ({ ...generatedVariant(), exerciseSet: { ...generatedVariant().exerciseSet, questions: [] } })],
   ['a non-recommended task type', () => ({ ...generatedVariant(), task: { ...generatedVariant().task, type: 'teacher_assigned' } })],
   ['a non-pending task status', () => ({ ...generatedVariant(), task: { ...generatedVariant().task, status: 'completed' } })],
+  ['a missing set source', () => ({ ...generatedVariant(), exerciseSet: { ...generatedVariant().exerciseSet, sourceQuestionId: undefined } })],
+  ['the wrong set source', () => ({ ...generatedVariant(), exerciseSet: { ...generatedVariant().exerciseSet, sourceQuestionId: 'another-source' } })],
+  ['a missing task source', () => ({ ...generatedVariant(), task: { ...generatedVariant().task, sourceQuestionId: undefined } })],
+  ['the wrong task source', () => ({ ...generatedVariant(), task: { ...generatedVariant().task, sourceQuestionId: 'another-source' } })],
+  ['a missing question source', () => ({ ...generatedVariant(), exerciseSet: { ...generatedVariant().exerciseSet, questions: [question({ id: 'variant-q1', variantOf: undefined })] } })],
+  ['the wrong question source', () => ({ ...generatedVariant(), exerciseSet: { ...generatedVariant().exerciseSet, questions: [question({ id: 'variant-q1', variantOf: 'another-source' })] } })],
 ])('rejects an incomplete L6 response with %s and leaves generation retryable', async (_label, makeResult) => {
   const generateVariant = vi.fn(() => Promise.resolve(makeResult()))
   renderStudentApp(<App services={servicesFor(createApi({ generateVariant }))} />, { route: '/exercise/invalid-variant' })
@@ -456,6 +469,7 @@ test.each([
 
 test('shows only the available subject-specific explanation fields after a correct answer', async () => {
   const mathSet = exerciseSet({
+    taskId: 'math',
     questions: [question({ understandingExplanation: 'Understand the rate of change.', scoringExplanation: 'Award both method marks.' })],
   })
   const mathView = renderStudentApp(<App services={servicesFor(createApi({ getExerciseSet: () => Promise.resolve(mathSet) }))} />, { route: '/exercise/math' })
