@@ -2,7 +2,7 @@ import { act, fireEvent, screen, waitFor, within } from '@testing-library/react'
 import { useLocation } from 'react-router-dom'
 import { afterEach, expect, test, vi } from 'vitest'
 import App from '../App'
-import { createSeedState } from '../data/mockData'
+import { bankExerciseSets, createSeedState, exerciseSets } from '../data/mockData'
 import { createAppServices } from '../store/services'
 import { renderStudentApp } from '../test/renderApp'
 
@@ -11,7 +11,7 @@ afterEach(() => vi.useRealTimers())
 function createApi(overrides = {}) {
   return {
     bootstrap: () => Promise.resolve(createSeedState()),
-    completeTask: () => Promise.resolve({}),
+    completeTask: (id) => Promise.resolve({ task: { id, status: 'completed' } }),
     reportTaskAdjustment: () => Promise.resolve({}),
     createTask: (task) => Promise.resolve({ task }),
     addErrors: (errors) => Promise.resolve({ errors }),
@@ -19,7 +19,13 @@ function createApi(overrides = {}) {
     submitRedo: () => Promise.resolve({}),
     createNote: (note) => Promise.resolve({ note }),
     updateNote: () => Promise.resolve({}),
+    getExerciseSet: (taskId) => Promise.resolve(Object.values(exerciseSets).find((set) => set.taskId === taskId)),
+    getBankExerciseSet: (setId) => Promise.resolve(bankExerciseSets[setId]),
     submitSession: (session) => Promise.resolve({ sessionId: session.sessionId }),
+    generateVariant: (sourceQuestionId) => Promise.resolve({
+      exerciseSet: { id: `variant-${sourceQuestionId}`, taskId: `variant-task-${sourceQuestionId}`, title: 'Variant practice', subject: 'A-Level Math', questions: [] },
+      task: { id: `variant-task-${sourceQuestionId}`, title: 'Independent transfer practice', status: 'pending' },
+    }),
     updateSettings: (patch) => Promise.resolve({ settings: patch }),
     ...overrides,
   }
