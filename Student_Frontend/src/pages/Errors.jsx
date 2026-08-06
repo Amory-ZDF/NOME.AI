@@ -2,31 +2,64 @@ import { useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { motion, AnimatePresence } from 'framer-motion'
 import { useApp } from '../store/AppStore'
-import { ERROR_TYPE_META } from '../data/mockData'
+import { ERROR_TYPES, ERROR_TYPE_META } from '../features/errors/errorTypes'
+import { canMarkMastered } from '../features/errors/masteryRules'
 import { Icon, Badge, EmptyState, ProgressBar, staggerContainer, fadeUpItem } from '../components/ui'
 
 const STATUS_META = {
   pending_review: { label: 'To Review', tone: 'amber' },
   reviewing: { label: 'Reviewing', tone: 'teal' },
+  verification_due: { label: 'Verification due', tone: 'amber' },
   mastered: { label: 'Mastered', tone: 'green' },
 }
 
 const filterChips = [
   { key: 'all', label: 'All' },
   { key: 'pending_review', label: 'To Review' },
+  { key: 'reviewing', label: 'Reviewing' },
+  { key: 'verification_due', label: 'Verification due' },
   { key: 'mastered', label: 'Mastered' },
   { key: 'repeated', label: 'Repeated Errors' },
 ]
+
+const markSchemeText = (points) => (
+  Array.isArray(points)
+    ? points.map((point) => point?.phrase ?? point?.text ?? point?.content).filter(Boolean).join(' · ')
+    : ''
+)
+
+function DiagnosisLayers({ item }) {
+  const scoring = [item.scoringExplanation, markSchemeText(item.markSchemePoints)].filter(Boolean).join(' · ')
+  const microTraining = item.microTraining || item.analysis
+  return (
+    <div className="grid md:grid-cols-2 gap-3 mt-3">
+      {item.subject?.includes('A-Level') && item.understandingExplanation && (
+        <div className="bg-teal-tint rounded-comp p-3"><p className="text-xs font-semibold text-deep-teal mb-1">Understanding</p><p className="text-warm-stone">{item.understandingExplanation}</p></div>
+      )}
+      {item.subject?.includes('A-Level') && scoring && (
+        <div className="bg-warm-paper rounded-comp p-3"><p className="text-xs font-semibold text-deep-ink mb-1">Scoring / Mark Scheme</p><p className="text-warm-stone">{scoring}</p></div>
+      )}
+      {item.subject === 'IELTS Reading' && item.passageEvidence && (
+        <div className="bg-teal-tint rounded-comp p-3"><p className="text-xs font-semibold text-deep-teal mb-1">Passage evidence</p><p className="text-warm-stone">{item.passageEvidence}</p></div>
+      )}
+      {item.subject === 'IELTS Reading' && item.errorPattern && (
+        <div className="bg-error-red/5 rounded-comp p-3"><p className="text-xs font-semibold text-error-red mb-1">Repeated pattern</p><p className="text-warm-stone">{item.errorPattern}</p></div>
+      )}
+      {item.subject === 'IELTS Reading' && microTraining && (
+        <div className="bg-warm-paper rounded-comp p-3"><p className="text-xs font-semibold text-deep-ink mb-1">Micro-training</p><p className="text-warm-stone">{microTraining}</p></div>
+      )}
+    </div>
+  )
+}
 
 function ErrorCard({ item }) {
   const navigate = useNavigate()
   const { markErrorMastered, isActionPending } = useApp()
   const [expanded, setExpanded] = useState(false)
-  const status = STATUS_META[item.status]
-  // PRD §4.3: "Mark as mastered" only available after a successful redo
-  const canMaster = item.redoHistory.some((r) => r.isCorrect) && item.status !== 'mastered'
+  const status = STATUS_META[item.status] || STATUS_META.pending_review
+  const canMaster = canMarkMastered(item) && item.status !== 'mastered'
   const meta = ERROR_TYPE_META[item.errorType] || {}
-  const mastering = isActionPending(`markErrorMastered:${item.id}`)
+  const mastering = isActionPending(`error:master:${item.id}`)
 
   return (
     <motion.div variants={fadeUpItem} className="zb-card !p-5">
@@ -34,7 +67,7 @@ function ErrorCard({ item }) {
         <div className="flex items-center gap-2 flex-wrap">
           <Badge tone="teal">{item.subject}</Badge>
           <span className="zb-badge" style={{ backgroundColor: `${meta.color}1A`, color: meta.color }}>{meta.label}</span>
-          <span className="font-mono text-xs text-warm-stone">{item.firstOccurredAt.slice(5)}</span>
+          {item.firstOccurredAt && <span className="font-mono text-xs text-warm-stone">{item.firstOccurredAt.slice(5)}</span>}
           {item.repeatCount > 1 && <Badge tone="amber">{item.repeatCount}× error</Badge>}
         </div>
         <Badge tone={status.tone}>{status.label}</Badge>
@@ -63,6 +96,7 @@ function ErrorCard({ item }) {
             <div className="bg-warm-paper rounded-comp p-3 mt-3 text-sm text-warm-stone leading-6">
               <span className="font-semibold text-deep-ink">AI analysis: </span>{item.analysis}
             </div>
+            <DiagnosisLayers item={item} />
             {item.redoHistory.length > 0 && (
               <p className="text-xs text-warm-stone mt-2">Redo history: {item.redoHistory.length} attempt(s), latest {item.redoHistory[item.redoHistory.length - 1].isCorrect ? '✓ correct' : '✗ wrong'}</p>
             )}
@@ -96,13 +130,17 @@ export default function Errors() {
   const { errors } = useApp()
   const navigate = useNavigate()
   const [filter, setFilter] = useState('all')
+  const [typeFilter, setTypeFilter] = useState('all')
   const [subject, setSubject] = useState('all')
 
   const subjects = useMemo(() => [...new Set(errors.map((e) => e.subject))], [errors])
 
   const filtered = errors.filter((e) => {
     if (subject !== 'all' && e.subject !== subject) return false
+    if (typeFilter !== 'all' && e.errorType !== typeFilter) return false
     if (filter === 'pending_review') return e.status === 'pending_review'
+    if (filter === 'reviewing') return e.status === 'reviewing'
+    if (filter === 'verification_due') return e.status === 'verification_due'
     if (filter === 'mastered') return e.status === 'mastered'
     if (filter === 'repeated') return e.repeatCount >= 2
     return true
@@ -111,6 +149,7 @@ export default function Errors() {
   const counts = {
     pending: errors.filter((e) => e.status === 'pending_review').length,
     reviewing: errors.filter((e) => e.status === 'reviewing').length,
+    verificationDue: errors.filter((e) => e.status === 'verification_due').length,
     mastered: errors.filter((e) => e.status === 'mastered').length,
   }
   const masteryRate = Math.round((counts.mastered / Math.max(1, errors.length)) * 100)
@@ -135,7 +174,7 @@ export default function Errors() {
         </div>
         <ProgressBar value={masteryRate} />
         <p className="text-xs text-warm-stone mt-2">
-          To review <span className="font-mono">{counts.pending}</span> · Reviewing <span className="font-mono">{counts.reviewing}</span> · Mastered <span className="font-mono">{counts.mastered}</span>
+          To review <span className="font-mono">{counts.pending}</span> · Reviewing <span className="font-mono">{counts.reviewing}</span> · Verification due <span className="font-mono">{counts.verificationDue}</span> · Mastered <span className="font-mono">{counts.mastered}</span>
         </p>
       </div>
 
@@ -150,6 +189,25 @@ export default function Errors() {
             }`}
           >
             {c.label}
+          </button>
+        ))}
+      </div>
+
+      <div className="flex flex-wrap gap-2 mb-5" aria-label="Error type filters">
+        <button
+          onClick={() => setTypeFilter('all')}
+          className={`px-3 py-1 rounded-full text-xs font-medium transition-colors ${typeFilter === 'all' ? 'bg-deep-teal text-white' : 'bg-pure-surface border border-whisper-line text-warm-stone'}`}
+        >
+          All types
+        </button>
+        {ERROR_TYPES.map((type) => (
+          <button
+            key={type}
+            onClick={() => setTypeFilter(type)}
+            className={`px-3 py-1 rounded-full text-xs font-medium transition-colors ${typeFilter === type ? 'text-white' : 'bg-pure-surface border border-whisper-line'}`}
+            style={typeFilter === type ? { backgroundColor: ERROR_TYPE_META[type].color } : { color: ERROR_TYPE_META[type].color }}
+          >
+            {ERROR_TYPE_META[type].label}
           </button>
         ))}
       </div>

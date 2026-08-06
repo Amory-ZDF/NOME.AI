@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useRef, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { motion } from 'framer-motion'
 import { useApp } from '../store/AppStore'
@@ -8,9 +8,14 @@ import { Icon, Badge, MathHTML } from '../components/ui'
 // PRD §4.4 redo mode: single-question focus, no AI hints
 export default function ErrorRedo() {
   const { id } = useParams()
+  return <ErrorRedoContent key={id} id={id} />
+}
+
+function ErrorRedoContent({ id }) {
   const navigate = useNavigate()
-  const { errors, recordRedo, markErrorMastered, showToast, isActionPending } = useApp()
+  const { errors, recordRedo, scheduleErrorVariant, showToast, isActionPending } = useApp()
   const item = errors.find((e) => e.id === id)
+  const attemptStartedAt = useRef(Date.now())
 
   const [answer, setAnswer] = useState('')
   const [result, setResult] = useState(null) // { isCorrect }
@@ -24,8 +29,8 @@ export default function ErrorRedo() {
     )
   }
 
-  const recording = isActionPending(`recordRedo:${item?.id}`)
-  const mastering = isActionPending(`markErrorMastered:${item?.id}`)
+  const recording = isActionPending(`error:redo:${item?.id}`)
+  const scheduling = isActionPending(`error:variant:${item?.id}`)
 
   const submit = async () => {
     const validation = validateAttempt(answer)
@@ -34,9 +39,10 @@ export default function ErrorRedo() {
       return
     }
     const { isCorrect } = gradeAnswer(item, validation.value)
+    const timeSpent = Math.max(0, Math.floor((Date.now() - attemptStartedAt.current) / 1000))
     try {
-      await recordRedo(item.id, { answer, isCorrect, timeSpent: 0 })
-      setResult({ isCorrect })
+      await recordRedo(item.id, { answer, isCorrect, timeSpent })
+      setResult({ isCorrect, timeSpent })
     } catch {
       // AppStore rolls back and displays the write failure.
     }
@@ -69,23 +75,29 @@ export default function ErrorRedo() {
 
           {!result ? (
             <>
-              <p className="text-sm font-semibold mb-2.5">Your solution</p>
               {item.options ? (
-                <div className="flex flex-col gap-2.5">
-                  {item.options.map((opt, i) => (
-                    <label key={i} className={`flex items-center gap-3 border rounded-comp px-4 py-3 cursor-pointer text-sm transition-colors ${answer === opt ? 'border-deep-teal bg-teal-tint' : 'border-whisper-line hover:bg-warm-paper'}`}>
-                      <input type="radio" className="accent-teal-600" checked={answer === opt} onChange={() => setAnswer(opt)} />
-                      {opt}
-                    </label>
-                  ))}
-                </div>
+                <fieldset>
+                  <legend className="text-sm font-semibold mb-2.5">Your solution</legend>
+                  <div className="flex flex-col gap-2.5">
+                    {item.options.map((opt, i) => (
+                      <label key={i} className={`flex items-center gap-3 border rounded-comp px-4 py-3 cursor-pointer text-sm transition-colors ${answer === opt ? 'border-deep-teal bg-teal-tint' : 'border-whisper-line hover:bg-warm-paper'}`}>
+                        <input name={`redo-solution-${item.id}`} type="radio" className="accent-teal-600" checked={answer === opt} onChange={() => setAnswer(opt)} />
+                        {opt}
+                      </label>
+                    ))}
+                  </div>
+                </fieldset>
               ) : (
-                <textarea
-                  className="zb-input !h-36 py-3 resize-none leading-6"
-                  placeholder="Write out your full solution independently…"
-                  value={answer}
-                  onChange={(e) => setAnswer(e.target.value)}
-                />
+                <>
+                  <label htmlFor="redo-solution" className="block text-sm font-semibold mb-2.5">Your solution</label>
+                  <textarea
+                    id="redo-solution"
+                    className="zb-input !h-36 py-3 resize-none leading-6"
+                    placeholder="Write out your full solution independently…"
+                    value={answer}
+                    onChange={(e) => setAnswer(e.target.value)}
+                  />
+                </>
               )}
               <button className="zb-btn-primary w-full mt-5" onClick={submit} disabled={recording}>
                 <Icon name="fact_check" size={16} /> Submit answer
@@ -134,15 +146,15 @@ export default function ErrorRedo() {
               <p className="text-sm text-warm-stone leading-6 mb-4">
                 Compared to last time, you fixed: {item.errorDescription}
               </p>
-              <button className="zb-btn-primary w-full mb-2" disabled={mastering} onClick={async () => {
+              <button className="zb-btn-primary w-full mb-2" disabled={scheduling} onClick={async () => {
                 try {
-                  await markErrorMastered(item.id)
-                  navigate('/errors')
+                  const scheduled = await scheduleErrorVariant(item.id)
+                  navigate(`/exercise/${scheduled.task.id}`)
                 } catch {
                   // AppStore displays the write failure and the page remains in place.
                 }
               }}>
-                <Icon name="workspace_premium" size={16} /> Mark as mastered
+                <Icon name="science" size={16} /> Start variant verification
               </button>
               <button className="zb-btn-ghost w-full" onClick={() => navigate('/errors')}>Back to Error Book</button>
             </motion.div>
@@ -158,7 +170,7 @@ export default function ErrorRedo() {
                 <p>{item.analysis}</p>
                 <p className="mt-2 text-xs text-alert-amber">This is the {item.repeatCount}th mistake on this question — the repeat counter has been updated.</p>
               </div>
-              <button className="zb-btn-primary w-full mb-2" onClick={() => { setResult(null); setAnswer('') }}>
+              <button className="zb-btn-primary w-full mb-2" onClick={() => { setResult(null); setAnswer(''); attemptStartedAt.current = Date.now() }}>
                 <Icon name="replay" size={16} /> Try again
               </button>
               <button className="zb-btn-ghost w-full" onClick={() => navigate('/errors')}>Back to Error Book</button>

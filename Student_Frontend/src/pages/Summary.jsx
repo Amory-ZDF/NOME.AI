@@ -1,20 +1,77 @@
-import { useMemo } from 'react'
+import { useEffect, useMemo } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import { motion } from 'framer-motion'
 import { useApp } from '../store/AppStore'
-import { ERROR_TYPE_META } from '../data/mockData'
+import { ERROR_TYPE_META } from '../features/errors/errorTypes'
+import { summarizeSession } from '../features/errors/sessionSummary'
+import { buildErrorCard } from '../features/errors/errorCards'
 import { Icon, Badge, MathHTML, staggerContainer, fadeUpItem } from '../components/ui'
 
-const wrongQuestionsSafe = (session) => (session ? session.questions.filter((q) => q.result.status !== 'correct') : [])
+const markSchemeText = (points) => (
+  Array.isArray(points)
+    ? points.map((point) => point?.phrase ?? point?.text ?? point?.content).filter(Boolean).join(' · ')
+    : ''
+)
+
+function DiagnosisLayers({ item, subject }) {
+  const scoring = [item.scoringExplanation, markSchemeText(item.markSchemePoints)].filter(Boolean).join(' · ')
+  const microTraining = item.microTraining || item.analysis
+  return (
+    <div className="grid md:grid-cols-2 gap-2 mt-3 text-xs">
+      {subject?.includes('A-Level') && item.understandingExplanation && (
+        <div className="bg-teal-tint rounded-comp p-3"><p className="font-semibold text-deep-teal mb-1">Understanding</p><p className="text-warm-stone leading-5">{item.understandingExplanation}</p></div>
+      )}
+      {subject?.includes('A-Level') && scoring && (
+        <div className="bg-warm-paper rounded-comp p-3"><p className="font-semibold text-deep-ink mb-1">Scoring / Mark Scheme</p><p className="text-warm-stone leading-5">{scoring}</p></div>
+      )}
+      {subject === 'IELTS Reading' && item.passageEvidence && (
+        <div className="bg-teal-tint rounded-comp p-3"><p className="font-semibold text-deep-teal mb-1">Passage evidence</p><p className="text-warm-stone leading-5">{item.passageEvidence}</p></div>
+      )}
+      {subject === 'IELTS Reading' && item.errorPattern && (
+        <div className="bg-error-red/5 rounded-comp p-3"><p className="font-semibold text-error-red mb-1">Repeated pattern</p><p className="text-warm-stone leading-5">{item.errorPattern}</p></div>
+      )}
+      {subject === 'IELTS Reading' && microTraining && (
+        <div className="bg-warm-paper rounded-comp p-3"><p className="font-semibold text-deep-ink mb-1">Micro-training</p><p className="text-warm-stone leading-5">{microTraining}</p></div>
+      )}
+    </div>
+  )
+}
 
 export default function Summary() {
   const { sessionId } = useParams()
   const navigate = useNavigate()
-  const { sessions, lastSession, addErrors, errors, showToast, addTask, isActionPending } = useApp()
+  const {
+    sessions, lastSession, sessionSummaries, loadSessionSummary,
+    addSessionErrors, errors, showToast, addTask, isActionPending,
+  } = useApp()
   const session = sessions[sessionId] || (lastSession?.sessionId === sessionId ? lastSession : null)
 
-  // Error card state (whether already added to error book)
-  const errorQuestionIds = useMemo(() => new Set(errors.map((e) => e.questionId)), [errors])
+  useEffect(() => {
+    if (!session) return
+    loadSessionSummary(sessionId).catch(() => {
+      // The persisted session still provides a complete local fallback.
+    })
+  }, [loadSessionSummary, session, sessionId])
+
+  const summary = sessionSummaries[sessionId] || summarizeSession(session)
+  const wrongQuestions = summary.wrongQuestions
+  const errorCards = useMemo(() => wrongQuestions.map((question) => buildErrorCard({
+    question,
+    session,
+    id: `error-${question.id}`,
+    occurredAt: session?.completedAt,
+  })), [session, wrongQuestions])
+
+  // Exact occurrence identity makes re-clicks idempotent without hiding a later recurrence.
+  const persistedOccurrenceKeys = useMemo(() => new Set(errors.flatMap((error) => [
+    ...(Array.isArray(error.occurrenceKeys) ? error.occurrenceKeys : []),
+    ...(Array.isArray(error.occurrenceRecords) ? error.occurrenceRecords.map((record) => record?.key) : []),
+  ].filter(Boolean))), [errors])
+  const isErrorCardAdded = (card) => (
+    card.occurrenceKeys.length > 0
+    && card.occurrenceKeys.every((key) => persistedOccurrenceKeys.has(key))
+  )
+  const allErrorsAdded = errorCards.length > 0 && errorCards.every(isErrorCardAdded)
 
   if (!session) {
     return (
@@ -26,43 +83,16 @@ export default function Summary() {
   }
 
   const total = session.questions.length
-  const correctCount = session.questions.filter((q) => q.result.status === 'correct').length
-  const accuracy = Math.round((correctCount / total) * 100)
+  const accuracy = summary.accuracy
   const accuracyChange = accuracy >= 66 ? 12 : accuracy >= 50 ? 5 : -3
-  const independentCount = session.questions.filter((q) => q.result.status === 'correct' && q.result.hintsUsed === 0).length
+  const independentCount = summary.hintDependency.independentlySolved
   const assistedCount = total - independentCount
-  const avgHints = (session.questions.reduce((s, q) => s + q.result.hintsUsed, 0) / total).toFixed(1)
-  const wrongQuestions = wrongQuestionsSafe(session)
+  const avgHints = summary.hintDependency.averageHints.toFixed(1)
 
   // Error cause distribution (based on actually wrong questions)
-  const distribution = (() => {
-    if (!session) return []
-    const dist = {}
-    wrongQuestionsSafe(session).forEach((q) => { dist[q.errorType] = (dist[q.errorType] || 0) + 1 })
-    return Object.entries(dist).map(([type, count]) => ({
-      type, count, pct: Math.round((count / Math.max(1, wrongQuestionsSafe(session).length)) * 100),
-    }))
-  })()
-
-  const buildErrorItem = (q) => ({
-    questionId: q.id,
-    subject: session.subject,
-    errorType: q.errorType,
-    questionSummary: q.content.replace(/<[^>]+>/g, '').slice(0, 60) + '…',
-    questionContent: q.content,
-    errorDescription: `Made an error on "${q.topic}" after ${q.result.attempts.length} attempt(s), using ${q.result.hintsUsed} hint level(s).`,
-    relatedTopic: q.topic,
-    topicId: q.topic,
-    repeatCount: 1,
-    status: 'pending_review',
-    studentAnswer: q.result.attempts[q.result.attempts.length - 1]?.answer || '(no answer)',
-    correctAnswer: q.correctDisplay,
-    analysis: `Review the L5 full solution to reinforce "${q.topic}" — retry recommended in 3 days.`,
-    acceptKeywords: q.acceptKeywords,
-    options: q.options,
-    correctIndex: q.correctIndex,
-    redoHistory: [],
-  })
+  const distribution = Object.entries(summary.errorDistribution).map(([type, count]) => ({
+    type, count, pct: Math.round((count / Math.max(1, wrongQuestions.length)) * 100),
+  }))
 
   return (
     <div className="max-w-content mx-auto px-4 lg:px-0 py-10">
@@ -159,21 +189,40 @@ export default function Summary() {
       {/* Error cards */}
       {wrongQuestions.length > 0 && (
         <motion.section variants={fadeUpItem} initial="hidden" animate="show" className="zb-card mb-4">
-          <h2 className="zb-section-title mb-4">Error Cards ({wrongQuestions.length})</h2>
+          <div className="flex items-center justify-between gap-3 mb-4 flex-wrap">
+            <h2 className="zb-section-title">Error Cards ({wrongQuestions.length})</h2>
+            <button
+              className={`zb-btn !h-9 text-xs ${allErrorsAdded ? 'zb-btn-ghost text-success-green' : 'zb-btn-primary'}`}
+              disabled={allErrorsAdded || isActionPending('errors:add')}
+              onClick={async () => {
+                if (allErrorsAdded) return
+                try {
+                  await addSessionErrors(errorCards)
+                  showToast('Added all errors to error book', 'success')
+                } catch {
+                  // AppStore rolls back and displays the write failure.
+                }
+              }}
+            >
+              {allErrorsAdded ? (<><Icon name="check" size={14} /> Already in error book</>) : (<><Icon name="bookmarks" size={14} /> Add all to error book</>)}
+            </button>
+          </div>
           <div className="flex flex-col gap-3">
-            {wrongQuestions.map((q) => {
-              const added = errorQuestionIds.has(q.id)
+            {wrongQuestions.map((q, index) => {
+              const card = errorCards[index]
+              const added = isErrorCardAdded(card)
               return (
                 <div key={q.id} className="border-l-[3px] border-alert-amber border border-whisper-line border-l-[3px] rounded-comp p-4">
                   <p className="text-sm leading-6 mb-2"><MathHTML html={q.content} /></p>
-                  <p className="text-xs text-warm-stone mb-1"><span className="font-semibold text-deep-ink">What went wrong: </span>used {q.result.hintsUsed} hint level(s) but still couldn't finish independently</p>
-                  <p className="text-xs text-warm-stone mb-3"><span className="font-semibold text-deep-ink">Why: </span>{ERROR_TYPE_META[q.errorType]?.label} · weak mastery of topic "{q.topic}"</p>
+                  <p className="text-xs text-warm-stone mb-1"><span className="font-semibold text-deep-ink">What went wrong: </span>{card.whereWrong}</p>
+                  <p className="text-xs text-warm-stone"><span className="font-semibold text-deep-ink">Why: </span>{card.whyWrong}</p>
+                  <DiagnosisLayers item={card} subject={session.subject} />
                   <button
-                    className={`zb-btn !h-8 text-xs ${added ? 'zb-btn-ghost text-success-green' : 'zb-btn-primary'}`}
-                    disabled={added || isActionPending('addErrors')}
+                    className={`zb-btn !h-8 text-xs mt-3 ${added ? 'zb-btn-ghost text-success-green' : 'zb-btn-primary'}`}
+                    disabled={added || isActionPending('errors:add')}
                     onClick={async () => {
                       try {
-                        await addErrors([buildErrorItem(q)])
+                        await addSessionErrors([card])
                         showToast('Added to error book', 'success')
                       } catch {
                         // AppStore rolls back and displays the write failure.
