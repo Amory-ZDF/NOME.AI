@@ -30,7 +30,7 @@ test('selects a newly created note after its asynchronous id resolves outside th
   const services = createAppServices({
     apiClient: createApi(() => new Promise((resolve) => { resolveCreate = resolve })),
     now: () => new Date('2026-08-06T00:00:00.000Z'),
-    createId: () => 'new-note',
+    createId: () => 'local-optimistic-id',
   })
 
   renderStudentApp(
@@ -46,7 +46,7 @@ test('selects a newly created note after its asynchronous id resolves outside th
   expect(screen.getByDisplayValue('Existing note')).toBeInTheDocument()
 
   await act(async () => {
-    resolveCreate({ note: { id: 'new-note' } })
+    resolveCreate({ note: { id: 'server-note', title: 'Persisted note' } })
   })
-  expect(await screen.findByDisplayValue('Untitled note')).toBeInTheDocument()
+  expect(await screen.findByDisplayValue('Persisted note')).toBeInTheDocument()
 })

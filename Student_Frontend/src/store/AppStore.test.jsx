@@ -108,6 +108,29 @@ test('ignores a stale bootstrap completion after a replacement service becomes r
   expect(screen.getByTestId('task-id')).toHaveTextContent('current-task')
 })
 
+test('does not consume deferred bootstrap data after the provider unmounts', async () => {
+  // Characterizes the mounted/request guard: removing it reads late bootstrap data after unmount.
+  let resolveBootstrap
+  let collectionReads = 0
+  const lateData = {
+    get tasks() { collectionReads += 1; return [] },
+    get errors() { collectionReads += 1; return [] },
+    get notes() { collectionReads += 1; return [] },
+    get noteFolders() { collectionReads += 1; return [] },
+    get settings() { collectionReads += 1; return {} },
+  }
+  const view = renderProvider(createApi({
+    bootstrap: () => new Promise((resolve) => { resolveBootstrap = resolve }),
+  }))
+
+  view.unmount()
+  await act(async () => {
+    resolveBootstrap(lateData)
+  })
+
+  expect(collectionReads).toBe(0)
+})
+
 test('keeps a duplicate action pending until every in-flight write settles', async () => {
   // Catches Set cleanup that clears an action key after the first of duplicate writes settles.
   const resolvers = []

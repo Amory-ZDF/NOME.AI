@@ -217,9 +217,17 @@ export function AppProvider({ children, services = defaultAppServices }) {
       snapshot: notesRef.current,
       optimistic: () => replaceNotes([createdNote, ...notesRef.current]),
       request: () => services.api.createNote(createdNote),
-      commit: () => {},
+      commit: (result) => {
+        const persistedNote = result?.note
+        if (!persistedNote) return
+        replaceNotes(notesRef.current.map((existingNote) => (
+          existingNote.id === createdNote.id
+            ? { ...createdNote, ...persistedNote }
+            : existingNote
+        )))
+      },
       rollback: replaceNotes,
-    })).then(() => createdNote.id)
+    }))
   }, [replaceNotes, runAction, services])
 
   const updateNote = useCallback((id, patch) => {

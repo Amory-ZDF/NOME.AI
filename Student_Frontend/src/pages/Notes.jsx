@@ -210,12 +210,12 @@ export default function Notes() {
 
   const createNote = async () => {
     try {
-      const id = await addNote({
+      const result = await addNote({
       title: 'Untitled note', folderId: 'f-math', folderPath: 'A-Level Math',
       tags: [], linkedTopics: [], linkedErrors: [], source: 'typed',
       content: [{ t: 'p', v: 'Start writing…' }], aiSuggestions: [],
       })
-      setActiveId(id)
+      setActiveId(result.note.id)
       showToast('New note created', 'success')
     } catch {
       // AppStore already displays the recoverable write error.
