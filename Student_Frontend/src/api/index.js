@@ -27,6 +27,15 @@ const isNumber = (value) => typeof value === 'number' && Number.isFinite(value)
 const isNonnegativeNumber = (value) => isNumber(value) && value >= 0
 const isStringArray = (value) => Array.isArray(value) && value.every(isString)
 const isOneOf = (...values) => (value) => values.includes(value)
+const isAdjustmentRequest = (request) => isRecord(request)
+  && isNonemptyString(request.id)
+  && isNonemptyString(request.taskId)
+  && isOneOf('time_conflict', 'difficulty', 'health', 'other')(request.reason)
+  && isString(request.details)
+  && isNonnegativeNumber(request.availableMinutes)
+  && isNonemptyString(request.proposedDueAt)
+  && isNonemptyString(request.createdAt)
+  && request.status === 'submitted'
 
 const assertFields = (value, entity, validators) => {
   if (!isRecord(value)) throw invalid(`${entity} must be an object`)
@@ -65,10 +74,13 @@ const assertTask = (task) => {
     assignedBy: isNullableString,
     priority: isOneOf('P0', 'P1', 'P2'),
     isOverdue: (value) => typeof value === 'boolean',
-    status: isOneOf('pending', 'completed', 'adjustment_requested'),
+    status: isOneOf('pending', 'completed'),
   })
   if (task.lastAccuracy !== undefined && !isNumber(task.lastAccuracy)) throw invalid('Task.lastAccuracy is invalid')
   if (task.exerciseSetId !== undefined && !isNonemptyString(task.exerciseSetId)) throw invalid('Task.exerciseSetId is invalid')
+  if (task.topicIds !== undefined && !isStringArray(task.topicIds)) throw invalid('Task.topicIds is invalid')
+  if (task.completedAt !== undefined && !isNonemptyString(task.completedAt)) throw invalid('Task.completedAt is invalid')
+  if (task.adjustmentStatus !== undefined && task.adjustmentStatus !== 'submitted') throw invalid('Task.adjustmentStatus is invalid')
 }
 
 const noteFieldValidators = Object.freeze({
@@ -232,11 +244,28 @@ export function resetMockState() {
 // ---------- Tasks ----------
 export const completeTask = async (id) => {
   if (!isMockMode) return http.patch(`/api/tasks/${id}`, { status: 'completed' })
-  return { task: await updateTask(id, { status: 'completed' }) }
+  return { task: await updateTask(id, { status: 'completed', completedAt: new Date().toISOString(), isOverdue: false }) }
 }
-export const reportTaskAdjustment = async (id) => {
-  if (!isMockMode) return http.post(`/api/tasks/${id}/adjustment-request`, {})
-  return { task: await updateTask(id, { status: 'adjustment_requested' }) }
+export const reportTaskAdjustment = async (id, request) => {
+  if (!isMockMode) return http.post(`/api/tasks/${id}/adjustment-request`, request)
+  if (!hasId({ id })) throw invalid('Task id is required')
+  if (!isAdjustmentRequest(request)) throw invalid('Task adjustment request is invalid')
+  if (request.taskId !== id) throw invalid('Task adjustment request taskId must match the target task')
+  const state = await repository.update((current) => {
+    if (!current.tasks.some((task) => task.id === id)) throw notFound('Task', id)
+    if (current.taskAdjustments.some((item) => item.id === request.id)) throw duplicate('Task adjustment request', request.id)
+    return {
+      ...current,
+      taskAdjustments: [...current.taskAdjustments, request],
+      tasks: current.tasks.map((task) => (task.id === id
+        ? { ...task, status: 'pending', adjustmentStatus: 'submitted' }
+        : task)),
+    }
+  })
+  return {
+    request: state.taskAdjustments.find((item) => item.id === request.id),
+    task: state.tasks.find((task) => task.id === id),
+  }
 }
 export const createTask = async (task) => {
   if (!isMockMode) return http.post('/api/tasks', task)

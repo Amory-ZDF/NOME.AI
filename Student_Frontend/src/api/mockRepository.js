@@ -17,6 +17,7 @@ const COLLECTION_IDENTIFIERS = Object.freeze({
   progressTimeline: 'date',
   achievements: 'id',
   sessions: 'sessionId',
+  taskAdjustments: 'id',
 })
 
 const hasNonemptyIdentifier = (value, field = 'id') => isPlainStateObject(value)

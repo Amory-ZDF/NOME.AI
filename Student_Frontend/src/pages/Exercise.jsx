@@ -226,7 +226,7 @@ export default function Exercise({ bankMode = false }) {
   const attemptedAll = questions.every((qq) => states[qq.id].status !== 'unanswered')
   const wholeSetSubmitting = submitTransactionPending
     || isActionPending('saveSession')
-    || Boolean(set.taskId && isActionPending(`completeTask:${set.taskId}`))
+    || Boolean(set.taskId && isActionPending(`task:complete:${set.taskId}`))
 
   const setState = (id, patch) => setStates((s) => ({ ...s, [id]: { ...s[id], ...patch } }))
 

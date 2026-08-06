@@ -103,6 +103,17 @@ test.each([
   expect(JSON.parse(storage.getItem(STORAGE_KEY)).data.sessions).toEqual([])
 })
 
+test('repairs persisted adjustment requests without stable identifiers', async () => {
+  // Catches task-adjustment schema validation being skipped because its seed collection is empty.
+  const storage = createMemoryStorage({
+    [STORAGE_KEY]: JSON.stringify({ version: 1, data: { ...createSeedState(), taskAdjustments: [{ taskId: 't1' }] } }),
+  })
+  const repository = createMockRepository({ storage, latencyMs: 0, seedFactory: createSeedState })
+
+  expect((await repository.bootstrap()).taskAdjustments).toEqual([])
+  expect(JSON.parse(storage.getItem(STORAGE_KEY)).data.taskAdjustments).toEqual([])
+})
+
 test('honors configured latency before resolving repository calls', async () => {
   // Catches a production mutation that removes the asynchronous latency boundary.
   vi.useFakeTimers()
@@ -126,7 +137,7 @@ test('creates independent serializable seed snapshots with every frontend collec
   expect(Object.keys(second).sort()).toEqual([
     'achievements', 'bankExerciseSets', 'bankQuestions', 'bankRecommendations', 'errorPatternData',
     'errorTypeMeta', 'errors', 'exerciseSets', 'greeting', 'knowledgeGraphData', 'learningSummary',
-    'moduleStats', 'noteFolders', 'notes', 'profileOverview', 'progressTimeline', 'sessions', 'settings', 'student', 'tasks',
+    'moduleStats', 'noteFolders', 'notes', 'profileOverview', 'progressTimeline', 'sessions', 'settings', 'student', 'taskAdjustments', 'tasks',
   ])
   expect(second.tasks[0].status).toBe('pending')
   expect(JSON.parse(JSON.stringify(second)).student.id).toBe('stu-001')

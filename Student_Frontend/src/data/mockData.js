@@ -693,8 +693,9 @@ export function createSeedState() {
     errorPatternData,
     achievements,
     moduleStats,
-    learningSummary,
-    sessions: [],
-    settings: defaultSettings,
+      learningSummary,
+      sessions: [],
+      taskAdjustments: [],
+      settings: defaultSettings,
   })
 }

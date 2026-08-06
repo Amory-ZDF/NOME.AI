@@ -50,6 +50,7 @@ One-shot load of everything the student shell needs. Frontend calls it once on m
 |---|---|---|
 | `student` | Student | Current student profile |
 | `tasks` | Task[] | Pending + completed tasks |
+| `taskAdjustments` | TaskAdjustment[] | Submitted adjustment requests; never removes the related task |
 | `errors` | ErrorItem[] | Error-book entries |
 | `notes` | Note[] | Notes |
 | `noteFolders` | NoteFolder[] | Folder tree (auto-created by AI) |
@@ -83,9 +84,23 @@ One-shot load of everything the student shell needs. Frontend calls it once on m
 | `assignedBy` | string \| null | Teacher name |
 | `priority` | enum | `P0` \| `P1` \| `P2` |
 | `isOverdue` | boolean | |
-| `status` | enum | `pending` \| `completed` \| `adjustment_requested` |
+| `status` | enum | `pending` \| `completed` |
 | `lastAccuracy` | number? | Optional, % of previous attempt |
 | `exerciseSetId` | string? | Links to an exercise set |
+| `topicIds` | string[]? | Linked curriculum topic ids |
+| `completedAt` | string? | ISO datetime set when the task is completed |
+| `adjustmentStatus` | enum? | `submitted` when the student has requested an adjustment |
+
+### TaskAdjustment
+| Field | Type | Notes |
+|---|---|---|
+| `id` | string | Client-generated request id |
+| `taskId` | string | The teacher-assigned task being discussed |
+| `reason` | enum | `time_conflict` \| `difficulty` \| `health` \| `other` |
+| `details` | string | Optional student explanation |
+| `availableMinutes` | number | Daily time the student can make available |
+| `proposedDueAt` / `createdAt` | string | ISO datetimes |
+| `status` | enum | Always `submitted` for this endpoint |
 
 ### Question
 | Field | Type | Notes |
@@ -205,10 +220,15 @@ One-shot load of everything the student shell needs. Frontend calls it once on m
 ## 3. Write Endpoints
 
 ### Tasks
+
+`PATCH /api/tasks/{id}` marks a task completed. Its returned task includes an ISO `completedAt` value and `isOverdue: false`.
+
+`POST /api/tasks/{id}/adjustment-request` receives the full `TaskAdjustment` body (`id`, `taskId`, `reason`, `details`, `availableMinutes`, `proposedDueAt`, `createdAt`, `status`) and resolves `{ request, task }`. A submitted adjustment does not delete or complete the task: it stays `pending` with `adjustmentStatus: "submitted"`.
+
 | Endpoint | Body | Notes |
 |---|---|---|
-| `PATCH /api/tasks/{id}` | `{ "status": "completed" }` | Mark task done (PRD §1.3) |
-| `POST /api/tasks/{id}/adjustment-request` | `{}` | Notify teacher and return the task with `status: "adjustment_requested"` (PRD §1.4) |
+| `PATCH /api/tasks/{id}` | `{ "status": "completed" }` | Mark task done; the response task includes `completedAt` and `isOverdue: false` (PRD §1.3) |
+| `POST /api/tasks/{id}/adjustment-request` | Full `TaskAdjustment` body | Persist and return `{ request, task }`; the task remains pending with `adjustmentStatus: "submitted"` (PRD §1.4) |
 | `POST /api/tasks` | Task (full object) | Create task (e.g. variant drill from summary page) |
 
 ### Error book
@@ -288,11 +308,13 @@ Question fields plus `result`:
 
 ## 5. Frontend Usage Map
 
+Task adjustments are submitted through `requestTaskAdjustment(task, draft)`; the store builds the request with its injected clock and id service before calling the endpoint.
+
 | UI action | API call | Code path |
 |---|---|---|
 | App mount | `GET /api/student/bootstrap` | `AppStore.jsx` → `api.bootstrap()` |
 | Check a task done | `PATCH /api/tasks/{id}` | `Home.jsx / Tasks.jsx` → `completeTask` |
-| "Can't complete" | `POST /api/tasks/{id}/adjustment-request` | `cannotCompleteTask` |
+| Submit adjustment request | `POST /api/tasks/{id}/adjustment-request` | `requestTaskAdjustment(task, draft)` |
 | Add wrong Qs to error book | `POST /api/errors/batch` | `Summary.jsx` → `addErrors` |
 | Mark error mastered | `PATCH /api/errors/{id}` | `Errors.jsx / ErrorRedo.jsx` |
 | Submit redo | `POST /api/errors/{id}/redo` | `ErrorRedo.jsx` → `recordRedo` |

@@ -1,6 +1,7 @@
 import { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react'
 import { runRecoverableAction } from './actionRunner'
 import { defaultAppServices } from './services'
+import { buildAdjustmentRequest } from '../features/tasks/adjustmentRules'
 
 const AppContext = createContext(null)
 
@@ -10,6 +11,10 @@ export function AppProvider({ children, services = defaultAppServices }) {
   const [bootStatus, setBootStatus] = useState('loading')
   const [bootError, setBootError] = useState(null)
   const [tasks, setTasks] = useState([])
+  const [taskAdjustments, setTaskAdjustments] = useState([])
+  const [greeting, setGreeting] = useState(null)
+  const [moduleStats, setModuleStats] = useState(null)
+  const [learningSummary, setLearningSummary] = useState(null)
   const [errors, setErrors] = useState([])
   const [notes, setNotes] = useState([])
   const [noteFolders, setNoteFolders] = useState([])
@@ -24,6 +29,7 @@ export function AppProvider({ children, services = defaultAppServices }) {
   const actionCounts = useRef(new Map())
   const collectionQueues = useRef(new Map())
   const tasksRef = useRef([])
+  const taskAdjustmentsRef = useRef([])
   const errorsRef = useRef([])
   const notesRef = useRef([])
   const settingsRef = useRef(null)
@@ -32,6 +38,10 @@ export function AppProvider({ children, services = defaultAppServices }) {
   const replaceTasks = useCallback((next) => {
     tasksRef.current = next
     setTasks(next)
+  }, [])
+  const replaceTaskAdjustments = useCallback((next) => {
+    taskAdjustmentsRef.current = next
+    setTaskAdjustments(next)
   }, [])
   const replaceErrors = useCallback((next) => {
     errorsRef.current = next
@@ -67,6 +77,10 @@ export function AppProvider({ children, services = defaultAppServices }) {
       const data = await services.api.bootstrap()
       if (!mounted.current || requestId !== bootRequest.current) return data
       replaceTasks(data.tasks)
+      replaceTaskAdjustments(data.taskAdjustments || [])
+      setGreeting(data.greeting || null)
+      setModuleStats(data.moduleStats || null)
+      setLearningSummary(data.learningSummary || null)
       replaceErrors(data.errors)
       replaceNotes(data.notes)
       setNoteFolders(data.noteFolders)
@@ -80,7 +94,7 @@ export function AppProvider({ children, services = defaultAppServices }) {
       }
       return undefined
     }
-  }, [replaceErrors, replaceNotes, replaceSettings, replaceTasks, services])
+  }, [replaceErrors, replaceNotes, replaceSettings, replaceTaskAdjustments, replaceTasks, services])
 
   useEffect(() => {
     mounted.current = true
@@ -94,6 +108,11 @@ export function AppProvider({ children, services = defaultAppServices }) {
   }, [retryBootstrap])
 
   const runAction = useCallback((key, collection, createOptions) => {
+    if (actionCounts.current.has(key)) {
+      const error = new Error('This task action is already in progress.')
+      showToast(error.message, 'error')
+      return Promise.reject(error)
+    }
     const generation = actionGeneration.current
     const count = actionCounts.current.get(key) || 0
     actionCounts.current.set(key, count + 1)
@@ -137,29 +156,49 @@ export function AppProvider({ children, services = defaultAppServices }) {
     return queued
   }, [showToast])
 
-  const completeTask = useCallback((id) => runAction(`completeTask:${id}`, 'tasks', () => ({
+  const completeTask = useCallback((id) => runAction(`task:complete:${id}`, 'tasks', () => ({
     snapshot: tasksRef.current,
     optimistic: () => replaceTasks(tasksRef.current.map((task) => (task.id === id ? { ...task, status: 'completed' } : task))),
     request: () => services.api.completeTask(id),
-    commit: () => {},
-    rollback: replaceTasks,
-  })), [replaceTasks, runAction, services])
-
-  const removeTask = useCallback((id) => runAction(`removeTask:${id}`, 'tasks', () => ({
-    snapshot: tasksRef.current,
-    optimistic: () => replaceTasks(tasksRef.current.filter((task) => task.id !== id)),
-    request: () => Promise.resolve({ id }),
-    commit: () => {},
-    rollback: replaceTasks,
-  })), [replaceTasks, runAction])
-
-  const cannotCompleteTask = useCallback((id) => runAction(`cannotCompleteTask:${id}`, 'tasks', () => ({
-    snapshot: tasksRef.current,
-    optimistic: () => replaceTasks(tasksRef.current.filter((task) => task.id !== id)),
-    request: () => services.api.reportTaskAdjustment(id),
-    commit: () => showToast('Feedback sent to your teacher 鈥?the task plan will be adjusted to fit you', 'success'),
+    commit: (result) => {
+      if (!result?.task) return
+      replaceTasks(tasksRef.current.map((task) => (task.id === id ? { ...task, ...result.task } : task)))
+      showToast('Task marked complete — nice work!', 'success')
+    },
     rollback: replaceTasks,
   })), [replaceTasks, runAction, services, showToast])
+
+  const requestTaskAdjustment = useCallback((task, draft) => {
+    const request = buildAdjustmentRequest({
+      task,
+      draft,
+      now: services.now(),
+      id: services.createId(),
+    })
+    return runAction(`task:adjust:${task.id}`, 'tasks', () => ({
+      snapshot: { tasks: tasksRef.current, taskAdjustments: taskAdjustmentsRef.current },
+      optimistic: () => {
+        replaceTasks(tasksRef.current.map((item) => (item.id === task.id
+          ? { ...item, status: 'pending', adjustmentStatus: 'submitted' }
+          : item)))
+        replaceTaskAdjustments([...taskAdjustmentsRef.current, request])
+      },
+      request: () => services.api.reportTaskAdjustment(task.id, request),
+      commit: (result) => {
+        if (result?.task) {
+          replaceTasks(tasksRef.current.map((item) => (item.id === task.id ? { ...item, ...result.task } : item)))
+        }
+        if (result?.request) {
+          replaceTaskAdjustments(taskAdjustmentsRef.current.map((item) => (item.id === request.id ? { ...item, ...result.request } : item)))
+        }
+        showToast('Adjustment request sent to your teacher.', 'success')
+      },
+      rollback: (snapshot) => {
+        replaceTasks(snapshot.tasks)
+        replaceTaskAdjustments(snapshot.taskAdjustments)
+      },
+    }))
+  }, [replaceTaskAdjustments, replaceTasks, runAction, services, showToast])
 
   const addTask = useCallback((task) => {
     const createdTask = task.id ? task : { ...task, id: services.createId() }
@@ -308,8 +347,8 @@ export function AppProvider({ children, services = defaultAppServices }) {
   return (
     <AppContext.Provider value={{
       booted: bootStatus === 'ready', bootStatus, bootError, pendingActions, retryBootstrap, isActionPending,
-      tasks, errors, notes, noteFolders, settings, lastSession, toast,
-      showToast, completeTask, removeTask, cannotCompleteTask, addTask,
+      tasks, taskAdjustments, greeting, moduleStats, learningSummary, errors, notes, noteFolders, settings, lastSession, toast,
+      showToast, completeTask, requestTaskAdjustment, addTask,
       addErrors, markErrorMastered, recordRedo,
       addNote, updateNote, saveSession, updateSettings,
     }}>

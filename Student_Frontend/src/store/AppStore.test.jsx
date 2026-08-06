@@ -5,6 +5,7 @@ import { createAppServices } from './services'
 
 const bootData = {
   tasks: [{ id: 't1', status: 'pending' }],
+  taskAdjustments: [],
   errors: [],
   notes: [],
   noteFolders: [],
@@ -15,7 +16,7 @@ function createApi(overrides = {}) {
   return {
     bootstrap: () => Promise.resolve(bootData),
     completeTask: () => Promise.resolve({ task: { id: 't1', status: 'completed' } }),
-    reportTaskAdjustment: () => Promise.resolve({ task: { id: 't1', status: 'adjustment_requested' } }),
+    reportTaskAdjustment: (_, request) => Promise.resolve({ request, task: { id: 't1', status: 'pending', adjustmentStatus: 'submitted' } }),
     createTask: (task) => Promise.resolve({ task }),
     addErrors: (items) => Promise.resolve({ errors: items }),
     markErrorMastered: () => Promise.resolve({ error: { id: 'e1', status: 'mastered' } }),
@@ -29,7 +30,7 @@ function createApi(overrides = {}) {
 }
 
 function Probe() {
-  const { bootStatus, bootError, retryBootstrap, completeTask, isActionPending, tasks } = useApp()
+  const { bootStatus, bootError, retryBootstrap, completeTask, requestTaskAdjustment, isActionPending, tasks, taskAdjustments } = useApp()
   return (
     <div>
       <output data-testid="boot-status">{bootStatus}</output>
@@ -37,9 +38,11 @@ function Probe() {
       <output data-testid="task-id">{tasks[0]?.id || ''}</output>
       <output data-testid="task-status">{tasks[0]?.status || ''}</output>
       <output data-testid="task-two-status">{tasks[1]?.status || ''}</output>
-      <output data-testid="pending-complete">{String(isActionPending('completeTask:t1'))}</output>
+      <output data-testid="adjustment-count">{taskAdjustments.length}</output>
+      <output data-testid="pending-complete">{String(isActionPending('task:complete:t1'))}</output>
       <button onClick={() => { retryBootstrap() }}>Retry</button>
       <button onClick={() => { completeTask('t1').catch(() => {}) }}>Complete</button>
+      <button onClick={() => { requestTaskAdjustment(tasks[0], { reason: 'difficulty', details: '', availableMinutes: 20, proposedDueAt: '2026-08-08T10:00:00.000Z' }).catch(() => {}) }}>Adjust</button>
     </div>
   )
 }
@@ -130,60 +133,6 @@ test('does not consume deferred bootstrap data after the provider unmounts', asy
   })
 
   expect(collectionReads).toBe(0)
-})
-
-test('keeps a duplicate action pending until every in-flight write settles', async () => {
-  // Catches Set cleanup that clears an action key after the first of duplicate writes settles.
-  const resolvers = []
-  const api = createApi({
-    completeTask: () => new Promise((resolve) => resolvers.push(resolve)),
-  })
-  renderProvider(api)
-  await screen.findByText('ready', { selector: '[data-testid="boot-status"]' })
-
-  fireEvent.click(screen.getByRole('button', { name: 'Complete' }))
-  fireEvent.click(screen.getByRole('button', { name: 'Complete' }))
-  expect(screen.getByTestId('pending-complete')).toHaveTextContent('true')
-
-  resolvers[0]({ task: { id: 't1', status: 'completed' } })
-  await waitFor(() => expect(screen.getByTestId('task-status')).toHaveTextContent('completed'))
-  expect(screen.getByTestId('pending-complete')).toHaveTextContent('true')
-
-  resolvers[1]({ task: { id: 't1', status: 'completed' } })
-  await waitFor(() => expect(screen.getByTestId('pending-complete')).toHaveTextContent('false'))
-})
-
-test('serializes same-key writes so a failed request cannot roll back a later success', async () => {
-  // Catches concurrent same-key requests that take stale snapshots and roll back successful UI state.
-  const started = []
-  let rejectFirst
-  let resolveSecond
-  const api = createApi({
-    completeTask: () => new Promise((resolve, reject) => {
-      started.push(started.length === 0 ? 'first' : 'second')
-      if (started.length === 1) rejectFirst = reject
-      else resolveSecond = resolve
-    }),
-  })
-  renderProvider(api)
-  await screen.findByText('ready', { selector: '[data-testid="boot-status"]' })
-
-  fireEvent.click(screen.getByRole('button', { name: 'Complete' }))
-  fireEvent.click(screen.getByRole('button', { name: 'Complete' }))
-  expect(started).toEqual(['first'])
-  expect(screen.getByTestId('pending-complete')).toHaveTextContent('true')
-
-  await act(async () => {
-    rejectFirst(new Error('offline'))
-  })
-  await waitFor(() => expect(started).toEqual(['first', 'second']))
-  expect(screen.getByTestId('pending-complete')).toHaveTextContent('true')
-
-  await act(async () => {
-    resolveSecond({ task: { id: 't1', status: 'completed' } })
-  })
-  await waitFor(() => expect(screen.getByTestId('task-status')).toHaveTextContent('completed'))
-  expect(screen.getByTestId('pending-complete')).toHaveTextContent('false')
 })
 
 test('serializes different task keys so one rollback cannot undo another successful task write', async () => {
@@ -382,4 +331,70 @@ test('settles a deferred provider rejection without reading it for rollback toas
   await act(async () => { rejectCreate(failure) })
   expect((await settlement).error).toBe(failure)
   expect(messageReads).toBe(0)
+})
+
+test('keeps completed tasks in state and commits the persisted completion timestamp', async () => {
+  // Catches a completion flow that filters history away or ignores the server's completedAt field.
+  const api = createApi({
+    completeTask: () => Promise.resolve({ task: { id: 't1', status: 'completed', completedAt: '2026-08-06T12:00:00.000Z', isOverdue: false } }),
+  })
+  renderProvider(api)
+  await screen.findByText('ready', { selector: '[data-testid="boot-status"]' })
+
+  fireEvent.click(screen.getByRole('button', { name: 'Complete' }))
+
+  await waitFor(() => expect(screen.getByTestId('task-status')).toHaveTextContent('completed'))
+  expect(screen.getByTestId('task-id')).toHaveTextContent('t1')
+})
+
+test('builds and optimistically persists an adjustment request with injected services', async () => {
+  // Catches a store action that forwards UI draft data instead of building the domain request and state.
+  let requestCall
+  const api = createApi({
+    reportTaskAdjustment: (_, request) => {
+      requestCall = request
+      return Promise.resolve({ request, task: { id: 't1', status: 'pending', adjustmentStatus: 'submitted' } })
+    },
+  })
+  renderProvider(api)
+  await screen.findByText('ready', { selector: '[data-testid="boot-status"]' })
+
+  fireEvent.click(screen.getByRole('button', { name: 'Adjust' }))
+
+  await waitFor(() => expect(screen.getByTestId('adjustment-count')).toHaveTextContent('1'))
+  expect(requestCall).toEqual({
+    id: 'generated-id', taskId: 't1', reason: 'difficulty', details: '', availableMinutes: 20,
+    proposedDueAt: '2026-08-08T10:00:00.000Z', createdAt: '2026-08-06T00:00:00.000Z', status: 'submitted',
+  })
+})
+
+test('rejects a duplicate task action and rolls back an adjustment failure without losing the task', async () => {
+  // Catches duplicate task writes and a failed adjustment that leaves an optimistic request/task mutation behind.
+  let rejectAdjustment
+  const api = createApi({
+    reportTaskAdjustment: () => new Promise((_, reject) => { rejectAdjustment = reject }),
+  })
+  let actions
+  function AdjustmentProbe() {
+    actions = useApp()
+    return <output>{actions.bootStatus}</output>
+  }
+  render(<AppProvider services={createAppServices({
+    apiClient: api,
+    now: () => new Date('2026-08-06T00:00:00.000Z'),
+    createId: () => 'generated-id',
+  })}><AdjustmentProbe /></AppProvider>)
+  await screen.findByText('ready')
+  const draft = { reason: 'difficulty', details: '', availableMinutes: 20, proposedDueAt: '2026-08-08T10:00:00.000Z' }
+  const first = actions.requestTaskAdjustment(actions.tasks[0], draft)
+  const firstSettlement = first.catch((error) => error)
+
+  await expect(actions.requestTaskAdjustment(actions.tasks[0], draft)).rejects.toThrow('already in progress')
+  await waitFor(() => expect(actions.tasks).toMatchObject([{ id: 't1', status: 'pending', adjustmentStatus: 'submitted' }]))
+  expect(actions.taskAdjustments).toHaveLength(1)
+
+  await act(async () => { rejectAdjustment(new Error('offline')) })
+  expect((await firstSettlement).message).toBe('offline')
+  expect(actions.tasks).toMatchObject([{ id: 't1', status: 'pending' }])
+  expect(actions.taskAdjustments).toEqual([])
 })

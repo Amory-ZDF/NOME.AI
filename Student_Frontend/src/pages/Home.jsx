@@ -2,12 +2,11 @@ import { useMemo, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { motion, AnimatePresence } from 'framer-motion'
 import { useApp } from '../store/AppStore'
-import { greetingData, moduleStats, learningSummary } from '../data/mockData'
 import { Icon, Badge, PriorityBadge, EmptyState, staggerContainer, fadeUpItem } from '../components/ui'
 
 // ---------- Greeting ----------
 function Greeting() {
-  const { tasks } = useApp()
+  const { tasks, greeting } = useApp()
   const hour = new Date().getHours()
   const period = hour < 12 ? 'Good morning' : hour < 18 ? 'Good afternoon' : 'Good evening'
   const pending = tasks.filter((t) => t.status === 'pending').length
@@ -20,7 +19,7 @@ function Greeting() {
       <p className="text-warm-stone mt-1.5 text-sm lg:text-base">
         It's {dateStr} — you have <span className="font-mono font-medium text-deep-ink">{pending}</span> pending task{pending === 1 ? '' : 's'}
       </p>
-      <p className="text-warm-stone italic mt-1 text-sm">"{greetingData.message}"</p>
+      {greeting && <p className="text-warm-stone italic mt-1 text-sm">"{greeting.message}"</p>}
     </section>
   )
 }
@@ -28,18 +27,16 @@ function Greeting() {
 // ---------- Task item ----------
 function TaskItem({ task }) {
   const navigate = useNavigate()
-  const { completeTask, removeTask, cannotCompleteTask, showToast, isActionPending } = useApp()
+  const { completeTask, showToast, isActionPending } = useApp()
   const [menuOpen, setMenuOpen] = useState(false)
   const done = task.status === 'completed'
 
-  // PRD §1.3: completed tasks turn grey + strikethrough, removed from list after 1s
-  const completing = isActionPending(`completeTask:${task.id}`)
-  const reporting = isActionPending(`cannotCompleteTask:${task.id}`)
+  // Completed tasks remain visible as history with a grey strikethrough.
+  const completing = isActionPending(`task:complete:${task.id}`)
 
   const markDone = async () => {
     try {
       await completeTask(task.id)
-      setTimeout(() => { removeTask(task.id).catch(() => {}) }, 1000)
     } catch {
       // AppStore rolls back and displays the write failure.
     }
@@ -99,7 +96,7 @@ function TaskItem({ task }) {
         <AnimatePresence>
           {menuOpen && (
             <motion.div initial={{ opacity: 0, y: 4 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }} className="absolute right-0 top-7 bg-pure-surface border border-whisper-line rounded-comp py-1 w-36 z-10">
-              <button className="w-full text-left px-3 py-2 text-sm text-warm-stone hover:bg-warm-paper hover:text-error-red" disabled={reporting} onClick={() => { setMenuOpen(false); cannotCompleteTask(task.id).catch(() => {}) }}>
+              <button className="w-full text-left px-3 py-2 text-sm text-warm-stone hover:bg-warm-paper hover:text-error-red" onClick={() => { setMenuOpen(false); showToast('The adjustment request form will open here next.', 'info') }}>
                 Can't complete — report to teacher
               </button>
             </motion.div>
@@ -113,7 +110,6 @@ function TaskItem({ task }) {
 // ---------- Task list ----------
 export function TaskList({ tasks, limit }) {
   const navigate = useNavigate()
-  const { removeTask } = useApp()
 
   // PRD §1.3 sort: overdue first → teacher tasks prioritised → urgent deadlines first
   const sorted = useMemo(() => {
@@ -134,7 +130,7 @@ export function TaskList({ tasks, limit }) {
         <h2 className="zb-section-title">Task List</h2>
         <Link to="/tasks" className="text-sm text-deep-teal hover:underline">All tasks →</Link>
       </div>
-      {pendingCount === 0 && tasks.every((t) => t.status === 'completed' || t.status === 'removed') ? (
+      {pendingCount === 0 && tasks.every((t) => t.status === 'completed') ? (
         <EmptyState
           icon="celebration"
           title="All tasks done for today"
@@ -160,6 +156,7 @@ const moduleCards = [
 
 function ModuleCards() {
   const navigate = useNavigate()
+  const { moduleStats } = useApp()
   return (
     <motion.section variants={staggerContainer} initial="hidden" animate="show" className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-4">
       {moduleCards.map((m) => (
@@ -168,7 +165,7 @@ function ModuleCards() {
           <p className="font-semibold mt-2.5">{m.title}</p>
           <p className="text-xs text-warm-stone mt-0.5">{m.desc}</p>
           <p className="font-mono text-xl mt-2 text-deep-ink">
-            {moduleStats[m.key]}<span className="text-sm text-warm-stone ml-1">{m.suffix}</span>
+            {moduleStats?.[m.key] ?? 0}<span className="text-sm text-warm-stone ml-1">{m.suffix}</span>
           </p>
         </motion.div>
       ))}
@@ -187,7 +184,9 @@ function heatColor(mastery) {
 function LearningStatus() {
   const navigate = useNavigate()
   const [hover, setHover] = useState(null)
-  const s = learningSummary
+  const { learningSummary: s } = useApp()
+
+  if (!s) return null
 
   return (
     <motion.section variants={fadeUpItem} initial="hidden" animate="show" className="zb-card">
