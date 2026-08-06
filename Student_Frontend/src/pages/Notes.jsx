@@ -105,6 +105,7 @@ function NoteDetail({ note, errors }) {
   const [title, setTitle] = useState(note.title)
   const [organizing, setOrganizing] = useState(false)
   const linkedErrors = errors.filter((e) => note.linkedErrors.includes(e.id))
+  const noteWritePending = isActionPending(`updateNote:${note.id}`)
 
   const renderBlock = (b, i) => {
     if (b.t === 'h') return <h4 key={i} className="font-semibold mt-4 mb-2">{b.v}</h4>
@@ -133,8 +134,9 @@ function NoteDetail({ note, errors }) {
       <input
         className="text-xl font-bold tracking-tight w-full bg-transparent focus:outline-none mb-1"
         value={title}
+        disabled={noteWritePending}
         onChange={(e) => setTitle(e.target.value)}
-        onBlur={() => { if (title !== note.title) updateNote(note.id, { title }).catch(() => {}) }}
+        onBlur={() => { if (!noteWritePending && title !== note.title) updateNote(note.id, { title }).catch(() => {}) }}
       />
       <div className="flex items-center gap-2 text-xs text-warm-stone mb-4 flex-wrap">
         <span>{note.folderPath}</span>

@@ -33,6 +33,31 @@ function servicesFor(api) {
   })
 }
 
+function deferred() {
+  let resolve
+  let reject
+  const promise = new Promise((resolvePromise, rejectPromise) => {
+    resolve = resolvePromise
+    reject = rejectPromise
+  })
+  return { promise, resolve, reject }
+}
+
+async function attemptTaskExercise() {
+  await screen.findByText('IELTS Reading · Cambridge 18 Test 2 P1')
+
+  fireEvent.click(screen.getAllByRole('radio')[1])
+  fireEvent.click(screen.getAllByRole('button', { name: /check my answer/i })[0])
+
+  fireEvent.click(screen.getByTitle('Question 2'))
+  fireEvent.click(screen.getAllByRole('radio')[1])
+  fireEvent.click(screen.getAllByRole('button', { name: /check my answer/i })[0])
+
+  fireEvent.click(screen.getByTitle('Question 3'))
+  fireEvent.change(screen.getByRole('textbox'), { target: { value: '25%' } })
+  fireEvent.click(screen.getAllByRole('button', { name: /check my answer/i })[0])
+}
+
 function LocationProbe() {
   const location = useLocation()
   return <output data-testid="location">{location.pathname}</output>
@@ -101,6 +126,77 @@ test('Exercise waits for session persistence and stays on the exercise when it f
   await act(async () => { rejectSession(new Error('session failed')) })
   expect(screen.getByTestId('location')).toHaveTextContent('/bank/exercise/bq3')
   expect(await screen.findByText('session failed')).toBeInTheDocument()
+})
+
+test('Exercise disables every whole-set submit control while session persistence is unresolved', async () => {
+  // Catches alternate submit entry points bypassing the active whole-set transaction.
+  const sessionWrite = deferred()
+  const submitSession = vi.fn(() => sessionWrite.promise)
+  const api = createApi({ submitSession })
+  renderStudentApp(<App services={servicesFor(api)} />, { route: '/exercise/t2' })
+  await attemptTaskExercise()
+
+  const submit = screen.getByRole('button', { name: 'Submit' })
+  const finish = screen.getByRole('button', { name: /Finish/i })
+  const reviewAndSubmit = screen.getByRole('button', { name: /Review & submit the whole set/i })
+  fireEvent.click(submit)
+
+  expect(submit).toBeDisabled()
+  expect(finish).toBeDisabled()
+  expect(reviewAndSubmit).toBeDisabled()
+  fireEvent.click(finish)
+  fireEvent.click(reviewAndSubmit)
+  expect(submitSession).toHaveBeenCalledTimes(1)
+
+  await act(async () => { sessionWrite.reject(new Error('stop test transaction')) })
+})
+
+test('Exercise keeps the whole-set transaction locked while task completion is unresolved', async () => {
+  // Catches the saveSession pending key clearing before completeTask settles and allowing a duplicate transaction.
+  const sessionWrite = deferred()
+  const taskWrite = deferred()
+  const submitSession = vi.fn(() => sessionWrite.promise)
+  const completeTask = vi.fn(() => taskWrite.promise)
+  const api = createApi({ submitSession, completeTask })
+  renderStudentApp(
+    <>
+      <App services={servicesFor(api)} />
+      <LocationProbe />
+    </>,
+    { route: '/exercise/t2' },
+  )
+  await attemptTaskExercise()
+
+  const submit = screen.getByRole('button', { name: 'Submit' })
+  fireEvent.click(submit)
+  await act(async () => { sessionWrite.resolve({ sessionId: 'persisted-session' }) })
+  await waitFor(() => expect(completeTask).toHaveBeenCalledTimes(1))
+
+  expect(screen.getByTestId('location')).toHaveTextContent('/exercise/t2')
+  expect(submit).toBeDisabled()
+  fireEvent.click(submit)
+  expect(submitSession).toHaveBeenCalledTimes(1)
+  expect(completeTask).toHaveBeenCalledTimes(1)
+
+  await act(async () => { taskWrite.resolve({}) })
+  await waitFor(() => expect(screen.getByTestId('location')).toHaveTextContent('/summary/persisted-session'))
+})
+
+test('Notes disables title editing for the duration of its own write', async () => {
+  // Catches title input remaining writable while an updateNote action for that note is unresolved.
+  const noteWrite = deferred()
+  const updateNote = vi.fn(() => noteWrite.promise)
+  const api = createApi({ updateNote })
+  renderStudentApp(<App services={servicesFor(api)} />, { route: '/notes' })
+  const title = await screen.findByDisplayValue('Trigonometry Formula Derivations')
+
+  fireEvent.change(title, { target: { value: 'Edited title' } })
+  fireEvent.blur(title)
+
+  expect(updateNote).toHaveBeenCalledTimes(1)
+  expect(title).toBeDisabled()
+  await act(async () => { noteWrite.resolve({ note: { id: 'n1', title: 'Edited title' } }) })
+  await waitFor(() => expect(title).not.toBeDisabled())
 })
 
 test('Bank upload waits for task creation and retains the modal when creation fails', async () => {

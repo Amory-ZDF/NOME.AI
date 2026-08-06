@@ -26,7 +26,7 @@ const hintBarColor = (n) => {
 }
 
 // ---------- AI tutoring panel ----------
-function AiPanel({ q, state, onSubmit, onUnlockHint, onNext, isLast }) {
+function AiPanel({ q, state, onSubmit, onUnlockHint, onNext, isLast, nextDisabled = false }) {
   const { showToast } = useApp()
 
   // State 3: answered correctly
@@ -53,7 +53,7 @@ function AiPanel({ q, state, onSubmit, onUnlockHint, onNext, isLast }) {
             <Icon name="refresh" size={16} /> Start variant question (L6)
           </button>
         )}
-        <button className="zb-btn-primary w-full" onClick={onNext}>
+        <button className="zb-btn-primary w-full" onClick={onNext} disabled={nextDisabled}>
           {isLast ? 'Review & submit the whole set' : 'Next question →'}
         </button>
       </div>
@@ -187,6 +187,8 @@ export default function Exercise({ bankMode = false }) {
   const { showToast, saveSession, completeTask, isActionPending } = useApp()
   const timer = useTimer()
   const secondsRef = useRef(0)
+  const submitTransactionRef = useRef(false)
+  const [submitTransactionPending, setSubmitTransactionPending] = useState(false)
 
   const set = useMemo(() => {
     if (bankMode) return bankExerciseSets[qId]
@@ -222,6 +224,9 @@ export default function Exercise({ bankMode = false }) {
   const state = states[q.id]
   const answeredCount = questions.filter((qq) => states[qq.id].status === 'correct').length
   const attemptedAll = questions.every((qq) => states[qq.id].status !== 'unanswered')
+  const wholeSetSubmitting = submitTransactionPending
+    || isActionPending('saveSession')
+    || Boolean(set.taskId && isActionPending(`completeTask:${set.taskId}`))
 
   const setState = (id, patch) => setStates((s) => ({ ...s, [id]: { ...s[id], ...patch } }))
 
@@ -260,9 +265,11 @@ export default function Exercise({ bankMode = false }) {
 
   // Submit the whole exercise set (PRD §2.7-6)
   const submitAll = async () => {
-    if (isActionPending('saveSession')) return
+    if (submitTransactionRef.current) return
+    submitTransactionRef.current = true
+    setSubmitTransactionPending(true)
     const session = {
-      taskId: set.taskId,
+      taskId: set.taskId ?? null,
       taskTitle: set.title,
       subject: set.subject,
       timeSpent: Math.max(1, Math.round(secondsRef.current / 60)),
@@ -283,6 +290,9 @@ export default function Exercise({ bankMode = false }) {
       navigate(`/summary/${persisted.sessionId}`)
     } catch {
       // AppStore rolls back and displays the write failure.
+    } finally {
+      submitTransactionRef.current = false
+      setSubmitTransactionPending(false)
     }
   }
 
@@ -302,7 +312,7 @@ export default function Exercise({ bankMode = false }) {
             <button
               className={`zb-btn-primary !h-9 ${attemptedAll ? '' : 'opacity-40 pointer-events-none'}`}
               onClick={submitAll}
-              disabled={!attemptedAll || isActionPending('saveSession')}
+              disabled={!attemptedAll || wholeSetSubmitting}
               title={attemptedAll ? 'Submit the whole exercise set' : 'You can submit after attempting all questions'}
             >
               Submit
@@ -366,7 +376,7 @@ export default function Exercise({ bankMode = false }) {
               <Icon name="chevron_left" size={16} /> Previous
             </button>
             {state.status === 'correct' ? (
-              <button className="zb-btn-primary !h-9" onClick={goNext} disabled={isActionPending('saveSession')}>{current === questions.length - 1 ? 'Finish' : 'Next'} <Icon name="chevron_right" size={16} /></button>
+              <button className="zb-btn-primary !h-9" onClick={goNext} disabled={wholeSetSubmitting}>{current === questions.length - 1 ? 'Finish' : 'Next'} <Icon name="chevron_right" size={16} /></button>
             ) : (
               <button className="zb-btn-primary !h-9" onClick={submitQuestion}>
                 <Icon name="fact_check" size={16} /> {state.attempts.length > 0 ? 'Resubmit' : "I'm done — check my answer"}
@@ -394,6 +404,7 @@ export default function Exercise({ bankMode = false }) {
             onUnlockHint={unlockHint}
             onNext={goNext}
             isLast={current === questions.length - 1}
+            nextDisabled={wholeSetSubmitting}
           />
 
           {/* Hint usage tracker (PRD §2.4) */}

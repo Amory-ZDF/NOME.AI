@@ -201,7 +201,7 @@ export default function Summary() {
               await addTask({
                 title: `Variant drill · ${wrongQuestions[0]?.topic || 'Consolidation'}`,
                 type: 'ai_recommended', subject: session.subject, estimatedMinutes: 15,
-                dueAt: null, priority: 'P2', isOverdue: false, status: 'pending',
+                dueAt: null, assignedBy: null, priority: 'P2', isOverdue: false, status: 'pending',
               })
               showToast('Added to task list', 'success')
             } catch {

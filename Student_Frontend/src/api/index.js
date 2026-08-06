@@ -19,9 +19,167 @@ const hasId = (value, field = 'id') => typeof value?.[field] === 'string' && val
 const invalid = (message) => new ApiError(message, { status: 400, code: 'INVALID_INPUT' })
 const notFound = (entity, id) => new ApiError(`${entity} ${id} was not found`, { status: 404, code: 'NOT_FOUND' })
 const duplicate = (entity, id) => new ApiError(`${entity} ${id} already exists`, { status: 409, code: 'DUPLICATE_ID' })
+const hasOwn = (value, field) => Object.prototype.hasOwnProperty.call(value, field)
+const isNonemptyString = (value) => typeof value === 'string' && value.trim().length > 0
+const isString = (value) => typeof value === 'string'
+const isNullableString = (value) => value === null || typeof value === 'string'
+const isNumber = (value) => typeof value === 'number' && Number.isFinite(value)
+const isNonnegativeNumber = (value) => isNumber(value) && value >= 0
+const isStringArray = (value) => Array.isArray(value) && value.every(isString)
+const isOneOf = (...values) => (value) => values.includes(value)
 
-const assertEntity = (value, entity, idField = 'id') => {
-  if (!isRecord(value) || !hasId(value, idField)) throw invalid(`${entity} requires a nonempty ${idField}`)
+const assertFields = (value, entity, validators) => {
+  if (!isRecord(value)) throw invalid(`${entity} must be an object`)
+  Object.entries(validators).forEach(([field, validate]) => {
+    if (!validate(value[field])) throw invalid(`${entity}.${field} is invalid`)
+  })
+}
+
+const isRedoAttempt = (attempt) => isRecord(attempt)
+  && isNonemptyString(attempt.attemptedAt)
+  && isString(attempt.answer)
+  && typeof attempt.isCorrect === 'boolean'
+  && isNonnegativeNumber(attempt.timeSpent)
+
+const isSessionAttempt = (attempt) => isRecord(attempt)
+  && isString(attempt.answer)
+  && isNonemptyString(attempt.submittedAt)
+  && typeof attempt.isCorrect === 'boolean'
+
+const isNoteBlock = (block) => isRecord(block)
+  && isOneOf('p', 'h', 'formula')(block.t)
+  && isString(block.v)
+
+const isAiSuggestion = (suggestion) => isRecord(suggestion)
+  && isOneOf('split_note', 'link_topic', 'related_content')(suggestion.type)
+  && isString(suggestion.message)
+
+const assertTask = (task) => {
+  assertFields(task, 'Task', {
+    id: isNonemptyString,
+    title: isNonemptyString,
+    type: isOneOf('teacher_assigned', 'error_review', 'ai_recommended'),
+    subject: isNonemptyString,
+    estimatedMinutes: isNonnegativeNumber,
+    dueAt: isNullableString,
+    assignedBy: isNullableString,
+    priority: isOneOf('P0', 'P1', 'P2'),
+    isOverdue: (value) => typeof value === 'boolean',
+    status: isOneOf('pending', 'completed', 'adjustment_requested'),
+  })
+  if (task.lastAccuracy !== undefined && !isNumber(task.lastAccuracy)) throw invalid('Task.lastAccuracy is invalid')
+  if (task.exerciseSetId !== undefined && !isNonemptyString(task.exerciseSetId)) throw invalid('Task.exerciseSetId is invalid')
+}
+
+const noteFieldValidators = Object.freeze({
+  title: isNonemptyString,
+  folderId: isNonemptyString,
+  folderPath: isNonemptyString,
+  tags: isStringArray,
+  linkedTopics: isStringArray,
+  linkedErrors: isStringArray,
+  source: isOneOf('typed', 'handwritten', 'photo', 'ai_organized'),
+  createdAt: isNonemptyString,
+  updatedAt: isNonemptyString,
+  content: (value) => Array.isArray(value) && value.every(isNoteBlock),
+  aiSuggestions: (value) => Array.isArray(value) && value.every(isAiSuggestion),
+})
+
+const assertNote = (note) => {
+  assertFields(note, 'Note', { id: isNonemptyString, ...noteFieldValidators })
+}
+
+const assertNotePatch = (patch) => {
+  if (!isRecord(patch)) throw invalid('Note patch must be an object')
+  if (hasOwn(patch, 'id')) throw invalid('Note.id is immutable')
+  Object.entries(patch).forEach(([field, value]) => {
+    const validate = noteFieldValidators[field]
+    if (!validate || !validate(value)) throw invalid(`Note.${field} is invalid`)
+  })
+}
+
+const assertRedoAttempt = (attempt) => {
+  if (!isRedoAttempt(attempt)) throw invalid('Redo attempt is invalid')
+}
+
+const assertError = (error) => {
+  assertFields(error, 'Error', {
+    id: isNonemptyString,
+    questionId: isNonemptyString,
+    subject: isNonemptyString,
+    errorType: isOneOf('calculation', 'method', 'knowledge', 'reading', 'execution'),
+    questionSummary: isString,
+    questionContent: isString,
+    errorDescription: isString,
+    relatedTopic: isNonemptyString,
+    topicId: isNonemptyString,
+    firstOccurredAt: isNonemptyString,
+    lastOccurredAt: isNonemptyString,
+    repeatCount: isNonnegativeNumber,
+    status: isOneOf('pending_review', 'reviewing', 'mastered'),
+    studentAnswer: isString,
+    correctAnswer: isString,
+    analysis: isString,
+    acceptKeywords: isStringArray,
+    redoHistory: (value) => Array.isArray(value) && value.every(isRedoAttempt),
+  })
+  if (error.options !== undefined && !isStringArray(error.options)) throw invalid('Error.options is invalid')
+  if (error.correctIndex !== undefined && !isNonnegativeNumber(error.correctIndex)) throw invalid('Error.correctIndex is invalid')
+}
+
+const isHint = (hint) => isRecord(hint)
+  && isNumber(hint.level)
+  && isString(hint.title)
+  && isString(hint.content)
+
+const isSessionQuestion = (question) => isRecord(question)
+  && isNonemptyString(question.id)
+  && isNumber(question.order)
+  && isOneOf('choice', 'calculation', 'proof', 'fill_blank', 'reading', 'writing')(question.type)
+  && isNonemptyString(question.topic)
+  && isNumber(question.difficulty)
+  && isString(question.content)
+  && (question.options === undefined || isStringArray(question.options))
+  && (question.correctIndex === undefined || isNonnegativeNumber(question.correctIndex))
+  && isStringArray(question.acceptKeywords)
+  && isString(question.correctDisplay)
+  && isOneOf('calculation', 'method', 'knowledge', 'reading', 'execution')(question.errorType)
+  && Array.isArray(question.hints)
+  && question.hints.every(isHint)
+  && isRecord(question.result)
+  && isOneOf('correct', 'wrong', 'unanswered')(question.result.status)
+  && Array.isArray(question.result.attempts)
+  && question.result.attempts.every(isSessionAttempt)
+  && isNonnegativeNumber(question.result.hintsUsed)
+  && (question.result.solvedAtHintLevel === null || isNonnegativeNumber(question.result.solvedAtHintLevel))
+
+const assertSession = (session) => {
+  assertFields(session, 'Session', {
+    sessionId: isNonemptyString,
+    taskId: (value) => value === null || isNonemptyString(value),
+    taskTitle: isNonemptyString,
+    subject: isNonemptyString,
+    completedAt: isNonemptyString,
+    timeSpent: isNonnegativeNumber,
+    timeSpentSeconds: isNonnegativeNumber,
+    questions: (value) => Array.isArray(value) && value.every(isSessionQuestion),
+  })
+}
+
+const settingsValidators = Object.freeze({
+  tone: (value) => isNumber(value) && value >= 0 && value <= 100,
+  dailyGoalHours: (value) => isNumber(value) && value >= 1 && value <= 12,
+  reminderTask: (value) => typeof value === 'boolean',
+  reminderErrorReview: (value) => typeof value === 'boolean',
+  reminderStudyTime: (value) => typeof value === 'boolean',
+})
+
+const assertSettingsPatch = (patch) => {
+  if (!isRecord(patch)) throw invalid('Settings patch must be an object')
+  Object.entries(patch).forEach(([field, value]) => {
+    const validate = settingsValidators[field]
+    if (!validate || !validate(value)) throw invalid(`Settings.${field} is invalid`)
+  })
 }
 
 const updateTask = async (id, patch) => {
@@ -50,7 +208,7 @@ const updateError = async (id, recipe) => {
 
 const updateStoredNote = async (id, patch) => {
   if (!hasId({ id })) throw invalid('Note id is required')
-  if (!isRecord(patch)) throw invalid('Note patch must be an object')
+  assertNotePatch(patch)
   const state = await repository.update((current) => {
     if (!current.notes.some((note) => note.id === id)) throw notFound('Note', id)
     return {
@@ -82,7 +240,7 @@ export const reportTaskAdjustment = async (id) => {
 }
 export const createTask = async (task) => {
   if (!isMockMode) return http.post('/api/tasks', task)
-  assertEntity(task, 'Task')
+  assertTask(task)
   const state = await repository.update((current) => {
     if (current.tasks.some((item) => item.id === task.id)) throw duplicate('Task', task.id)
     return { ...current, tasks: [...current.tasks, task] }
@@ -95,8 +253,7 @@ export const addErrors = async (items) => {
   if (!isMockMode) return http.post('/api/errors/batch', { items })
   if (!Array.isArray(items)) throw invalid('Error batch must be an array')
   items.forEach((item) => {
-    assertEntity(item, 'Error')
-    if (!hasId(item, 'questionId')) throw invalid('Error requires a nonempty questionId')
+    assertError(item)
   })
   let added = []
   await repository.update((current) => {
@@ -121,7 +278,7 @@ export const markErrorMastered = async (id) => {
 }
 export const submitRedo = async (id, attempt) => {
   if (!isMockMode) return http.post(`/api/errors/${id}/redo`, attempt)
-  if (!isRecord(attempt) || typeof attempt.isCorrect !== 'boolean') throw invalid('Redo attempt is invalid')
+  assertRedoAttempt(attempt)
   return {
     error: await updateError(id, (error) => ({
       ...error,
@@ -136,7 +293,7 @@ export const submitRedo = async (id, attempt) => {
 // ---------- Notes ----------
 export const createNote = async (note) => {
   if (!isMockMode) return http.post('/api/notes', note)
-  assertEntity(note, 'Note')
+  assertNote(note)
   const state = await repository.update((current) => {
     if (current.notes.some((item) => item.id === note.id)) throw duplicate('Note', note.id)
     return { ...current, notes: [note, ...current.notes] }
@@ -151,7 +308,7 @@ export const updateNote = async (id, patch) => {
 // ---------- Exercise session ----------
 export const submitSession = async (session) => {
   if (!isMockMode) return http.post('/api/sessions', session)
-  assertEntity(session, 'Session', 'sessionId')
+  assertSession(session)
   await repository.update((current) => {
     if (current.sessions.some((item) => item.sessionId === session.sessionId)) throw duplicate('Session', session.sessionId)
     return { ...current, sessions: [...current.sessions, session] }
@@ -162,7 +319,7 @@ export const submitSession = async (session) => {
 // ---------- Settings ----------
 export const updateSettings = async (patch) => {
   if (!isMockMode) return http.patch('/api/student/settings', patch)
-  if (!isRecord(patch)) throw invalid('Settings patch must be an object')
+  assertSettingsPatch(patch)
   const state = await repository.update((current) => ({ ...current, settings: { ...current.settings, ...patch } }))
   return { settings: state.settings }
 }

@@ -85,7 +85,7 @@ export default function Bank() {
       await addTask({
         title: 'Confirm AI-split question classification',
         type: 'ai_recommended', subject: 'A-Level Math', estimatedMinutes: 10,
-        dueAt: null, priority: 'P2', isOverdue: false, status: 'pending',
+        dueAt: null, assignedBy: null, priority: 'P2', isOverdue: false, status: 'pending',
       })
       showToast('Paper uploaded: the AI is splitting and classifying questions — you\'ll be asked to confirm when done', 'success')
       setUploadOpen(false)

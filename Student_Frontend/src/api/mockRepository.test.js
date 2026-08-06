@@ -88,6 +88,21 @@ test.each([
   expect(result.settings).toMatchObject({ dailyGoalHours: 4 })
 })
 
+test.each([
+  ['an object without a sessionId', [{}]],
+  ['a null session', [null]],
+  ['a blank sessionId', [{ sessionId: ' ' }]],
+])('repairs persisted sessions containing %s even though the seed collection is empty', async (_, sessions) => {
+  // Catches identifier validation being inferred only from nonempty seed samples.
+  const storage = createMemoryStorage({
+    [STORAGE_KEY]: JSON.stringify({ version: 1, data: { ...createSeedState(), sessions } }),
+  })
+  const repository = createMockRepository({ storage, latencyMs: 0, seedFactory: createSeedState })
+
+  expect((await repository.bootstrap()).sessions).toEqual([])
+  expect(JSON.parse(storage.getItem(STORAGE_KEY)).data.sessions).toEqual([])
+})
+
 test('honors configured latency before resolving repository calls', async () => {
   // Catches a production mutation that removes the asynchronous latency boundary.
   vi.useFakeTimers()

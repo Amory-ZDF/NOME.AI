@@ -7,9 +7,21 @@ const isPlainStateObject = (value) => value !== null
   && !Array.isArray(value)
   && Object.getPrototypeOf(value) === Object.prototype
 
-const hasNonemptyId = (value) => isPlainStateObject(value)
-  && typeof value.id === 'string'
-  && value.id.trim().length > 0
+const COLLECTION_IDENTIFIERS = Object.freeze({
+  tasks: 'id',
+  errors: 'id',
+  noteFolders: 'id',
+  notes: 'id',
+  bankQuestions: 'id',
+  bankRecommendations: 'questionId',
+  progressTimeline: 'date',
+  achievements: 'id',
+  sessions: 'sessionId',
+})
+
+const hasNonemptyIdentifier = (value, field = 'id') => isPlainStateObject(value)
+  && typeof value[field] === 'string'
+  && value[field].trim().length > 0
 
 const matchesSeedSchema = (value, seedValue) => {
   if (!isPlainStateObject(value) || !isPlainStateObject(seedValue)) return false
@@ -18,8 +30,10 @@ const matchesSeedSchema = (value, seedValue) => {
     const actual = value[key]
     if (Array.isArray(expected)) {
       if (!Array.isArray(actual)) return false
-      const idBearing = expected.length > 0 && expected.every(hasNonemptyId)
-      return !idBearing || actual.every(hasNonemptyId)
+      const identifier = COLLECTION_IDENTIFIERS[key]
+      if (identifier) return actual.every((item) => hasNonemptyIdentifier(item, identifier))
+      const idBearing = expected.length > 0 && expected.every((item) => hasNonemptyIdentifier(item))
+      return !idBearing || actual.every((item) => hasNonemptyIdentifier(item))
     }
     if (isPlainStateObject(expected)) return isPlainStateObject(actual)
     return Object.prototype.hasOwnProperty.call(value, key)
