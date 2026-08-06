@@ -11,6 +11,7 @@
 import { ApiError, http, isMockMode } from './client'
 import { createSeedState } from '../data/mockData'
 import { createMockRepository } from './mockRepository'
+import { isTaskAdjustmentEligible } from '../features/tasks/taskRules'
 
 const repository = createMockRepository({ seedFactory: createSeedState })
 
@@ -252,13 +253,17 @@ export const reportTaskAdjustment = async (id, request) => {
   if (!isAdjustmentRequest(request)) throw invalid('Task adjustment request is invalid')
   if (request.taskId !== id) throw invalid('Task adjustment request taskId must match the target task')
   const state = await repository.update((current) => {
-    if (!current.tasks.some((task) => task.id === id)) throw notFound('Task', id)
+    const task = current.tasks.find((item) => item.id === id)
+    if (!task) throw notFound('Task', id)
+    if (!isTaskAdjustmentEligible(task, current.taskAdjustments)) {
+      throw invalid('Adjustment requests are only available for a pending teacher-assigned task without a submitted adjustment.')
+    }
     if (current.taskAdjustments.some((item) => item.id === request.id)) throw duplicate('Task adjustment request', request.id)
     return {
       ...current,
       taskAdjustments: [...current.taskAdjustments, request],
       tasks: current.tasks.map((task) => (task.id === id
-        ? { ...task, status: 'pending', adjustmentStatus: 'submitted' }
+        ? { ...task, adjustmentStatus: 'submitted' }
         : task)),
     }
   })

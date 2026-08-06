@@ -1,16 +1,18 @@
-import { useMemo, useState } from 'react'
+import { useMemo, useRef, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { motion, AnimatePresence } from 'framer-motion'
 import { useApp } from '../../store/AppStore'
 import { Icon, Badge, PriorityBadge, EmptyState, staggerContainer, fadeUpItem } from '../../components/ui'
-import { isTaskOverdue, rankTasks } from './taskRules'
+import { isTaskAdjustmentEligible, isTaskOverdue, rankTasks } from './taskRules'
 import { TaskAdjustmentModal } from './TaskAdjustmentModal'
 
 function TaskItem({ task, isNextUp, onRequestAdjustment }) {
   const navigate = useNavigate()
-  const { completeTask, showToast, isActionPending } = useApp()
+  const { completeTask, showToast, isActionPending, taskAdjustments } = useApp()
   const [menuOpen, setMenuOpen] = useState(false)
+  const moreButtonRef = useRef(null)
   const done = task.status === 'completed'
+  const canRequestAdjustment = isTaskAdjustmentEligible(task, taskAdjustments)
 
   // Completed tasks remain visible as history with a grey strikethrough.
   const completing = isActionPending(`task:complete:${task.id}`)
@@ -75,9 +77,10 @@ function TaskItem({ task, isNextUp, onRequestAdjustment }) {
       </div>
 
       {/* More actions: cannot complete */}
-      <div className="relative" onClick={(event) => event.stopPropagation()}>
+      {canRequestAdjustment && <div className="relative" onClick={(event) => event.stopPropagation()}>
         <button
-          className="p-1 rounded text-warm-stone/50 hover:text-deep-ink opacity-0 group-hover:opacity-100 transition-opacity"
+          ref={moreButtonRef}
+          className="p-1 rounded text-warm-stone/50 hover:text-deep-ink opacity-0 group-hover:opacity-100 focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-deep-teal transition-opacity"
           onClick={() => setMenuOpen(!menuOpen)}
           aria-label={`More options for ${task.title}`}
           aria-haspopup="menu"
@@ -88,20 +91,20 @@ function TaskItem({ task, isNextUp, onRequestAdjustment }) {
         <AnimatePresence>
           {menuOpen && (
             <motion.div role="menu" initial={{ opacity: 0, y: 4 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }} className="absolute right-0 top-7 bg-pure-surface border border-whisper-line rounded-comp py-1 w-36 z-10">
-              <button className="w-full text-left px-3 py-2 text-sm text-warm-stone hover:bg-warm-paper hover:text-error-red" role="menuitem" aria-label="I can't complete this task" onClick={() => { setMenuOpen(false); onRequestAdjustment(task) }}>
+              <button className="w-full text-left px-3 py-2 text-sm text-warm-stone hover:bg-warm-paper hover:text-error-red" role="menuitem" aria-label="I can't complete this task" onClick={() => { setMenuOpen(false); onRequestAdjustment(task, moreButtonRef.current) }}>
                 Can&apos;t complete — report to teacher
               </button>
             </motion.div>
           )}
         </AnimatePresence>
-      </div>
+      </div>}
     </motion.div>
   )
 }
 
-export function TaskList({ tasks, limit, now = new Date(), availableMinutes = Infinity, weakTopics = [], showNextUp = false }) {
+export function TaskList({ tasks, limit, now = new Date(), availableMinutes = Infinity, weakTopics = [], showNextUp = false, celebrateWhenNoPending = false }) {
   const navigate = useNavigate()
-  const [adjustmentTask, setAdjustmentTask] = useState(null)
+  const [adjustment, setAdjustment] = useState(null)
 
   const sorted = useMemo(() => rankTasks(tasks, { now, availableMinutes, weakTopics }).map((task) => ({
     ...task,
@@ -110,6 +113,7 @@ export function TaskList({ tasks, limit, now = new Date(), availableMinutes = In
 
   const shown = limit ? sorted.slice(0, limit) : sorted
   const nextTaskId = showNextUp ? sorted.find((task) => task.status === 'pending')?.id : null
+  const showCelebration = tasks.length === 0 || (celebrateWhenNoPending && !tasks.some((task) => task.status === 'pending'))
 
   return (
     <section className="zb-card mb-4">
@@ -117,7 +121,7 @@ export function TaskList({ tasks, limit, now = new Date(), availableMinutes = In
         <h2 className="zb-section-title">Task List</h2>
         <Link to="/tasks" className="text-sm text-deep-teal hover:underline">All tasks →</Link>
       </div>
-      {tasks.length === 0 ? (
+      {showCelebration ? (
         <EmptyState
           icon="celebration"
           title="All tasks done for today"
@@ -126,10 +130,10 @@ export function TaskList({ tasks, limit, now = new Date(), availableMinutes = In
         />
       ) : (
         <motion.div variants={staggerContainer} initial="hidden" animate="show" className="-mx-2">
-          {shown.map((task) => <TaskItem key={task.id} task={task} isNextUp={task.id === nextTaskId} onRequestAdjustment={setAdjustmentTask} />)}
+          {shown.map((task) => <TaskItem key={task.id} task={task} isNextUp={task.id === nextTaskId} onRequestAdjustment={(selectedTask, returnFocusTarget) => setAdjustment({ task: selectedTask, returnFocusTarget })} />)}
         </motion.div>
       )}
-      <TaskAdjustmentModal task={adjustmentTask} open={Boolean(adjustmentTask)} onClose={() => setAdjustmentTask(null)} />
+      <TaskAdjustmentModal task={adjustment?.task} open={Boolean(adjustment)} returnFocusTarget={adjustment?.returnFocusTarget} onClose={() => setAdjustment(null)} />
     </section>
   )
 }

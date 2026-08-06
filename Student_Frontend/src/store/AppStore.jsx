@@ -2,6 +2,7 @@ import { createContext, useCallback, useContext, useEffect, useRef, useState } f
 import { runRecoverableAction } from './actionRunner'
 import { defaultAppServices } from './services'
 import { buildAdjustmentRequest } from '../features/tasks/adjustmentRules'
+import { isTaskAdjustmentEligible } from '../features/tasks/taskRules'
 
 const AppContext = createContext(null)
 
@@ -169,24 +170,34 @@ export function AppProvider({ children, services = defaultAppServices }) {
   })), [replaceTasks, runAction, services, showToast])
 
   const requestTaskAdjustment = useCallback((task, draft) => {
+    const actionKey = `task:adjust:${task.id}`
+    if (actionCounts.current.has(actionKey)) {
+      const error = new Error('This task action is already in progress.')
+      showToast(error.message, 'error')
+      return Promise.reject(error)
+    }
+    const currentTask = tasksRef.current.find((item) => item.id === task.id)
+    if (!isTaskAdjustmentEligible(currentTask, taskAdjustmentsRef.current)) {
+      return Promise.reject(new Error('Adjustment requests are only available for a pending teacher-assigned task without a submitted adjustment.'))
+    }
     const request = buildAdjustmentRequest({
-      task,
+      task: currentTask,
       draft,
       now: services.now(),
       id: services.createId(),
     })
-    return runAction(`task:adjust:${task.id}`, 'tasks', () => ({
+    return runAction(actionKey, 'tasks', () => ({
       snapshot: { tasks: tasksRef.current, taskAdjustments: taskAdjustmentsRef.current },
       optimistic: () => {
-        replaceTasks(tasksRef.current.map((item) => (item.id === task.id
-          ? { ...item, status: 'pending', adjustmentStatus: 'submitted' }
+        replaceTasks(tasksRef.current.map((item) => (item.id === currentTask.id
+          ? { ...item, adjustmentStatus: 'submitted' }
           : item)))
         replaceTaskAdjustments([...taskAdjustmentsRef.current, request])
       },
-      request: () => services.api.reportTaskAdjustment(task.id, request),
+      request: () => services.api.reportTaskAdjustment(currentTask.id, request),
       commit: (result) => {
         if (result?.task) {
-          replaceTasks(tasksRef.current.map((item) => (item.id === task.id ? { ...item, ...result.task } : item)))
+          replaceTasks(tasksRef.current.map((item) => (item.id === currentTask.id ? { ...item, ...result.task } : item)))
         }
         if (result?.request) {
           replaceTaskAdjustments(taskAdjustmentsRef.current.map((item) => (item.id === request.id ? { ...item, ...result.request } : item)))

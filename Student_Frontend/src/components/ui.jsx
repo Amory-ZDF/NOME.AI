@@ -1,4 +1,5 @@
 import { motion, AnimatePresence } from 'framer-motion'
+import { useEffect, useId, useRef } from 'react'
 
 // Material Symbol icon
 export function Icon({ name, size = 20, className = '', filled = false }) {
@@ -85,7 +86,55 @@ export function Toggle({ checked, onChange, label }) {
 }
 
 // Modal
-export function Modal({ open, onClose, title, children, width = 'max-w-lg' }) {
+export function Modal({ open, onClose, title, children, width = 'max-w-lg', initialFocusRef, returnFocusTarget }) {
+  const dialogRef = useRef(null)
+  const onCloseRef = useRef(onClose)
+  const titleId = useId()
+  onCloseRef.current = onClose
+
+  useEffect(() => {
+    if (!open) return undefined
+
+    const restoreTarget = returnFocusTarget || document.activeElement
+    const dialog = dialogRef.current
+    const focusableSelector = 'button:not([disabled]):not([tabindex="-1"]), select:not([disabled]), textarea:not([disabled]), input:not([disabled]), a[href], [tabindex]:not([tabindex="-1"])'
+    const focusable = () => Array.from(dialog?.querySelectorAll(focusableSelector) ?? [])
+    const first = initialFocusRef?.current || focusable()[0] || dialog
+    first?.focus()
+
+    const handleKeyDown = (event) => {
+      if (event.key === 'Escape') {
+        event.preventDefault()
+        onCloseRef.current()
+        return
+      }
+      if (event.key !== 'Tab') return
+
+      const elements = focusable()
+      if (elements.length === 0) {
+        event.preventDefault()
+        dialog?.focus()
+        return
+      }
+      const firstElement = elements[0]
+      const lastElement = elements.at(-1)
+      const activeElement = document.activeElement
+      if (event.shiftKey && (activeElement === firstElement || !dialog?.contains(activeElement))) {
+        event.preventDefault()
+        lastElement.focus()
+      } else if (!event.shiftKey && (activeElement === lastElement || !dialog?.contains(activeElement))) {
+        event.preventDefault()
+        firstElement.focus()
+      }
+    }
+
+    document.addEventListener('keydown', handleKeyDown)
+    return () => {
+      document.removeEventListener('keydown', handleKeyDown)
+      if (restoreTarget?.isConnected) restoreTarget.focus()
+    }
+  }, [initialFocusRef, open, returnFocusTarget])
+
   return (
     <AnimatePresence>
       {open && (
@@ -95,6 +144,11 @@ export function Modal({ open, onClose, title, children, width = 'max-w-lg' }) {
         >
           <div className="absolute inset-0 bg-deep-ink/30 backdrop-blur-[2px]" onClick={onClose} />
           <motion.div
+            ref={dialogRef}
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby={titleId}
+            tabIndex={-1}
             className={`relative bg-pure-surface rounded-card border border-whisper-line w-full ${width} p-6 max-h-[85vh] overflow-y-auto`}
             initial={{ opacity: 0, y: 12, scale: 0.98 }}
             animate={{ opacity: 1, y: 0, scale: 1 }}
@@ -102,8 +156,8 @@ export function Modal({ open, onClose, title, children, width = 'max-w-lg' }) {
             transition={{ type: 'spring', stiffness: 300, damping: 28 }}
           >
             <div className="flex items-center justify-between mb-4">
-              <h3 className="zb-section-title">{title}</h3>
-              <button onClick={onClose} className="text-warm-stone hover:text-deep-ink"><Icon name="close" /></button>
+              <h3 id={titleId} className="zb-section-title">{title}</h3>
+              <button type="button" aria-label="close" onClick={onClose} className="text-warm-stone hover:text-deep-ink"><Icon name="close" /></button>
             </div>
             {children}
           </motion.div>

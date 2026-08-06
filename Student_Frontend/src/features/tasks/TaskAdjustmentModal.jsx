@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useRef, useState } from 'react'
 import { Modal } from '../../components/ui'
 import { useApp } from '../../store/AppStore'
 import { ADJUSTMENT_REASONS, validateAdjustmentDraft } from './adjustmentRules'
@@ -17,8 +17,9 @@ const initialDraft = {
   proposedDueAt: '',
 }
 
-export function TaskAdjustmentModal({ task, open, onClose }) {
+export function TaskAdjustmentModal({ task, open, onClose, returnFocusTarget }) {
   const { requestTaskAdjustment, isActionPending } = useApp()
+  const reasonRef = useRef(null)
   const [draft, setDraft] = useState(initialDraft)
   const [errors, setErrors] = useState({})
   const pending = task ? isActionPending(`task:adjust:${task.id}`) : false
@@ -58,12 +59,12 @@ export function TaskAdjustmentModal({ task, open, onClose }) {
   }
 
   return (
-    <Modal open={open} onClose={close} title="Adjust task">
+    <Modal open={open} onClose={close} title="Adjust task" initialFocusRef={reasonRef} returnFocusTarget={returnFocusTarget}>
       <form onSubmit={submit}>
         <p className="text-sm text-warm-stone mb-4">Tell your teacher what needs to change for “{task?.title}”.</p>
 
         <label className="block text-sm font-medium mb-1.5" htmlFor="task-adjustment-reason">Reason</label>
-        <select id="task-adjustment-reason" className="zb-input mb-1" value={draft.reason} onChange={update('reason')} disabled={pending}>
+        <select ref={reasonRef} id="task-adjustment-reason" className="zb-input mb-1" value={draft.reason} onChange={update('reason')} disabled={pending}>
           <option value="">Choose a reason</option>
           {ADJUSTMENT_REASONS.map((reason) => <option key={reason} value={reason}>{reasonLabels[reason]}</option>)}
         </select>

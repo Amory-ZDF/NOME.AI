@@ -41,6 +41,16 @@ const matchesSeedSchema = (value, seedValue) => {
   })
 }
 
+const migrateStoredState = (envelope, fallback) => {
+  if (envelope?.version !== STORAGE_VERSION || !isPlainStateObject(envelope.data)) return null
+
+  const data = Object.prototype.hasOwnProperty.call(envelope.data, 'taskAdjustments')
+    ? envelope.data
+    : { ...envelope.data, taskAdjustments: [] }
+
+  return matchesSeedSchema(data, fallback) ? data : null
+}
+
 export function createMockRepository({ storage = window.localStorage, latencyMs = 60, seedFactory }) {
   const wait = () => new Promise((resolve) => setTimeout(resolve, latencyMs))
   const seed = () => clone(seedFactory())
@@ -51,7 +61,7 @@ export function createMockRepository({ storage = window.localStorage, latencyMs 
 
     try {
       const envelope = JSON.parse(raw)
-      return envelope.version === STORAGE_VERSION && matchesSeedSchema(envelope.data, fallback) ? envelope.data : fallback
+      return migrateStoredState(envelope, fallback) ?? fallback
     } catch {
       return fallback
     }

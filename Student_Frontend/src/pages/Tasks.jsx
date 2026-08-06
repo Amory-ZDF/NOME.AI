@@ -41,7 +41,7 @@ export default function Tasks() {
         ))}
       </div>
 
-      <TaskList tasks={filtered} now={now} availableMinutes={60} weakTopics={learningSummary?.weakTopics ?? []} />
+      <TaskList tasks={filtered} now={now} availableMinutes={60} weakTopics={learningSummary?.weakTopics ?? []} showNextUp />
     </div>
   )
 }

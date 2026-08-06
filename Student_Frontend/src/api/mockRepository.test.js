@@ -114,6 +114,31 @@ test('repairs persisted adjustment requests without stable identifiers', async (
   expect(JSON.parse(storage.getItem(STORAGE_KEY)).data.taskAdjustments).toEqual([])
 })
 
+test('migrates legacy v1 state without task adjustments while preserving user changes', async () => {
+  const legacy = createSeedState()
+  delete legacy.taskAdjustments
+  legacy.tasks = legacy.tasks.map((task) => (task.id === 't1' ? { ...task, status: 'completed' } : task))
+  legacy.notes = legacy.notes.map((note) => (note.id === 'n1' ? { ...note, title: 'My edited note' } : note))
+  legacy.sessions = [{ sessionId: 'legacy-session' }]
+  legacy.settings = { ...legacy.settings, tone: 88 }
+  const storage = createMemoryStorage({
+    [STORAGE_KEY]: JSON.stringify({ version: 1, data: legacy }),
+  })
+  const repository = createMockRepository({ storage, latencyMs: 0, seedFactory: createSeedState })
+
+  const migrated = await repository.bootstrap()
+
+  expect(migrated.tasks.find((task) => task.id === 't1')).toMatchObject({ status: 'completed' })
+  expect(migrated.notes.find((note) => note.id === 'n1')).toMatchObject({ title: 'My edited note' })
+  expect(migrated.sessions).toEqual([{ sessionId: 'legacy-session' }])
+  expect(migrated.settings).toMatchObject({ tone: 88 })
+  expect(migrated.taskAdjustments).toEqual([])
+  expect(JSON.parse(storage.getItem(STORAGE_KEY)).data).toMatchObject({
+    sessions: [{ sessionId: 'legacy-session' }],
+    taskAdjustments: [],
+  })
+})
+
 test('honors configured latency before resolving repository calls', async () => {
   // Catches a production mutation that removes the asynchronous latency boundary.
   vi.useFakeTimers()

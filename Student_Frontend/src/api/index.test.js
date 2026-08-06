@@ -20,6 +20,12 @@ const makeTask = (overrides = {}) => ({
   isOverdue: false, status: 'pending', ...overrides,
 })
 
+const makeAdjustmentRequest = (overrides = {}) => ({
+  id: 'adj-1', taskId: 't1', reason: 'difficulty', details: '', availableMinutes: 20,
+  proposedDueAt: '2026-08-08T10:00:00Z', createdAt: '2026-08-06T10:00:00Z', status: 'submitted',
+  ...overrides,
+})
+
 const makeNote = (overrides = {}) => ({
   id: 'n-new', title: 'New note', folderId: 'f-math', folderPath: 'A-Level Math',
   tags: [], linkedTopics: [], linkedErrors: [], source: 'typed',
@@ -85,10 +91,7 @@ test('createTask returns and persists the created task', async () => {
 test('an adjustment request keeps the task pending and persists the submitted request', async () => {
   // Catches a mock adapter mutation that drops the request or removes/completes the assigned task.
   await resetMockState()
-  const request = {
-    id: 'adj-1', taskId: 't1', reason: 'difficulty', details: '', availableMinutes: 20,
-    proposedDueAt: '2026-08-08T10:00:00Z', createdAt: '2026-08-06T10:00:00Z', status: 'submitted',
-  }
+  const request = makeAdjustmentRequest()
 
   await expect(reportTaskAdjustment('t1', request)).resolves.toMatchObject({
     request,
@@ -99,6 +102,39 @@ test('an adjustment request keeps the task pending and persists the submitted re
     expect.objectContaining({ id: 't1', status: 'pending', adjustmentStatus: 'submitted' }),
   ]))
   expect(data.taskAdjustments).toContainEqual(request)
+})
+
+test('rejects adjustment requests for completed tasks without resurrecting them', async () => {
+  await resetMockState()
+  await completeTask('t1')
+
+  await expect(reportTaskAdjustment('t1', makeAdjustmentRequest())).rejects.toThrow(/pending teacher-assigned task/i)
+
+  const data = await bootstrap()
+  expect(data.tasks.find((task) => task.id === 't1')).toMatchObject({ status: 'completed' })
+  expect(data.taskAdjustments).toEqual([])
+})
+
+test('rejects adjustment requests for non-teacher tasks', async () => {
+  await resetMockState()
+
+  await expect(reportTaskAdjustment('t3', makeAdjustmentRequest({ id: 'adj-error', taskId: 't3' }))).rejects.toThrow(/pending teacher-assigned task/i)
+
+  const data = await bootstrap()
+  expect(data.tasks.find((task) => task.id === 't3')).toMatchObject({ type: 'error_review', status: 'pending' })
+  expect(data.taskAdjustments).toEqual([])
+})
+
+test('rejects a repeat adjustment while a submitted request is active', async () => {
+  await resetMockState()
+  const first = makeAdjustmentRequest()
+  await reportTaskAdjustment('t1', first)
+
+  await expect(reportTaskAdjustment('t1', makeAdjustmentRequest({ id: 'adj-2' }))).rejects.toThrow(/pending teacher-assigned task/i)
+
+  const data = await bootstrap()
+  expect(data.tasks.find((task) => task.id === 't1')).toMatchObject({ status: 'pending', adjustmentStatus: 'submitted' })
+  expect(data.taskAdjustments).toEqual([first])
 })
 
 test('sends the full adjustment request to the real endpoint', async () => {

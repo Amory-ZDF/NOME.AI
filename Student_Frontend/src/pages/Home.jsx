@@ -127,7 +127,7 @@ export default function Home() {
   return (
     <div className="max-w-content mx-auto px-4 lg:px-0 py-8">
       <Greeting />
-      <TaskList tasks={tasks} now={now} availableMinutes={60} weakTopics={learningSummary?.weakTopics ?? []} showNextUp />
+      <TaskList tasks={tasks} now={now} availableMinutes={60} weakTopics={learningSummary?.weakTopics ?? []} showNextUp celebrateWhenNoPending />
       <ModuleCards />
       <LearningStatus />
     </div>

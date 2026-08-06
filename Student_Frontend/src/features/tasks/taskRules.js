@@ -12,6 +12,14 @@ export const isTaskOverdue = (task, now) => (
   task.status === 'pending' && dueTime(task.dueAt) < new Date(now).getTime()
 )
 
+export const isTaskAdjustmentEligible = (task, adjustments = []) => Boolean(
+  task
+  && task.status === 'pending'
+  && task.type === 'teacher_assigned'
+  && task.adjustmentStatus !== 'submitted'
+  && !adjustments.some((request) => request.taskId === task.id && request.status === 'submitted')
+)
+
 export function rankTasks(tasks, { now = new Date(), availableMinutes = Infinity, weakTopics = [] } = {}) {
   return [...tasks].sort((a, b) => {
     const aWeak = (a.topicIds ?? []).some((topic) => weakTopics.includes(topic))

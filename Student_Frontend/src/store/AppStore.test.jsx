@@ -1,10 +1,10 @@
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
-import { expect, test } from 'vitest'
+import { expect, test, vi } from 'vitest'
 import { AppProvider, useApp } from './AppStore'
 import { createAppServices } from './services'
 
 const bootData = {
-  tasks: [{ id: 't1', status: 'pending' }],
+  tasks: [{ id: 't1', type: 'teacher_assigned', status: 'pending' }],
   taskAdjustments: [],
   errors: [],
   notes: [],
@@ -397,4 +397,60 @@ test('rejects a duplicate task action and rolls back an adjustment failure witho
   expect((await firstSettlement).message).toBe('offline')
   expect(actions.tasks).toMatchObject([{ id: 't1', status: 'pending' }])
   expect(actions.taskAdjustments).toEqual([])
+})
+
+test.each([
+  ['completed teacher task', { id: 't1', type: 'teacher_assigned', status: 'completed' }],
+  ['pending non-teacher task', { id: 't1', type: 'error_review', status: 'pending' }],
+  ['teacher task with a submitted adjustment', { id: 't1', type: 'teacher_assigned', status: 'pending', adjustmentStatus: 'submitted' }],
+])('rejects adjustment for a %s without mutating or calling the API', async (_, task) => {
+  const reportTaskAdjustment = vi.fn(() => Promise.resolve({}))
+  let actions
+  function EligibilityProbe() {
+    actions = useApp()
+    return <output>{actions.bootStatus}</output>
+  }
+  render(<AppProvider services={createAppServices({
+    apiClient: createApi({
+      bootstrap: () => Promise.resolve({ ...bootData, tasks: [task] }),
+      reportTaskAdjustment,
+    }),
+    now: () => new Date('2026-08-06T00:00:00.000Z'),
+    createId: () => 'generated-id',
+  })}><EligibilityProbe /></AppProvider>)
+  await screen.findByText('ready')
+  const before = actions.tasks[0]
+  const draft = { reason: 'difficulty', details: '', availableMinutes: 20, proposedDueAt: '2026-08-08T10:00:00.000Z' }
+
+  await expect(actions.requestTaskAdjustment(actions.tasks[0], draft)).rejects.toThrow(/pending teacher-assigned task/i)
+
+  expect(reportTaskAdjustment).not.toHaveBeenCalled()
+  expect(actions.tasks[0]).toEqual(before)
+  expect(actions.taskAdjustments).toEqual([])
+})
+
+test('rejects a second adjustment after the first submitted request settles', async () => {
+  const reportTaskAdjustment = vi.fn((_, request) => Promise.resolve({
+    request,
+    task: { id: 't1', type: 'teacher_assigned', status: 'pending', adjustmentStatus: 'submitted' },
+  }))
+  let actions
+  function RepeatProbe() {
+    actions = useApp()
+    return <output>{actions.bootStatus}</output>
+  }
+  render(<AppProvider services={createAppServices({
+    apiClient: createApi({ reportTaskAdjustment }),
+    now: () => new Date('2026-08-06T00:00:00.000Z'),
+    createId: () => `generated-${reportTaskAdjustment.mock.calls.length + 1}`,
+  })}><RepeatProbe /></AppProvider>)
+  await screen.findByText('ready')
+  const draft = { reason: 'difficulty', details: '', availableMinutes: 20, proposedDueAt: '2026-08-08T10:00:00.000Z' }
+
+  await act(async () => { await actions.requestTaskAdjustment(actions.tasks[0], draft) })
+  await expect(actions.requestTaskAdjustment(actions.tasks[0], draft)).rejects.toThrow(/pending teacher-assigned task/i)
+
+  expect(reportTaskAdjustment).toHaveBeenCalledTimes(1)
+  expect(actions.tasks[0]).toMatchObject({ status: 'pending', adjustmentStatus: 'submitted' })
+  expect(actions.taskAdjustments).toHaveLength(1)
 })
