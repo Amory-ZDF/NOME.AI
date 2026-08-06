@@ -30,6 +30,7 @@ export default function Summary() {
   const accuracy = Math.round((correctCount / total) * 100)
   const accuracyChange = accuracy >= 66 ? 12 : accuracy >= 50 ? 5 : -3
   const independentCount = session.questions.filter((q) => q.result.status === 'correct' && q.result.hintsUsed === 0).length
+  const assistedCount = total - independentCount
   const avgHints = (session.questions.reduce((s, q) => s + q.result.hintsUsed, 0) / total).toFixed(1)
   const wrongQuestions = wrongQuestionsSafe(session)
 
@@ -91,7 +92,11 @@ export default function Summary() {
         </div>
 
         {wrongQuestions.length === 0 ? (
-          <p className="text-sm text-warm-stone py-4 text-center">No mistakes in this session — all solved independently 🎉</p>
+          <p className="text-sm text-warm-stone py-4 text-center">
+            {independentCount === total
+              ? 'No mistakes in this session — all solved independently 🎉'
+              : `No unresolved mistakes in this session. ${assistedCount} ${assistedCount === 1 ? 'question was' : 'questions were'} solved with hints or after retrying.`}
+          </p>
         ) : (
           <>
             {/* Horizontal stacked bar chart */}
@@ -190,7 +195,9 @@ export default function Summary() {
         <p className="text-sm text-warm-stone mb-4">
           {wrongQuestions.length > 0
             ? `Try 1 variant question to verify mastery — focus on reinforcing "${wrongQuestions[0].topic}".`
-            : 'Great form! Try harder questions to keep progressing.'}
+            : independentCount < total
+              ? 'No unresolved mistakes remain. Review assisted solutions, then try a variant question to confirm independent mastery.'
+              : 'Great form! Try harder questions to keep progressing.'}
         </p>
         <div className="flex flex-wrap gap-2 mb-5">
           <button className="zb-btn-primary" onClick={() => navigate('/bank')}>
