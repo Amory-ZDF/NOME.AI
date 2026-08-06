@@ -120,3 +120,12 @@ test('preserves solved progress after later attempts and hint requests', () => {
   expect(laterWrong.attempts).toHaveLength(3)
   expect(hintRequest).toMatchObject({ status: 'correct', hintLevel: 3, transitionError: 'ALREADY_SOLVED' })
 })
+
+test('does not raise hint level after an independent solve followed by a wrong attempt', () => {
+  const question = { acceptKeywords: ['42'] }
+  const solved = submitAttempt(createQuestionProgress('q1'), question, '42', '2026-08-06T10:00:00Z')
+  const laterWrong = submitAttempt(solved, question, '41', '2026-08-06T10:01:00Z')
+
+  expect(laterWrong).toMatchObject({ status: 'correct', solvedAtHintLevel: 0, hintLevel: 0 })
+  expect(laterWrong.attempts).toHaveLength(2)
+})

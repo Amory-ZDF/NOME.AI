@@ -21,7 +21,9 @@ export function submitAttempt(progress, question, answer, submittedAt) {
     submittedAt,
     isCorrect,
   }]
-  const firstWrongAttempt = !isCorrect && !progress.attempts.some((attempt) => !attempt.isCorrect)
+  const firstWrongAttempt = progress.status !== 'correct'
+    && !isCorrect
+    && !progress.attempts.some((attempt) => !attempt.isCorrect)
 
   return {
     ...progress,
