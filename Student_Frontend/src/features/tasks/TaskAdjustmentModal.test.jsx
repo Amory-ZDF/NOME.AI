@@ -8,11 +8,12 @@ import { TaskAdjustmentModal } from './TaskAdjustmentModal'
 
 const now = new Date('2026-08-06T10:00:00.000Z')
 const task = { id: 'teacher', title: 'Math P3 Ch7 Review', type: 'teacher_assigned', subject: 'Math', estimatedMinutes: 45, dueAt: '2026-08-08T12:00:00.000Z', assignedBy: 'Ms. Wang', priority: 'P1', isOverdue: false, status: 'pending', topicIds: ['calculus'] }
+const secondTask = { id: 'error-review', title: 'Error review practice', type: 'error_review', subject: 'Math', estimatedMinutes: 20, dueAt: null, assignedBy: null, priority: 'P2', isOverdue: false, status: 'pending', topicIds: [] }
 
 function servicesFor({ reportTaskAdjustment = vi.fn(async (_, request) => ({ request, task: { ...task, adjustmentStatus: 'submitted' } })) } = {}) {
   return createAppServices({
     apiClient: {
-      bootstrap: async () => ({ tasks: [task], taskAdjustments: [], greeting: null, moduleStats: null, learningSummary: { weakTopics: ['calculus'], knowledgeHeatmap: [] }, errors: [], notes: [], noteFolders: [], settings: {} }),
+      bootstrap: async () => ({ tasks: [task, secondTask], taskAdjustments: [], greeting: null, moduleStats: null, learningSummary: { weakTopics: ['calculus'], knowledgeHeatmap: [] }, errors: [], notes: [], noteFolders: [], settings: {} }),
       completeTask: vi.fn(), reportTaskAdjustment,
       createTask: vi.fn(), addErrors: vi.fn(), markErrorMastered: vi.fn(), submitRedo: vi.fn(), createNote: vi.fn(), updateNote: vi.fn(), submitSession: vi.fn(), updateSettings: vi.fn(),
     },
@@ -21,8 +22,8 @@ function servicesFor({ reportTaskAdjustment = vi.fn(async (_, request) => ({ req
   })
 }
 
-async function openAdjustment(user) {
-  await user.click(await screen.findByRole('button', { name: /more options for Math P3/i }))
+async function openAdjustment(user, title = 'Math P3') {
+  await user.click(await screen.findByRole('button', { name: new RegExp(`more options for ${title}`, 'i') }))
   await user.click(screen.getByRole('menuitem', { name: /I can't complete this/i }))
 }
 
@@ -63,6 +64,37 @@ test('shows field validation errors without sending an invalid adjustment reques
   expect(reportTaskAdjustment).not.toHaveBeenCalled()
 })
 
+test('resets a dismissed invalid draft before reopening the same task', async () => {
+  const user = userEvent.setup()
+  renderStudentApp(<App services={servicesFor()} />)
+
+  await openAdjustment(user)
+  await user.type(screen.getByLabelText('Details'), 'Stale explanation')
+  await user.click(screen.getByRole('button', { name: 'Send adjustment request' }))
+  expect(screen.getAllByRole('alert')).toHaveLength(2)
+
+  await user.click(screen.getByRole('button', { name: 'Cancel' }))
+  await openAdjustment(user)
+
+  expect(screen.getByLabelText('Details')).toHaveValue('')
+  expect(screen.queryAllByRole('alert')).toHaveLength(0)
+})
+
+test('resets a close-icon dismissal before opening another task adjustment', async () => {
+  const user = userEvent.setup()
+  renderStudentApp(<App services={servicesFor()} />)
+
+  await openAdjustment(user)
+  await completeDraft(user)
+  await user.click(screen.getByRole('button', { name: 'close' }))
+  await openAdjustment(user, 'Error review practice')
+
+  expect(screen.getByLabelText('Reason')).toHaveValue('')
+  expect(screen.getByLabelText('Details')).toHaveValue('')
+  expect(screen.getByLabelText('Available minutes')).toHaveValue(60)
+  expect(screen.getByLabelText('Proposed new time')).toHaveValue('')
+})
+
 test('disables duplicate adjustment submission while the request is pending', async () => {
   const user = userEvent.setup()
   let resolveRequest
@@ -75,7 +107,10 @@ test('disables duplicate adjustment submission while the request is pending', as
   await user.click(submit)
 
   expect(submit).toBeDisabled()
+  expect(screen.getByRole('button', { name: 'Cancel' })).toBeDisabled()
   expect(reportTaskAdjustment).toHaveBeenCalledTimes(1)
+  await user.click(screen.getByRole('button', { name: 'close' }))
+  expect(screen.getByLabelText('Details')).toHaveValue('Mock exam preparation')
   resolveRequest({ request: { id: 'adjustment-id' }, task: { ...task, adjustmentStatus: 'submitted' } })
   expect(await screen.findByText(/Adjustment request sent to your teacher/i)).toBeInTheDocument()
 })

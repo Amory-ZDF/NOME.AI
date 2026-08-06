@@ -28,8 +28,16 @@ export function TaskAdjustmentModal({ task, open, onClose }) {
     setErrors((current) => ({ ...current, [field]: undefined }))
   }
 
+  const reset = () => {
+    setDraft(initialDraft)
+    setErrors({})
+  }
+
   const close = () => {
-    if (!pending) onClose()
+    if (!pending) {
+      reset()
+      onClose()
+    }
   }
 
   const submit = async (event) => {
@@ -42,8 +50,7 @@ export function TaskAdjustmentModal({ task, open, onClose }) {
 
     try {
       await requestTaskAdjustment(task, draft)
-      setDraft(initialDraft)
-      setErrors({})
+      reset()
       onClose()
     } catch {
       // AppStore rolls back and displays the recoverable write failure.
