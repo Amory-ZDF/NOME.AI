@@ -117,3 +117,73 @@ test('updateSettings returns and persists the merged settings', async () => {
   await expect(updateSettings({ tone: 80 })).resolves.toMatchObject({ settings: { tone: 80, dailyGoalHours: 4 } })
   await expect(bootstrap()).resolves.toMatchObject({ settings: { tone: 80, dailyGoalHours: 4 } })
 })
+
+test.each([
+  ['task updater', () => completeTask('missing')],
+  ['error updater', () => markErrorMastered('missing')],
+  ['note updater', () => updateNote('missing', { title: 'No target' })],
+])('%s rejects an unknown target with a typed not-found error', async (_, command) => {
+  // Catches mock update commands silently resolving `{ entity: undefined }` for missing IDs.
+  await resetMockState()
+
+  await expect(command()).rejects.toMatchObject({
+    name: 'ApiError', status: 404, code: 'NOT_FOUND',
+  })
+})
+
+test('createTask rejects invalid and duplicate entities without changing stored tasks', async () => {
+  // Catches mock creates accepting missing IDs or appending an existing entity twice.
+  await resetMockState()
+  const before = (await bootstrap()).tasks
+
+  await expect(createTask({ title: 'Missing id' })).rejects.toMatchObject({ name: 'ApiError', code: 'INVALID_INPUT' })
+  await expect(createTask({ ...before[0] })).rejects.toMatchObject({ name: 'ApiError', code: 'DUPLICATE_ID' })
+  await expect(bootstrap()).resolves.toMatchObject({ tasks: before })
+})
+
+test('createNote and submitSession reject duplicate or invalid entities', async () => {
+  // Catches non-task creator families accepting duplicate IDs or malformed payloads.
+  await resetMockState()
+  await expect(createNote({ title: 'Missing id' })).rejects.toMatchObject({ name: 'ApiError', code: 'INVALID_INPUT' })
+  await expect(createNote({ id: 'n1', title: 'Duplicate' })).rejects.toMatchObject({ name: 'ApiError', code: 'DUPLICATE_ID' })
+  await expect(submitSession({ score: 10 })).rejects.toMatchObject({ name: 'ApiError', code: 'INVALID_INPUT' })
+
+  const session = { sessionId: 's-duplicate', questions: [] }
+  await submitSession(session)
+  await expect(submitSession(session)).rejects.toMatchObject({ name: 'ApiError', code: 'DUPLICATE_ID' })
+})
+
+test('addErrors deduplicates a submitted batch and persisted question IDs', async () => {
+  // Catches batch duplicates being added twice or persisted dedupe returning a phantom success.
+  await resetMockState()
+  const first = { id: 'e-batch-1', questionId: 'q-batch', redoHistory: [] }
+  const duplicate = { id: 'e-batch-2', questionId: 'q-batch', redoHistory: [] }
+
+  await expect(addErrors([first, duplicate])).resolves.toEqual({ errors: [first] })
+  await expect(addErrors([{ ...duplicate, id: 'e-batch-3' }])).resolves.toEqual({ errors: [] })
+  expect((await bootstrap()).errors.filter((error) => error.questionId === 'q-batch')).toEqual([first])
+})
+
+test('addErrors rejects malformed items with a typed error', async () => {
+  // Catches malformed batch entities reaching repository state and later crashing consumers.
+  await resetMockState()
+
+  await expect(addErrors([{ id: '', questionId: 'q-bad' }])).rejects.toMatchObject({
+    name: 'ApiError', code: 'INVALID_INPUT',
+  })
+})
+
+test('addErrors rejects duplicate entity IDs without changing persisted errors', async () => {
+  // Catches distinct questions sharing an entity ID and corrupting the seed-derived ID invariant.
+  await resetMockState()
+  const before = (await bootstrap()).errors
+
+  await expect(addErrors([
+    { id: 'e-shared', questionId: 'q-one' },
+    { id: 'e-shared', questionId: 'q-two' },
+  ])).rejects.toMatchObject({ name: 'ApiError', code: 'DUPLICATE_ID' })
+  await expect(addErrors([{ id: before[0].id, questionId: 'q-new-id-collision' }])).rejects.toMatchObject({
+    name: 'ApiError', code: 'DUPLICATE_ID',
+  })
+  expect((await bootstrap()).errors).toEqual(before)
+})

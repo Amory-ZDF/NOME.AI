@@ -694,6 +694,7 @@ export function createSeedState() {
     achievements,
     moduleStats,
     learningSummary,
+    sessions: [],
     settings: defaultSettings,
   })
 }

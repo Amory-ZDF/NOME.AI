@@ -1,12 +1,14 @@
-export async function runRecoverableAction({ snapshot, optimistic, request, commit, rollback, onError }) {
-  optimistic()
+export async function runRecoverableAction({ snapshot, optimistic, request, commit, rollback, onError, isActive = () => true }) {
+  if (isActive()) optimistic()
   try {
     const result = await request()
-    commit(result)
+    if (isActive()) commit(result)
     return result
   } catch (error) {
-    rollback(snapshot)
-    onError(error)
+    if (isActive()) {
+      rollback(snapshot)
+      onError(error)
+    }
     throw error
   }
 }

@@ -56,7 +56,7 @@ function QuestionRow({ q, smart }) {
 
 export default function Bank() {
   const navigate = useNavigate()
-  const { showToast, addTask } = useApp()
+  const { showToast, addTask, isActionPending } = useApp()
   const [subject, setSubject] = useState('All')
   const [difficulty, setDifficulty] = useState('all')
   const [type, setType] = useState('all')
@@ -79,6 +79,20 @@ export default function Bank() {
     .filter((r) => r.q && (subject === 'All' || r.q.subject === subject))
 
   const selectCls = 'zb-input !w-auto !h-9 text-sm'
+
+  const uploadPaper = async () => {
+    try {
+      await addTask({
+        title: 'Confirm AI-split question classification',
+        type: 'ai_recommended', subject: 'A-Level Math', estimatedMinutes: 10,
+        dueAt: null, priority: 'P2', isOverdue: false, status: 'pending',
+      })
+      showToast('Paper uploaded: the AI is splitting and classifying questions — you\'ll be asked to confirm when done', 'success')
+      setUploadOpen(false)
+    } catch {
+      // AppStore rolls back and displays the write failure.
+    }
+  }
 
   return (
     <div className="max-w-content mx-auto px-4 lg:px-0 py-8">
@@ -159,15 +173,7 @@ export default function Bank() {
           <Icon name="upload_file" size={32} className="text-deep-teal" />
           <p className="text-sm font-medium">Select a paper file (PDF / photo)</p>
           <p className="text-xs text-warm-stone">The AI will automatically split it into individual questions and classify them</p>
-          <input type="file" className="hidden" onChange={() => {
-            setUploadOpen(false)
-            showToast('Paper uploaded: the AI is splitting and classifying questions — you\'ll be asked to confirm when done', 'success')
-            addTask({
-              id: `t-upload-${Date.now()}`, title: 'Confirm AI-split question classification',
-              type: 'ai_recommended', subject: 'A-Level Math', estimatedMinutes: 10,
-              dueAt: null, priority: 'P2', isOverdue: false, status: 'pending',
-            })
-          }} />
+          <input type="file" className="hidden" disabled={isActionPending('addTask')} onChange={uploadPaper} />
         </label>
       </Modal>
     </div>

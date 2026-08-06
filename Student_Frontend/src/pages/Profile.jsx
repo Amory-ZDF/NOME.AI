@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { motion } from 'framer-motion'
 import { useApp } from '../store/AppStore'
@@ -172,38 +172,53 @@ function Achievements() {
 
 // ---------- Settings panel (PRD §7.4) ----------
 function SettingsModal({ open, onClose }) {
-  const { settings, updateSettings, showToast } = useApp()
+  const { settings, updateSettings, showToast, isActionPending } = useApp()
+  const [draft, setDraft] = useState(settings)
+  useEffect(() => {
+    if (open && settings) setDraft(settings)
+  }, [open, settings])
   if (!settings) return null
+  const pending = isActionPending('updateSettings')
+  const save = async () => {
+    try {
+      await updateSettings(draft)
+      showToast('Settings saved and applied', 'success')
+      onClose()
+    } catch {
+      // AppStore rolls back and displays the write failure.
+    }
+  }
   return (
     <Modal open={open} onClose={onClose} title="Settings">
       <div className="flex flex-col gap-5">
         <div>
-          <label className="text-sm font-medium block mb-2">AI tone style</label>
+          <label htmlFor="settings-tone" className="text-sm font-medium block mb-2">AI tone style</label>
           <input
-            type="range" min="0" max="100" value={settings.tone}
-            onChange={(e) => updateSettings({ tone: Number(e.target.value) })}
+            id="settings-tone" type="range" min="0" max="100" value={draft.tone}
+            onChange={(e) => setDraft((current) => ({ ...current, tone: Number(e.target.value) }))}
             className="w-full accent-teal-600"
           />
           <div className="flex justify-between text-xs text-warm-stone mt-1">
-            <span className={settings.tone < 50 ? 'text-deep-teal font-medium' : ''}>Warm & encouraging</span>
-            <span className={settings.tone >= 50 ? 'text-deep-teal font-medium' : ''}>Strict coach</span>
+            <span className={draft.tone < 50 ? 'text-deep-teal font-medium' : ''}>Warm & encouraging</span>
+            <span className={draft.tone >= 50 ? 'text-deep-teal font-medium' : ''}>Strict coach</span>
           </div>
         </div>
         <div>
-          <label className="text-sm font-medium block mb-2">Daily study goal (hours)</label>
+          <label htmlFor="settings-daily-goal" className="text-sm font-medium block mb-2">Daily study goal (hours)</label>
           <input
+            id="settings-daily-goal"
             type="number" min="1" max="12" className="zb-input max-w-[120px]"
-            value={settings.dailyGoalHours}
-            onChange={(e) => updateSettings({ dailyGoalHours: Number(e.target.value) })}
+            value={draft.dailyGoalHours}
+            onChange={(e) => setDraft((current) => ({ ...current, dailyGoalHours: Number(e.target.value) }))}
           />
         </div>
         <div className="flex flex-col gap-3">
           <p className="text-sm font-medium">Reminders</p>
-          <Toggle checked={settings.reminderTask} onChange={(v) => updateSettings({ reminderTask: v })} label="Task deadline reminders" />
-          <Toggle checked={settings.reminderErrorReview} onChange={(v) => updateSettings({ reminderErrorReview: v })} label="Error review reminders" />
-          <Toggle checked={settings.reminderStudyTime} onChange={(v) => updateSettings({ reminderStudyTime: v })} label="Daily study-time reminders" />
+          <Toggle checked={draft.reminderTask} onChange={(v) => setDraft((current) => ({ ...current, reminderTask: v }))} label="Task deadline reminders" />
+          <Toggle checked={draft.reminderErrorReview} onChange={(v) => setDraft((current) => ({ ...current, reminderErrorReview: v }))} label="Error review reminders" />
+          <Toggle checked={draft.reminderStudyTime} onChange={(v) => setDraft((current) => ({ ...current, reminderStudyTime: v }))} label="Daily study-time reminders" />
         </div>
-        <button className="zb-btn-primary" onClick={() => { showToast('Settings saved and applied', 'success'); onClose() }}>Save settings</button>
+        <button className="zb-btn-primary" onClick={save} disabled={pending}>Save settings</button>
       </div>
     </Modal>
   )

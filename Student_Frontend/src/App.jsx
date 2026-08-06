@@ -27,9 +27,16 @@ function Shell() {
 
   return (
     <div className="min-h-screen flex flex-col">
-      {!bareLayout && <TopNav />}
+      {(!bareLayout || bootStatus !== 'ready') && <TopNav />}
       <main className="flex-1">
-        {bootStatus === 'error' ? (
+        {bootStatus === 'loading' ? (
+          <section role="status" aria-live="polite" className="min-h-[calc(100vh-3.5rem)] flex items-center justify-center px-4">
+            <div className="zb-card max-w-md w-full text-center py-10">
+              <h1 className="text-xl font-bold tracking-tight">Loading your learning data</h1>
+              <p className="text-sm text-warm-stone mt-2">Preparing your tasks, notes, and progress…</p>
+            </div>
+          </section>
+        ) : bootStatus === 'error' ? (
           <section className="min-h-[calc(100vh-3.5rem)] flex items-center justify-center px-4">
             <div className="zb-card max-w-md w-full text-center py-10">
               <h1 className="text-xl font-bold tracking-tight">We couldn&apos;t load your learning data</h1>

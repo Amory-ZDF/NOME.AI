@@ -9,7 +9,7 @@ import { Icon, Badge, MathHTML } from '../components/ui'
 export default function ErrorRedo() {
   const { id } = useParams()
   const navigate = useNavigate()
-  const { errors, recordRedo, markErrorMastered, showToast } = useApp()
+  const { errors, recordRedo, markErrorMastered, showToast, isActionPending } = useApp()
   const item = errors.find((e) => e.id === id)
 
   const [answer, setAnswer] = useState('')
@@ -24,7 +24,10 @@ export default function ErrorRedo() {
     )
   }
 
-  const submit = () => {
+  const recording = isActionPending(`recordRedo:${item?.id}`)
+  const mastering = isActionPending(`markErrorMastered:${item?.id}`)
+
+  const submit = async () => {
     if (isThrowaway(answer)) {
       showToast('Please answer seriously first', 'error')
       return
@@ -37,13 +40,12 @@ export default function ErrorRedo() {
     } else {
       isCorrect = item.acceptKeywords.some((k) => normalized.includes(k.toLowerCase()))
     }
-    recordRedo(item.id, {
-      attemptedAt: new Date().toISOString().slice(0, 10),
-      answer,
-      isCorrect,
-      timeSpent: 0,
-    })
-    setResult({ isCorrect })
+    try {
+      await recordRedo(item.id, { answer, isCorrect, timeSpent: 0 })
+      setResult({ isCorrect })
+    } catch {
+      // AppStore rolls back and displays the write failure.
+    }
   }
 
   return (
@@ -91,7 +93,7 @@ export default function ErrorRedo() {
                   onChange={(e) => setAnswer(e.target.value)}
                 />
               )}
-              <button className="zb-btn-primary w-full mt-5" onClick={submit}>
+              <button className="zb-btn-primary w-full mt-5" onClick={submit} disabled={recording}>
                 <Icon name="fact_check" size={16} /> Submit answer
               </button>
             </>
@@ -138,7 +140,14 @@ export default function ErrorRedo() {
               <p className="text-sm text-warm-stone leading-6 mb-4">
                 Compared to last time, you fixed: {item.errorDescription}
               </p>
-              <button className="zb-btn-primary w-full mb-2" onClick={() => { markErrorMastered(item.id); navigate('/errors') }}>
+              <button className="zb-btn-primary w-full mb-2" disabled={mastering} onClick={async () => {
+                try {
+                  await markErrorMastered(item.id)
+                  navigate('/errors')
+                } catch {
+                  // AppStore displays the write failure and the page remains in place.
+                }
+              }}>
                 <Icon name="workspace_premium" size={16} /> Mark as mastered
               </button>
               <button className="zb-btn-ghost w-full" onClick={() => navigate('/errors')}>Back to Error Book</button>

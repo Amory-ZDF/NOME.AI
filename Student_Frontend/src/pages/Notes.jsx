@@ -13,7 +13,7 @@ const SOURCE_META = {
 
 // ---------- Upload flow (PRD §5.4) ----------
 function UploadModal({ open, onClose }) {
-  const { addNote, showToast } = useApp()
+  const { addNote, showToast, isActionPending } = useApp()
   const [stage, setStage] = useState('idle') // idle | processing | done
   const [progress, setProgress] = useState(0)
   const [fileName, setFileName] = useState('')
@@ -90,7 +90,7 @@ function UploadModal({ open, onClose }) {
             <p className="text-sm">Recognised as: <span className="font-semibold">A-Level Math — Chapter 7 Trigonometry / Calculus</span></p>
           </div>
           <div className="flex gap-2">
-            <button className="zb-btn-primary flex-1" onClick={confirm}>Confirm & create note</button>
+            <button className="zb-btn-primary flex-1" onClick={confirm} disabled={isActionPending('addNote')}>Confirm & create note</button>
             <button className="zb-btn-ghost flex-1" onClick={() => { showToast('You can pick the folder manually in the classification tree', 'info') }}>Change folder</button>
           </div>
         </div>
@@ -101,7 +101,7 @@ function UploadModal({ open, onClose }) {
 
 // ---------- Note detail ----------
 function NoteDetail({ note, errors }) {
-  const { updateNote, showToast } = useApp()
+  const { updateNote, showToast, isActionPending } = useApp()
   const [title, setTitle] = useState(note.title)
   const [organizing, setOrganizing] = useState(false)
   const linkedErrors = errors.filter((e) => note.linkedErrors.includes(e.id))
@@ -116,10 +116,15 @@ function NoteDetail({ note, errors }) {
 
   const organize = () => {
     setOrganizing(true)
-    setTimeout(() => {
-      updateNote(note.id, { tags: [...new Set([...note.tags, 'organized'])], source: 'ai_organized' })
-      setOrganizing(false)
-      showToast('AI organisation complete: topics linked and structure optimised', 'success')
+    setTimeout(async () => {
+      try {
+        await updateNote(note.id, { tags: [...new Set([...note.tags, 'organized'])], source: 'ai_organized' })
+        showToast('AI organisation complete: topics linked and structure optimised', 'success')
+      } catch {
+        // AppStore rolls back and displays the write failure.
+      } finally {
+        setOrganizing(false)
+      }
     }, 1200)
   }
 
@@ -129,7 +134,7 @@ function NoteDetail({ note, errors }) {
         className="text-xl font-bold tracking-tight w-full bg-transparent focus:outline-none mb-1"
         value={title}
         onChange={(e) => setTitle(e.target.value)}
-        onBlur={() => title !== note.title && updateNote(note.id, { title })}
+        onBlur={() => { if (title !== note.title) updateNote(note.id, { title }).catch(() => {}) }}
       />
       <div className="flex items-center gap-2 text-xs text-warm-stone mb-4 flex-wrap">
         <span>{note.folderPath}</span>
@@ -179,7 +184,7 @@ function NoteDetail({ note, errors }) {
               <div key={i} className="bg-teal-tint/70 rounded-comp px-3 py-2.5 text-sm text-warm-stone leading-6">{s.message}</div>
             ))}
           </div>
-          <button className="zb-btn-primary !h-9" onClick={organize} disabled={organizing}>
+          <button className="zb-btn-primary !h-9" onClick={organize} disabled={organizing || isActionPending(`updateNote:${note.id}`)}>
             {organizing ? 'Organising…' : (<><Icon name="magic_button" size={16} /> One-click organise</>)}
           </button>
         </div>
@@ -190,7 +195,7 @@ function NoteDetail({ note, errors }) {
 
 // ---------- Notes page ----------
 export default function Notes() {
-  const { notes, noteFolders, errors, addNote, showToast } = useApp()
+  const { notes, noteFolders, errors, addNote, showToast, isActionPending } = useApp()
   const { id: routeNoteId } = useParams()
   const navigate = useNavigate()
   const [activeFolder, setActiveFolder] = useState('all')
@@ -252,7 +257,7 @@ export default function Notes() {
             <input className="zb-input !w-52 !pl-8" placeholder="Search notes…" value={search} onChange={(e) => setSearch(e.target.value)} />
           </div>
           <button className="zb-btn-ghost" onClick={() => setUploadOpen(true)}><Icon name="cloud_upload" size={16} /> Upload</button>
-          <button className="zb-btn-primary" onClick={createNote}><Icon name="add" size={16} /> New note</button>
+          <button className="zb-btn-primary" onClick={createNote} disabled={isActionPending('addNote')}><Icon name="add" size={16} /> New note</button>
         </div>
       </div>
 

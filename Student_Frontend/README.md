@@ -31,8 +31,9 @@ npm test -- --run    # run the suite once (CI-friendly)
 With `VITE_API_BASE_URL` unset, the mock adapter persists its state in browser `localStorage`
 under the versioned key `nome-ai.student-state.v1`. The stored value is a `{ version: 1, data }`
 envelope, so task, note, error, session, and settings writes survive a refresh. A missing,
-incompatible, malformed, or non-object envelope is replaced with fresh seed data on the next
-bootstrap.
+incompatible, malformed, or structurally incomplete envelope is replaced with fresh seed data on
+the next bootstrap. Required collection container types and IDs on seed-defined entity collections
+are checked before persisted state is accepted.
 
 `resetMockState()` is exported from `src/api/index.js` for tests and local development. It clears
 that key and asynchronously returns a newly bootstrapped seed state. It is a mock-state helper;
@@ -81,7 +82,9 @@ The real HTTP client normalizes a successful `{ code: 0, message, data }` envelo
 callers (and also accepts a bare JSON payload). A non-2xx response or a non-zero envelope `code`
 rejects with `ApiError`, exposing `message`, HTTP `status`, and API `code`; network and JSON
 failures are also surfaced as `ApiError`. Mock-mode endpoint functions return the same caller-facing
-payload shapes as their real HTTP counterparts while preserving writes locally.
+payload shapes as their real HTTP counterparts while preserving writes locally. Empty HTTP 204/205
+successes resolve to `null`; non-JSON HTTP failures retain their response status and `HTTP_<status>`
+code.
 
 To connect a real backend later: set `VITE_API_BASE_URL` (see `.env.example`) and implement the
 endpoints listed in **`API_INTERFACE.md`**. No UI code changes are needed.

@@ -10,7 +10,7 @@ const wrongQuestionsSafe = (session) => (session ? session.questions.filter((q) 
 export default function Summary() {
   const { sessionId } = useParams()
   const navigate = useNavigate()
-  const { lastSession, addErrors, errors, showToast, addTask } = useApp()
+  const { lastSession, addErrors, errors, showToast, addTask, isActionPending } = useApp()
   const session = lastSession
 
   // Error card state (whether already added to error book)
@@ -44,7 +44,6 @@ export default function Summary() {
   })()
 
   const buildErrorItem = (q) => ({
-    id: `e-${q.id}`,
     questionId: q.id,
     subject: session.subject,
     errorType: q.errorType,
@@ -53,8 +52,6 @@ export default function Summary() {
     errorDescription: `Made an error on "${q.topic}" after ${q.result.attempts.length} attempt(s), using ${q.result.hintsUsed} hint level(s).`,
     relatedTopic: q.topic,
     topicId: q.topic,
-    firstOccurredAt: new Date().toISOString().slice(0, 10),
-    lastOccurredAt: new Date().toISOString().slice(0, 10),
     repeatCount: 1,
     status: 'pending_review',
     studentAnswer: q.result.attempts[q.result.attempts.length - 1]?.answer || '(no answer)',
@@ -168,8 +165,15 @@ export default function Summary() {
                   <p className="text-xs text-warm-stone mb-3"><span className="font-semibold text-deep-ink">Why: </span>{ERROR_TYPE_META[q.errorType]?.label} · weak mastery of topic "{q.topic}"</p>
                   <button
                     className={`zb-btn !h-8 text-xs ${added ? 'zb-btn-ghost text-success-green' : 'zb-btn-primary'}`}
-                    disabled={added}
-                    onClick={() => { addErrors([buildErrorItem(q)]); showToast('Added to error book', 'success') }}
+                    disabled={added || isActionPending('addErrors')}
+                    onClick={async () => {
+                      try {
+                        await addErrors([buildErrorItem(q)])
+                        showToast('Added to error book', 'success')
+                      } catch {
+                        // AppStore rolls back and displays the write failure.
+                      }
+                    }}
                   >
                     {added ? (<><Icon name="check" size={14} /> In error book</>) : (<><Icon name="bookmarks" size={14} /> Add to error book</>)}
                   </button>
@@ -192,13 +196,17 @@ export default function Summary() {
           <button className="zb-btn-primary" onClick={() => navigate('/bank')}>
             <Icon name="refresh" size={16} /> Start variant question
           </button>
-          <button className="zb-btn-ghost" onClick={() => {
-            addTask({
-              id: `t-v-${Date.now()}`, title: `Variant drill · ${wrongQuestions[0]?.topic || 'Consolidation'}`,
-              type: 'ai_recommended', subject: session.subject, estimatedMinutes: 15,
-              dueAt: null, priority: 'P2', isOverdue: false, status: 'pending',
-            })
-            showToast('Added to task list', 'success')
+          <button className="zb-btn-ghost" disabled={isActionPending('addTask')} onClick={async () => {
+            try {
+              await addTask({
+                title: `Variant drill · ${wrongQuestions[0]?.topic || 'Consolidation'}`,
+                type: 'ai_recommended', subject: session.subject, estimatedMinutes: 15,
+                dueAt: null, priority: 'P2', isOverdue: false, status: 'pending',
+              })
+              showToast('Added to task list', 'success')
+            } catch {
+              // AppStore rolls back and displays the write failure.
+            }
           }}>
             <Icon name="add_task" size={16} /> Add to task list
           </button>

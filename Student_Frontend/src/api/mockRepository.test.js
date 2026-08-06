@@ -62,6 +62,32 @@ test('reset discards the previous transaction and stores a versioned seed envelo
   expect(JSON.parse(storage.getItem(STORAGE_KEY))).toEqual({ version: 1, data: { tasks: [{ id: 'seed', status: 'pending' }] } })
 })
 
+test('reset remains usable when called without repository method binding', async () => {
+  // Catches reset delegating through `this.bootstrap`, which breaks when reset is destructured.
+  const repository = createMockRepository({
+    storage: createMemoryStorage(), latencyMs: 0,
+    seedFactory: () => ({ tasks: [{ id: 'seed' }] }),
+  })
+  const { reset } = repository
+
+  await expect(reset()).resolves.toEqual({ tasks: [{ id: 'seed' }] })
+})
+
+test.each([
+  ['missing required collections', {}],
+  ['a null collection', { ...createSeedState(), tasks: null }],
+  ['an id-bearing entity without an id', { ...createSeedState(), tasks: [{ status: 'pending' }] }],
+])('repairs persisted state with %s from the complete seed schema', async (_, data) => {
+  // Catches current-version but structurally incompatible state reaching page/store consumers.
+  const storage = createMemoryStorage({ [STORAGE_KEY]: JSON.stringify({ version: 1, data }) })
+  const repository = createMockRepository({ storage, latencyMs: 0, seedFactory: createSeedState })
+
+  const result = await repository.bootstrap()
+
+  expect(result.tasks[0].id).toBe('t-overdue')
+  expect(result.settings).toMatchObject({ dailyGoalHours: 4 })
+})
+
 test('honors configured latency before resolving repository calls', async () => {
   // Catches a production mutation that removes the asynchronous latency boundary.
   vi.useFakeTimers()
@@ -85,7 +111,7 @@ test('creates independent serializable seed snapshots with every frontend collec
   expect(Object.keys(second).sort()).toEqual([
     'achievements', 'bankExerciseSets', 'bankQuestions', 'bankRecommendations', 'errorPatternData',
     'errorTypeMeta', 'errors', 'exerciseSets', 'greeting', 'knowledgeGraphData', 'learningSummary',
-    'moduleStats', 'noteFolders', 'notes', 'profileOverview', 'progressTimeline', 'settings', 'student', 'tasks',
+    'moduleStats', 'noteFolders', 'notes', 'profileOverview', 'progressTimeline', 'sessions', 'settings', 'student', 'tasks',
   ])
   expect(second.tasks[0].status).toBe('pending')
   expect(JSON.parse(JSON.stringify(second)).student.id).toBe('stu-001')

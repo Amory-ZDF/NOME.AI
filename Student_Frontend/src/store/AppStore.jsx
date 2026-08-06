@@ -20,8 +20,9 @@ export function AppProvider({ children, services = defaultAppServices }) {
   const toastTimer = useRef(null)
   const mounted = useRef(true)
   const bootRequest = useRef(0)
+  const actionGeneration = useRef(0)
   const actionCounts = useRef(new Map())
-  const actionQueues = useRef(new Map())
+  const collectionQueues = useRef(new Map())
   const tasksRef = useRef([])
   const errorsRef = useRef([])
   const notesRef = useRef([])
@@ -50,6 +51,7 @@ export function AppProvider({ children, services = defaultAppServices }) {
   }, [])
 
   const showToast = useCallback((message, type = 'info') => {
+    if (!mounted.current) return
     clearTimeout(toastTimer.current)
     setToast({ message, type, key: services.now().getTime() })
     toastTimer.current = setTimeout(() => {
@@ -86,11 +88,13 @@ export function AppProvider({ children, services = defaultAppServices }) {
     return () => {
       mounted.current = false
       bootRequest.current += 1
+      actionGeneration.current += 1
       clearTimeout(toastTimer.current)
     }
   }, [retryBootstrap])
 
-  const runAction = useCallback((key, createOptions) => {
+  const runAction = useCallback((key, collection, createOptions) => {
+    const generation = actionGeneration.current
     const count = actionCounts.current.get(key) || 0
     actionCounts.current.set(key, count + 1)
     setPendingActions((current) => {
@@ -103,35 +107,37 @@ export function AppProvider({ children, services = defaultAppServices }) {
       const options = createOptions()
       return runRecoverableAction({
         ...options,
+        isActive: () => mounted.current && generation === actionGeneration.current,
         onError: (error) => {
           options.onError?.(error)
           showToast(error.message || 'Unable to save your changes. Please try again.', 'error')
         },
       })
     }
-    const previous = actionQueues.current.get(key)
+    const previous = collectionQueues.current.get(collection)
     const operation = previous ? previous.catch(() => undefined).then(start) : start()
-    const queued = operation.finally(() => {
+    let queued
+    queued = operation.finally(() => {
       const remaining = (actionCounts.current.get(key) || 1) - 1
       if (remaining > 0) {
         actionCounts.current.set(key, remaining)
-        return
+      } else {
+        actionCounts.current.delete(key)
+        if (mounted.current) {
+          setPendingActions((current) => {
+            const next = new Set(current)
+            next.delete(key)
+            return next
+          })
+        }
       }
-      actionCounts.current.delete(key)
-      actionQueues.current.delete(key)
-      if (mounted.current) {
-        setPendingActions((current) => {
-          const next = new Set(current)
-          next.delete(key)
-          return next
-        })
-      }
+      if (collectionQueues.current.get(collection) === queued) collectionQueues.current.delete(collection)
     })
-    actionQueues.current.set(key, queued)
+    collectionQueues.current.set(collection, queued)
     return queued
   }, [showToast])
 
-  const completeTask = useCallback((id) => runAction(`completeTask:${id}`, () => ({
+  const completeTask = useCallback((id) => runAction(`completeTask:${id}`, 'tasks', () => ({
     snapshot: tasksRef.current,
     optimistic: () => replaceTasks(tasksRef.current.map((task) => (task.id === id ? { ...task, status: 'completed' } : task))),
     request: () => services.api.completeTask(id),
@@ -139,7 +145,7 @@ export function AppProvider({ children, services = defaultAppServices }) {
     rollback: replaceTasks,
   })), [replaceTasks, runAction, services])
 
-  const removeTask = useCallback((id) => runAction(`removeTask:${id}`, () => ({
+  const removeTask = useCallback((id) => runAction(`removeTask:${id}`, 'tasks', () => ({
     snapshot: tasksRef.current,
     optimistic: () => replaceTasks(tasksRef.current.filter((task) => task.id !== id)),
     request: () => Promise.resolve({ id }),
@@ -147,7 +153,7 @@ export function AppProvider({ children, services = defaultAppServices }) {
     rollback: replaceTasks,
   })), [replaceTasks, runAction])
 
-  const cannotCompleteTask = useCallback((id) => runAction(`cannotCompleteTask:${id}`, () => ({
+  const cannotCompleteTask = useCallback((id) => runAction(`cannotCompleteTask:${id}`, 'tasks', () => ({
     snapshot: tasksRef.current,
     optimistic: () => replaceTasks(tasksRef.current.filter((task) => task.id !== id)),
     request: () => services.api.reportTaskAdjustment(id),
@@ -157,7 +163,7 @@ export function AppProvider({ children, services = defaultAppServices }) {
 
   const addTask = useCallback((task) => {
     const createdTask = task.id ? task : { ...task, id: services.createId() }
-    return runAction(`addTask:${createdTask.id}`, () => ({
+    return runAction('addTask', 'tasks', () => ({
       snapshot: tasksRef.current,
       optimistic: () => replaceTasks([...tasksRef.current, createdTask]),
       request: () => services.api.createTask(createdTask),
@@ -166,19 +172,33 @@ export function AppProvider({ children, services = defaultAppServices }) {
     }))
   }, [replaceTasks, runAction, services])
 
-  const addErrors = useCallback((items) => runAction('addErrors', () => ({
-    snapshot: errorsRef.current,
-    optimistic: () => replaceErrors((() => {
-      const existingQuestionIds = new Set(errorsRef.current.map((error) => error.questionId))
-      const fresh = items.filter((item) => !existingQuestionIds.has(item.questionId))
-      return [...fresh, ...errorsRef.current]
-    })()),
-    request: () => services.api.addErrors(items),
-    commit: () => {},
-    rollback: replaceErrors,
-  })), [replaceErrors, runAction, services])
+  const addErrors = useCallback((items) => {
+    const actionNow = services.now()
+    const occurredAt = dateOnly(actionNow)
+    const authoredItems = items.map((item) => ({
+      ...item,
+      id: item.id || services.createId(),
+      firstOccurredAt: item.firstOccurredAt || occurredAt,
+      lastOccurredAt: item.lastOccurredAt || occurredAt,
+    }))
+    return runAction('addErrors', 'errors', () => ({
+      snapshot: errorsRef.current,
+      optimistic: () => replaceErrors((() => {
+        const questionIds = new Set(errorsRef.current.map((error) => error.questionId))
+        const fresh = authoredItems.filter((item) => {
+          if (questionIds.has(item.questionId)) return false
+          questionIds.add(item.questionId)
+          return true
+        })
+        return [...fresh, ...errorsRef.current]
+      })()),
+      request: () => services.api.addErrors(authoredItems),
+      commit: () => {},
+      rollback: replaceErrors,
+    }))
+  }, [replaceErrors, runAction, services])
 
-  const markErrorMastered = useCallback((id) => runAction(`markErrorMastered:${id}`, () => ({
+  const markErrorMastered = useCallback((id) => runAction(`markErrorMastered:${id}`, 'errors', () => ({
     snapshot: errorsRef.current,
     optimistic: () => replaceErrors(errorsRef.current.map((error) => (error.id === id ? { ...error, status: 'mastered' } : error))),
     request: () => services.api.markErrorMastered(id),
@@ -187,15 +207,16 @@ export function AppProvider({ children, services = defaultAppServices }) {
   })), [replaceErrors, runAction, services, showToast])
 
   const recordRedo = useCallback((id, attempt) => {
-    const recordedAttempt = attempt.attemptedAt ? attempt : { ...attempt, attemptedAt: services.now().toISOString() }
-    return runAction(`recordRedo:${id}`, () => ({
+    const actionNow = services.now()
+    const recordedAttempt = attempt.attemptedAt ? attempt : { ...attempt, attemptedAt: actionNow.toISOString() }
+    return runAction(`recordRedo:${id}`, 'errors', () => ({
       snapshot: errorsRef.current,
       optimistic: () => replaceErrors(errorsRef.current.map((error) => (error.id === id
         ? {
             ...error,
             redoHistory: [...error.redoHistory, recordedAttempt],
             repeatCount: recordedAttempt.isCorrect ? error.repeatCount : error.repeatCount + 1,
-            lastOccurredAt: recordedAttempt.isCorrect ? error.lastOccurredAt : dateOnly(services.now()),
+            lastOccurredAt: recordedAttempt.isCorrect ? error.lastOccurredAt : dateOnly(actionNow),
             status: recordedAttempt.isCorrect ? (error.status === 'pending_review' ? 'reviewing' : error.status) : 'pending_review',
           }
         : error))),
@@ -206,14 +227,15 @@ export function AppProvider({ children, services = defaultAppServices }) {
   }, [replaceErrors, runAction, services])
 
   const addNote = useCallback((note) => {
-    const today = dateOnly(services.now())
+    const actionNow = services.now()
+    const today = dateOnly(actionNow)
     const createdNote = {
       ...note,
       id: note.id || services.createId(),
       createdAt: note.createdAt || today,
       updatedAt: note.updatedAt || today,
     }
-    return runAction(`addNote:${createdNote.id}`, () => ({
+    return runAction('addNote', 'notes', () => ({
       snapshot: notesRef.current,
       optimistic: () => replaceNotes([createdNote, ...notesRef.current]),
       request: () => services.api.createNote(createdNote),
@@ -231,8 +253,9 @@ export function AppProvider({ children, services = defaultAppServices }) {
   }, [replaceNotes, runAction, services])
 
   const updateNote = useCallback((id, patch) => {
-    const updatedPatch = { ...patch, updatedAt: dateOnly(services.now()) }
-    return runAction(`updateNote:${id}`, () => ({
+    const actionNow = services.now()
+    const updatedPatch = { ...patch, updatedAt: dateOnly(actionNow) }
+    return runAction(`updateNote:${id}`, 'notes', () => ({
       snapshot: notesRef.current,
       optimistic: () => replaceNotes(notesRef.current.map((note) => (note.id === id ? { ...note, ...updatedPatch } : note))),
       request: () => services.api.updateNote(id, updatedPatch),
@@ -242,21 +265,37 @@ export function AppProvider({ children, services = defaultAppServices }) {
   }, [replaceNotes, runAction, services])
 
   const saveSession = useCallback((session) => {
+    const actionNow = services.now()
+    const completedAt = actionNow.toISOString()
     const savedSession = {
       ...session,
       sessionId: session.sessionId || services.createId(),
-      completedAt: session.completedAt || services.now().toISOString(),
+      completedAt: session.completedAt || completedAt,
+      questions: session.questions?.map((question) => ({
+        ...question,
+        result: {
+          ...question.result,
+          attempts: question.result?.attempts?.map((attempt) => ({
+            ...attempt,
+            submittedAt: attempt.submittedAt || completedAt,
+          })) || [],
+        },
+      })) || [],
     }
-    return runAction(`saveSession:${savedSession.sessionId}`, () => ({
+    return runAction('saveSession', 'session', () => ({
       snapshot: lastSessionRef.current,
       optimistic: () => replaceLastSession(savedSession),
       request: () => services.api.submitSession(savedSession),
-      commit: () => {},
+      commit: (result) => {
+        if (result?.sessionId && result.sessionId !== savedSession.sessionId) {
+          replaceLastSession({ ...savedSession, sessionId: result.sessionId })
+        }
+      },
       rollback: replaceLastSession,
     }))
   }, [replaceLastSession, runAction, services])
 
-  const updateSettings = useCallback((patch) => runAction('updateSettings', () => ({
+  const updateSettings = useCallback((patch) => runAction('updateSettings', 'settings', () => ({
     snapshot: settingsRef.current,
     optimistic: () => replaceSettings({ ...settingsRef.current, ...patch }),
     request: () => services.api.updateSettings(patch),

@@ -73,3 +73,24 @@ test('wraps network failures while preserving the original cause', async () => {
     name: 'ApiError', status: 0, code: 'NETWORK_ERROR', message: 'Network unavailable', cause: networkFailure,
   })
 })
+
+test('preserves HTTP status and code when an error response body is not JSON', async () => {
+  // Catches JSON parsing masking the transport status of a non-JSON HTTP failure.
+  const parseFailure = new SyntaxError('Unexpected token <')
+  const json = vi.fn().mockRejectedValue(parseFailure)
+  vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: false, status: 500, json }))
+
+  await expect(http.get('/api/example')).rejects.toMatchObject({
+    name: 'ApiError', status: 500, code: 'HTTP_500', cause: parseFailure,
+  })
+  expect(json).toHaveBeenCalledTimes(1)
+})
+
+test.each([204, 205])('returns null for an empty %s success without parsing a body', async (status) => {
+  // Catches empty successful responses being sent through JSON parsing or converted to errors.
+  const json = vi.fn()
+  vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, status, json }))
+
+  await expect(http.del('/api/example')).resolves.toBeNull()
+  expect(json).not.toHaveBeenCalled()
+})

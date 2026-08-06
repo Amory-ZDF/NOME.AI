@@ -20,12 +20,13 @@ const filterChips = [
 
 function ErrorCard({ item }) {
   const navigate = useNavigate()
-  const { markErrorMastered, showToast } = useApp()
+  const { markErrorMastered, isActionPending } = useApp()
   const [expanded, setExpanded] = useState(false)
   const status = STATUS_META[item.status]
   // PRD §4.3: "Mark as mastered" only available after a successful redo
   const canMaster = item.redoHistory.some((r) => r.isCorrect) && item.status !== 'mastered'
   const meta = ERROR_TYPE_META[item.errorType] || {}
+  const mastering = isActionPending(`markErrorMastered:${item.id}`)
 
   return (
     <motion.div variants={fadeUpItem} className="zb-card !p-5">
@@ -81,7 +82,8 @@ function ErrorCard({ item }) {
         <button
           className={`zb-btn-ghost !h-9 ${canMaster ? 'text-success-green border-success-green/30' : 'opacity-40 pointer-events-none'}`}
           title={canMaster ? 'Mark as mastered' : 'Available after a successful redo'}
-          onClick={() => markErrorMastered(item.id)}
+          disabled={!canMaster || mastering}
+          onClick={() => { markErrorMastered(item.id).catch(() => {}) }}
         >
           <Icon name="check_circle" size={16} /> Mark as mastered
         </button>

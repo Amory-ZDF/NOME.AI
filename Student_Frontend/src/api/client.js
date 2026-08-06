@@ -35,8 +35,20 @@ async function request(path, options = {}) {
       headers: { 'Content-Type': 'application/json', ...(options.headers || {}) },
       ...options,
     })
-    const payload = await res.json()
     const status = res.status ?? 0
+    if (res.ok && (status === 204 || status === 205)) return null
+
+    let payload
+    try {
+      payload = await res.json()
+    } catch (cause) {
+      if (!res.ok) {
+        throw new ApiError(`API ${options.method || 'GET'} ${path} failed: ${status}`, {
+          status, code: `HTTP_${status}`, cause,
+        })
+      }
+      throw new ApiError('API response was not valid JSON', { status, code: 'INVALID_RESPONSE', cause })
+    }
 
     if (!res.ok || (hasOwn(payload, 'code') && payload.code !== 0)) {
       throw new ApiError(

@@ -25,7 +25,8 @@
   It also accepts a bare JSON payload for compatibility with an endpoint that does not wrap data.
 - Error normalization: a non-2xx HTTP status or an envelope with `code !== 0` rejects with
   `ApiError`; it retains the backend message, HTTP `status`, and API `code`. Network and JSON
-  parsing failures are likewise surfaced as `ApiError`.
+  parsing failures are likewise surfaced as `ApiError`. A non-JSON HTTP error retains its status
+  with code `HTTP_<status>`, while an empty successful 204/205 response resolves to `null`.
 - Mock persistence: without `VITE_API_BASE_URL`, the local adapter persists the state that backs
   these endpoint functions in `localStorage` key `nome-ai.student-state.v1`, using the versioned
   `{ version: 1, data }` envelope. State survives refreshes; missing, malformed, or incompatible
@@ -82,7 +83,7 @@ One-shot load of everything the student shell needs. Frontend calls it once on m
 | `assignedBy` | string \| null | Teacher name |
 | `priority` | enum | `P0` \| `P1` \| `P2` |
 | `isOverdue` | boolean | |
-| `status` | enum | `pending` \| `completed` |
+| `status` | enum | `pending` \| `completed` \| `adjustment_requested` |
 | `lastAccuracy` | number? | Optional, % of previous attempt |
 | `exerciseSetId` | string? | Links to an exercise set |
 
@@ -207,7 +208,7 @@ One-shot load of everything the student shell needs. Frontend calls it once on m
 | Endpoint | Body | Notes |
 |---|---|---|
 | `PATCH /api/tasks/{id}` | `{ "status": "completed" }` | Mark task done (PRD §1.3) |
-| `POST /api/tasks/{id}/adjustment-request` | `{}` | Student can't complete → notify teacher (PRD §1.4) |
+| `POST /api/tasks/{id}/adjustment-request` | `{}` | Notify teacher and return the task with `status: "adjustment_requested"` (PRD §1.4) |
 | `POST /api/tasks` | Task (full object) | Create task (e.g. variant drill from summary page) |
 
 ### Error book

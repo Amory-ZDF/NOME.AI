@@ -184,7 +184,7 @@ function AnswerArea({ q, state, onAnswer, onHandwriting }) {
 export default function Exercise({ bankMode = false }) {
   const { taskId, qId } = useParams()
   const navigate = useNavigate()
-  const { showToast, saveSession, completeTask } = useApp()
+  const { showToast, saveSession, completeTask, isActionPending } = useApp()
   const timer = useTimer()
   const secondsRef = useRef(0)
 
@@ -232,7 +232,7 @@ export default function Exercise({ bankMode = false }) {
       return
     }
     const isCorrect = checkAnswer(q, state.answer)
-    const attempt = { answer: state.answer, submittedAt: new Date().toISOString(), isCorrect }
+    const attempt = { answer: state.answer, isCorrect }
     if (isCorrect) {
       setState(q.id, {
         status: 'correct',
@@ -259,14 +259,12 @@ export default function Exercise({ bankMode = false }) {
   }
 
   // Submit the whole exercise set (PRD §2.7-6)
-  const submitAll = () => {
-    const sessionId = `session-${Date.now()}`
+  const submitAll = async () => {
+    if (isActionPending('saveSession')) return
     const session = {
-      sessionId,
       taskId: set.taskId,
       taskTitle: set.title,
       subject: set.subject,
-      completedAt: new Date().toISOString(),
       timeSpent: Math.max(1, Math.round(secondsRef.current / 60)),
       timeSpentSeconds: secondsRef.current,
       questions: questions.map((qq) => ({
@@ -279,9 +277,13 @@ export default function Exercise({ bankMode = false }) {
         },
       })),
     }
-    saveSession(session)
-    if (set.taskId) completeTask(set.taskId)
-    navigate(`/summary/${sessionId}`)
+    try {
+      const persisted = await saveSession(session)
+      if (set.taskId) await completeTask(set.taskId)
+      navigate(`/summary/${persisted.sessionId}`)
+    } catch {
+      // AppStore rolls back and displays the write failure.
+    }
   }
 
   return (
@@ -300,6 +302,7 @@ export default function Exercise({ bankMode = false }) {
             <button
               className={`zb-btn-primary !h-9 ${attemptedAll ? '' : 'opacity-40 pointer-events-none'}`}
               onClick={submitAll}
+              disabled={!attemptedAll || isActionPending('saveSession')}
               title={attemptedAll ? 'Submit the whole exercise set' : 'You can submit after attempting all questions'}
             >
               Submit
@@ -363,7 +366,7 @@ export default function Exercise({ bankMode = false }) {
               <Icon name="chevron_left" size={16} /> Previous
             </button>
             {state.status === 'correct' ? (
-              <button className="zb-btn-primary !h-9" onClick={goNext}>{current === questions.length - 1 ? 'Finish' : 'Next'} <Icon name="chevron_right" size={16} /></button>
+              <button className="zb-btn-primary !h-9" onClick={goNext} disabled={isActionPending('saveSession')}>{current === questions.length - 1 ? 'Finish' : 'Next'} <Icon name="chevron_right" size={16} /></button>
             ) : (
               <button className="zb-btn-primary !h-9" onClick={submitQuestion}>
                 <Icon name="fact_check" size={16} /> {state.attempts.length > 0 ? 'Resubmit' : "I'm done — check my answer"}

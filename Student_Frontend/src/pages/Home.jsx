@@ -28,14 +28,21 @@ function Greeting() {
 // ---------- Task item ----------
 function TaskItem({ task }) {
   const navigate = useNavigate()
-  const { completeTask, removeTask, cannotCompleteTask, showToast } = useApp()
+  const { completeTask, removeTask, cannotCompleteTask, showToast, isActionPending } = useApp()
   const [menuOpen, setMenuOpen] = useState(false)
   const done = task.status === 'completed'
 
   // PRD §1.3: completed tasks turn grey + strikethrough, removed from list after 1s
-  const markDone = () => {
-    completeTask(task.id)
-    setTimeout(() => removeTask(task.id), 1000)
+  const completing = isActionPending(`completeTask:${task.id}`)
+  const reporting = isActionPending(`cannotCompleteTask:${task.id}`)
+
+  const markDone = async () => {
+    try {
+      await completeTask(task.id)
+      setTimeout(() => { removeTask(task.id).catch(() => {}) }, 1000)
+    } catch {
+      // AppStore rolls back and displays the write failure.
+    }
   }
 
   const openExercise = () => {
@@ -55,8 +62,9 @@ function TaskItem({ task }) {
         }`}
         onClick={(e) => {
           e.stopPropagation()
-          if (!done) markDone()
+          if (!done && !completing) markDone()
         }}
+        disabled={completing}
       >
         <AnimatePresence>
           {done && <motion.span initial={{ scale: 0 }} animate={{ scale: 1 }} transition={{ type: 'spring', stiffness: 400, damping: 15 }}><Icon name="check" size={14} className="text-white" /></motion.span>}
@@ -91,7 +99,7 @@ function TaskItem({ task }) {
         <AnimatePresence>
           {menuOpen && (
             <motion.div initial={{ opacity: 0, y: 4 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }} className="absolute right-0 top-7 bg-pure-surface border border-whisper-line rounded-comp py-1 w-36 z-10">
-              <button className="w-full text-left px-3 py-2 text-sm text-warm-stone hover:bg-warm-paper hover:text-error-red" onClick={() => { setMenuOpen(false); cannotCompleteTask(task.id) }}>
+              <button className="w-full text-left px-3 py-2 text-sm text-warm-stone hover:bg-warm-paper hover:text-error-red" disabled={reporting} onClick={() => { setMenuOpen(false); cannotCompleteTask(task.id).catch(() => {}) }}>
                 Can't complete — report to teacher
               </button>
             </motion.div>
