@@ -64,6 +64,7 @@ const parseEvidenceTime = (value) => {
 
 const normalizeEvidenceTime = (value) => parseEvidenceTime(value)?.normalized ?? null
 const evidenceTimeValue = (value) => parseEvidenceTime(value)?.timeValue ?? null
+export const isValidEvidenceTime = (value) => parseEvidenceTime(value) !== null
 
 const isCompleteRedoEvidence = (attempt) => (
   isRecord(attempt)

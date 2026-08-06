@@ -20,7 +20,9 @@ import {
   applyRedoAttempt,
   attachVerificationVariant,
   canMarkMastered,
+  isValidEvidenceTime,
   recordVariantVerification,
+  RedoChronologyError,
 } from '../features/errors/masteryRules'
 
 const repository = createMockRepository({ seedFactory: createSeedState })
@@ -41,8 +43,14 @@ const isNullableString = (value) => value === null || typeof value === 'string'
 const isNullableNonemptyString = (value) => value === null || isNonemptyString(value)
 const isNumber = (value) => typeof value === 'number' && Number.isFinite(value)
 const isNonnegativeNumber = (value) => isNumber(value) && value >= 0
+const isNonnegativeInteger = (value) => Number.isInteger(value) && value >= 0
+const isPositiveInteger = (value) => Number.isInteger(value) && value > 0
+const isDifficulty = (value) => Number.isInteger(value) && value >= 1 && value <= 5
 const isStringArray = (value) => Array.isArray(value) && value.every(isString)
+const isNonemptyStringArray = (value) => Array.isArray(value) && value.every(isNonemptyString)
+const hasUniqueValues = (value) => new Set(value).size === value.length
 const isOneOf = (...values) => (value) => values.includes(value)
+const QUESTION_TYPES = Object.freeze(['choice', 'calculation', 'proof', 'fill_blank', 'reading', 'writing'])
 const isAdjustmentRequest = (request) => isRecord(request)
   && isNonemptyString(request.id)
   && isNonemptyString(request.taskId)
@@ -61,19 +69,19 @@ const assertFields = (value, entity, validators) => {
 }
 
 const isRedoAttempt = (attempt) => isRecord(attempt)
-  && isNonemptyString(attempt.attemptedAt)
+  && isValidEvidenceTime(attempt.attemptedAt)
   && isString(attempt.answer)
   && typeof attempt.isCorrect === 'boolean'
   && isNonnegativeNumber(attempt.timeSpent)
 
 const isOccurrenceRecord = (record) => isRecord(record)
   && isNonemptyString(record.key)
-  && isNullableNonemptyString(record.occurredAt)
+  && isValidEvidenceTime(record.occurredAt)
 
 const isVerificationResult = (result) => isRecord(result)
   && isNonemptyString(result.variantId)
   && typeof result.isCorrect === 'boolean'
-  && isNonemptyString(result.verifiedAt)
+  && isValidEvidenceTime(result.verifiedAt)
 const isVariantVerification = (result) => result === null || isVerificationResult(result)
 
 const isSessionAttempt = (attempt) => isRecord(attempt)
@@ -108,6 +116,9 @@ const assertTask = (task) => {
   if (task.completedAt !== undefined && !isNonemptyString(task.completedAt)) throw invalid('Task.completedAt is invalid')
   if (task.adjustmentStatus !== undefined && task.adjustmentStatus !== 'submitted') throw invalid('Task.adjustmentStatus is invalid')
   if (task.sourceQuestionId !== undefined && !isNonemptyString(task.sourceQuestionId)) throw invalid('Task.sourceQuestionId is invalid')
+  if (task.verificationForErrorId !== undefined && !isNonemptyString(task.verificationForErrorId)) {
+    throw invalid('Task.verificationForErrorId is invalid')
+  }
   if (task.reason !== undefined && !isString(task.reason)) throw invalid('Task.reason is invalid')
   if (task.createdAt !== undefined && !isNonemptyString(task.createdAt)) throw invalid('Task.createdAt is invalid')
 }
@@ -154,9 +165,9 @@ const assertError = (error) => {
     errorDescription: isString,
     relatedTopic: isNonemptyString,
     topicId: isNullableNonemptyString,
-    firstOccurredAt: isNonemptyString,
-    lastOccurredAt: isNonemptyString,
-    repeatCount: isNonnegativeNumber,
+    firstOccurredAt: isValidEvidenceTime,
+    lastOccurredAt: isValidEvidenceTime,
+    repeatCount: isPositiveInteger,
     status: isOneOf('pending_review', 'reviewing', 'verification_due', 'mastered'),
     studentAnswer: isString,
     correctAnswer: isString,
@@ -165,33 +176,63 @@ const assertError = (error) => {
     redoHistory: (value) => Array.isArray(value) && value.every(isRedoAttempt),
   })
   if (error.options !== undefined && !isStringArray(error.options)) throw invalid('Error.options is invalid')
-  if (error.correctIndex !== undefined && !isNonnegativeNumber(error.correctIndex)) throw invalid('Error.correctIndex is invalid')
+  if (error.correctIndex !== undefined
+    && (!isNonnegativeInteger(error.correctIndex)
+      || !Array.isArray(error.options)
+      || error.correctIndex >= error.options.length)) throw invalid('Error.correctIndex is invalid')
   if (error.sessionId !== undefined && !isNullableNonemptyString(error.sessionId)) throw invalid('Error.sessionId is invalid')
-  if (error.type !== undefined && !isNullableNonemptyString(error.type)) throw invalid('Error.type is invalid')
-  if (error.difficulty !== undefined && error.difficulty !== null && !isNumber(error.difficulty)) throw invalid('Error.difficulty is invalid')
+  if (error.type !== undefined && error.type !== null && !QUESTION_TYPES.includes(error.type)) throw invalid('Error.type is invalid')
+  if (error.difficulty !== undefined && error.difficulty !== null && !isDifficulty(error.difficulty)) throw invalid('Error.difficulty is invalid')
   if (error.whereWrong !== undefined && !isString(error.whereWrong)) throw invalid('Error.whereWrong is invalid')
   if (error.whyWrong !== undefined && !isString(error.whyWrong)) throw invalid('Error.whyWrong is invalid')
   if (error.linkedAbility !== undefined && !isString(error.linkedAbility)) throw invalid('Error.linkedAbility is invalid')
-  if (error.hintDependency !== undefined && !isNonnegativeNumber(error.hintDependency)) throw invalid('Error.hintDependency is invalid')
-  if (error.occurrences !== undefined && !isStringArray(error.occurrences)) throw invalid('Error.occurrences is invalid')
-  if (error.occurrenceKeys !== undefined && !isStringArray(error.occurrenceKeys)) throw invalid('Error.occurrenceKeys is invalid')
+  if (error.hintDependency !== undefined && !isNonnegativeInteger(error.hintDependency)) throw invalid('Error.hintDependency is invalid')
+  if (error.occurrences !== undefined
+    && (!Array.isArray(error.occurrences) || !error.occurrences.every(isValidEvidenceTime))) {
+    throw invalid('Error.occurrences is invalid')
+  }
+  if (error.occurrenceKeys !== undefined
+    && (!isNonemptyStringArray(error.occurrenceKeys) || !hasUniqueValues(error.occurrenceKeys))) {
+    throw invalid('Error.occurrenceKeys is invalid')
+  }
   if (error.occurrenceRecords !== undefined
-    && (!Array.isArray(error.occurrenceRecords) || !error.occurrenceRecords.every(isOccurrenceRecord))) {
+    && (!Array.isArray(error.occurrenceRecords)
+      || !error.occurrenceRecords.every(isOccurrenceRecord)
+      || !hasUniqueValues(error.occurrenceRecords.map((record) => record.key)))) {
     throw invalid('Error.occurrenceRecords is invalid')
+  }
+  if (error.occurrenceKeys !== undefined && error.occurrenceRecords !== undefined
+    && (error.occurrenceKeys.length !== error.occurrenceRecords.length
+      || error.occurrenceKeys.some((key, index) => error.occurrenceRecords[index].key !== key))) {
+    throw invalid('Error occurrence identities are inconsistent')
   }
   if (error.verificationVariantId !== undefined && !isNullableNonemptyString(error.verificationVariantId)) {
     throw invalid('Error.verificationVariantId is invalid')
   }
-  if (error.variantVerifiedAt !== undefined && !isNullableNonemptyString(error.variantVerifiedAt)) {
+  if (error.variantVerifiedAt !== undefined
+    && error.variantVerifiedAt !== null
+    && !isValidEvidenceTime(error.variantVerifiedAt)) {
     throw invalid('Error.variantVerifiedAt is invalid')
   }
   if (error.variantVerification !== undefined && !isVariantVerification(error.variantVerification)) {
     throw invalid('Error.variantVerification is invalid')
   }
+  if (error.variantVerification) {
+    const hasMatchingAudit = error.variantVerification.variantId === error.verificationVariantId
+      && (error.variantVerification.isCorrect
+        ? error.variantVerifiedAt === error.variantVerification.verifiedAt
+        : error.variantVerifiedAt === null)
+    if (!hasMatchingAudit) throw invalid('Error verification audit is inconsistent')
+  } else if (error.variantVerifiedAt !== undefined && error.variantVerifiedAt !== null) {
+    throw invalid('Error verification audit is incomplete')
+  }
   for (const field of ['understandingExplanation', 'scoringExplanation', 'errorPattern']) {
     if (error[field] !== undefined && !isString(error[field])) throw invalid(`Error.${field} is invalid`)
   }
-  if (error.markSchemePoints !== undefined && !Array.isArray(error.markSchemePoints)) throw invalid('Error.markSchemePoints is invalid')
+  if (error.markSchemePoints !== undefined
+    && (!Array.isArray(error.markSchemePoints) || !error.markSchemePoints.every(isRecord))) {
+    throw invalid('Error.markSchemePoints is invalid')
+  }
   if (error.passageEvidence !== undefined
     && !isString(error.passageEvidence)
     && !isStringArray(error.passageEvidence)) throw invalid('Error.passageEvidence is invalid')
@@ -477,7 +518,18 @@ export const markErrorMastered = async (id) => {
 export const submitRedo = async (id, attempt) => {
   if (!isMockMode) return http.post(`/api/errors/${encodeURIComponent(id)}/redo`, attempt)
   assertRedoAttempt(attempt)
-  return { error: await updateError(id, (error) => applyRedoAttempt(error, attempt)) }
+  return {
+    error: await updateError(id, (error) => {
+      try {
+        return applyRedoAttempt(error, attempt)
+      } catch (transitionError) {
+        if (transitionError instanceof TypeError || transitionError instanceof RedoChronologyError) {
+          throw invalid(transitionError.message)
+        }
+        throw transitionError
+      }
+    }),
+  }
 }
 
 export const scheduleErrorVariant = async (id) => {
@@ -521,17 +573,30 @@ export const verifyErrorVariant = async (id, result) => {
       throw invalid('Verification result does not match the linked variant')
     }
     const exerciseSet = current.exerciseSets[result.variantId]
-    const hasExactTask = current.tasks.some((task) => (
-      task.exerciseSetId === result.variantId
-      && task.sourceQuestionId === error.questionId
-      && task.verificationForErrorId === id
-    ))
-    const hasExactSet = exerciseSet?.sourceQuestionId === error.questionId
-      && exerciseSet.questions?.every((question) => question.variantOf === error.questionId)
+    const linkedTasks = isNonemptyString(exerciseSet?.taskId)
+      ? current.tasks.filter((task) => task.id === exerciseSet.taskId)
+      : []
+    const linkedTask = linkedTasks[0]
+    const hasExactTask = linkedTasks.length === 1
+      && linkedTask.id === exerciseSet.taskId
+      && linkedTask.exerciseSetId === exerciseSet.id
+      && linkedTask.sourceQuestionId === error.questionId
+      && linkedTask.verificationForErrorId === id
+    const hasExactSet = isNonemptyString(exerciseSet?.id)
+      && exerciseSet.id === result.variantId
+      && exerciseSet.sourceQuestionId === error.questionId
+      && Array.isArray(exerciseSet.questions)
+      && exerciseSet.questions.length === 1
+      && exerciseSet.questions.every((question) => question.variantOf === error.questionId)
     if (!hasExactTask || !hasExactSet) throw invalid('Verification variant provenance is invalid')
 
     const verified = recordVariantVerification(error, result)
-    if (verified.variantVerification?.variantId !== result.variantId
+    const transitionWasApplied = verified.status !== error.status
+      || verified.variantVerifiedAt !== error.variantVerifiedAt
+      || JSON.stringify(verified.variantVerification ?? null) !== JSON.stringify(error.variantVerification ?? null)
+    if (!transitionWasApplied
+      || verified.variantVerification?.variantId !== result.variantId
+      || verified.variantVerification?.isCorrect !== result.isCorrect
       || verified.variantVerification?.verifiedAt !== result.verifiedAt) {
       throw invalid('Verification result is invalid or out of order')
     }

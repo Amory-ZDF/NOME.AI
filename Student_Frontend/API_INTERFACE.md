@@ -94,7 +94,7 @@ One-shot load of everything the student shell needs. Frontend calls it once on m
 | `completedAt` | string? | ISO datetime set when the task is completed |
 | `adjustmentStatus` | enum? | `submitted` when the student has requested an adjustment |
 | `sourceQuestionId` | string? | Source question for an independently generated variant task |
-| `verificationForErrorId` | string? | Error-book item whose independent transfer check this task verifies |
+| `verificationForErrorId` | string? | Non-empty error id whose independent transfer check this task verifies |
 | `reason` | string? | Variant tasks use `"Independent transfer check"` |
 | `createdAt` | string? | ISO datetime for generated tasks |
 
@@ -161,39 +161,39 @@ One-shot load of everything the student shell needs. Frontend calls it once on m
 | `errorType` | enum | `knowledge` \| `method` \| `calculation` \| `reading` \| `execution` \| `expression` \| `habit` |
 | `questionSummary` | string | Plain-text excerpt |
 | `questionContent` | string | HTML |
-| `type` | Question.type \| null | Original question type, when available |
-| `difficulty` | number \| null | Original difficulty, when available |
+| `type` | Question.type \| null | Original question type, when available; only the six `Question.type` enum values are accepted |
+| `difficulty` | integer \| null | Original difficulty, when available; 1-5 |
 | `errorDescription` | string | AI explanation of the mistake |
 | `relatedTopic` | string | |
 | `topicId` | string \| null | |
 | `whereWrong` / `whyWrong` | string | Concrete diagnostic location and root-cause evidence |
 | `linkedAbility` | string | Ability targeted by the normalized error type |
-| `hintDependency` | number | Hints consumed in the source session |
-| `firstOccurredAt` / `lastOccurredAt` | string | ISO date |
-| `occurrences` | string[] | Chronological occurrence timestamps |
-| `occurrenceKeys` | string[] | Stable identities, normally `session:{sessionId}:question:{questionId}` |
-| `occurrenceRecords` | `{ key, occurredAt }[]` | Auditable key/timestamp pairs; replaying the same key is idempotent |
-| `repeatCount` | number | Number of distinct recurrence identities |
+| `hintDependency` | non-negative integer | Hints consumed in the source session |
+| `firstOccurredAt` / `lastOccurredAt` | string | Valid ISO calendar date or RFC3339 timestamp |
+| `occurrences` | string[] | Valid ISO calendar dates or RFC3339 timestamps |
+| `occurrenceKeys` | string[] | Unique non-empty stable identities, normally `session:{sessionId}:question:{questionId}` |
+| `occurrenceRecords` | `{ key, occurredAt }[]` | Unique non-empty keys with valid timestamps; when keys and records are both supplied, they must align exactly |
+| `repeatCount` | positive integer | Number of distinct recurrence identities |
 | `status` | enum | `pending_review` \| `reviewing` \| `verification_due` \| `mastered` |
 | `studentAnswer` | string | |
 | `correctAnswer` | string | |
 | `analysis` | string | |
 | `acceptKeywords` | string[] | For redo grading |
 | `options` | string[]? | For choice-type redos |
-| `correctIndex` | number? | |
+| `correctIndex` | non-negative integer? | Must be smaller than `options.length` |
 | `redoHistory` | RedoAttempt[] | |
 | `verificationVariantId` | string \| null | Exact generated exercise-set id linked for independent verification |
 | `variantVerifiedAt` | string \| null | Timestamp of the latest accepted correct verification |
 | `variantVerification` | VariantVerification \| null | Full audit result for the linked variant |
 | `understandingExplanation` / `scoringExplanation` | string? | Preserved A-Level diagnostic evidence |
-| `markSchemePoints` | object[]? | Preserved A-Level mark-scheme evidence |
+| `markSchemePoints` | object[]? | Preserved A-Level mark-scheme evidence; every element must be a record |
 | `passageEvidence` | string \| string[]? | Preserved IELTS passage evidence |
 | `errorPattern` | string? | Preserved reading/habit evidence |
 
 ### RedoAttempt
 | Field | Type |
 |---|---|
-| `attemptedAt` | string (ISO date) |
+| `attemptedAt` | string (valid ISO calendar date or RFC3339 timestamp) |
 | `answer` | string |
 | `isCorrect` | boolean |
 | `timeSpent` | number (seconds) |
@@ -203,7 +203,7 @@ One-shot load of everything the student shell needs. Frontend calls it once on m
 |---|---|---|
 | `variantId` | string | Must equal `ErrorItem.verificationVariantId` |
 | `isCorrect` | boolean | A wrong verification returns the item to `reviewing` |
-| `verifiedAt` | string | ISO date/datetime; cannot precede the latest correct redo or replay older evidence |
+| `verifiedAt` | string | Valid ISO calendar date or RFC3339 timestamp; must be at or after the latest correct redo and strictly later than any accepted verification |
 
 ### Note
 | Field | Type | Notes |
@@ -279,12 +279,24 @@ One-shot load of everything the student shell needs. Frontend calls it once on m
 | `POST /api/errors/{id}/verification` | VariantVerification | Accept only the exact linked task/set/error provenance and chronological evidence |
 | `PATCH /api/errors/{id}` | `{ "status": "mastered" }` | Valid only after a correct redo followed by a correct linked independent variant |
 
+Error batches are validated atomically. In addition to the field constraints above, each redo entry
+must contain all four `RedoAttempt` fields, every verification audit must be internally consistent,
+and `passageEvidence` must be a string or an array of strings. An invalid item rejects the whole
+batch without changing persisted state. `expression` and `habit` are valid normalized error types.
+
 Mastery chronology is strict: a correct redo alone is not mastery. It first moves the item to
 `verification_due`; the backend then schedules one independent variant. A correct verification
-whose `variantId` matches the persisted error/task/set chain and whose `verifiedAt` is not earlier
-than the latest correct redo permits the final mastery patch. Otherwise the patch rejects with code
-`MASTERY_GATE_NOT_MET` and message `Complete the independent variant before marking this mastered`.
-A new recurrence or redo clears stale verification evidence.
+must prove this exact persisted chain: `ErrorItem.verificationVariantId` equals both the
+`exerciseSets` record key and `ExerciseSet.id`; the set has a non-empty `taskId` resolving to exactly
+one task; that task has the same `id`, set id, source question id, and `verificationForErrorId`; the
+set has the same source question id and exactly one question whose `variantOf` is that source id.
+The verification timestamp must not precede the latest correct redo. It then permits the final
+mastery patch. Otherwise the patch rejects with code `MASTERY_GATE_NOT_MET` and message
+`Complete the independent variant before marking this mastered`. A new recurrence or redo clears
+stale verification evidence.
+
+Malformed or out-of-order redo evidence, verification replay, and a conflicting verification at an
+already accepted timestamp reject with code `INVALID_INPUT`; these failures do not mutate state.
 
 ### Notes
 | Endpoint | Body | Notes |

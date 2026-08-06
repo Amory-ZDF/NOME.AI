@@ -105,6 +105,17 @@ const scheduledErrorVariant = (error = validError({
   }
 }
 
+const taskFailureCases = [
+  ['completion', 'completeTask', (app) => app.completeTask('t1')],
+  ['addition', 'createTask', (app) => app.addTask({ title: 'Concurrent task' })],
+  ['adjustment', 'reportTaskAdjustment', (app) => app.requestTaskAdjustment(app.tasks[0], {
+    reason: 'difficulty',
+    details: '',
+    availableMinutes: 20,
+    proposedDueAt: '2026-08-08T10:00:00.000Z',
+  })],
+]
+
 function createApi(overrides = {}) {
   return {
     bootstrap: () => Promise.resolve(bootData),
@@ -1311,6 +1322,31 @@ test('atomically consumes a provenance-checked scheduled variant and rolls back 
   expect(harness.app.isActionPending('error:variant:e1')).toBe(false)
 })
 
+test('rejects a scheduled variant whose set taskId does not match the returned task', async () => {
+  // Catches the client caching a response whose set/task relationship cannot be navigated by exact ID.
+  const due = validError({
+    status: 'verification_due',
+    redoHistory: [{ attemptedAt: '2026-08-06T00:00:00.000Z', answer: '2x', isCorrect: true, timeSpent: 20 }],
+  })
+  const scheduled = scheduledErrorVariant(due)
+  const malformed = {
+    ...scheduled,
+    exerciseSet: { ...scheduled.exerciseSet, taskId: 'another-task' },
+  }
+  const harness = await renderApp(createApi({
+    bootstrap: () => Promise.resolve({ ...bootData, errors: [due] }),
+    scheduleErrorVariant: () => Promise.resolve(malformed),
+  }))
+
+  await act(async () => {
+    await expect(harness.app.scheduleErrorVariant('e1'))
+      .rejects.toThrow('The generated verification variant is incomplete. Please try again.')
+  })
+  expect(harness.app.tasks).toEqual(bootData.tasks)
+  expect(harness.app.errors).toEqual([due])
+  expect(harness.app.exerciseCache).toEqual({})
+})
+
 test('does not roll back an unrelated task write when scheduling a verification variant fails', async () => {
   // Catches an error-collection request restoring a stale task snapshot even though it made no optimistic task edit.
   const due = validError({
@@ -1325,14 +1361,117 @@ test('does not roll back an unrelated task write when scheduling a verification 
     completeTask: (id) => Promise.resolve({ task: { id, type: 'teacher_assigned', status: 'completed' } }),
   }))
   const schedule = harness.app.scheduleErrorVariant('e1').catch((error) => error)
+  const completion = harness.app.completeTask('t1')
 
-  await act(async () => { await harness.app.completeTask('t1') })
-  expect(harness.app.tasks[0].status).toBe('completed')
   await act(async () => { rejectSchedule(new Error('variant offline')); await schedule })
+  await act(async () => { await completion })
 
   expect(harness.app.tasks[0].status).toBe('completed')
   expect(harness.app.errors).toEqual([due])
 })
+
+test.each(taskFailureCases)(
+  'preserves a successfully scheduled variant when a concurrently requested task %s fails afterward',
+  async (_, apiMethod, startTaskAction) => {
+    // Catches schedule committing outside the task queue before a later stale task snapshot rolls it back.
+    const due = validError({
+      status: 'verification_due',
+      redoHistory: [{ attemptedAt: '2026-08-06T00:00:00.000Z', answer: '2x', isCorrect: true, timeSpent: 20 }],
+    })
+    const scheduled = scheduledErrorVariant(due)
+    const events = []
+    let resolveSchedule
+    let rejectTask
+    const taskFailure = () => new Promise((_, reject) => {
+      events.push('task')
+      rejectTask = reject
+    })
+    const api = createApi({
+      bootstrap: () => Promise.resolve({ ...bootData, errors: [due] }),
+      scheduleErrorVariant: () => new Promise((resolve) => {
+        events.push('schedule')
+        resolveSchedule = resolve
+      }),
+      [apiMethod]: taskFailure,
+    })
+    const harness = await renderApp(api)
+    let scheduleOperation
+    let taskSettlement
+
+    act(() => {
+      scheduleOperation = harness.app.scheduleErrorVariant('e1')
+      taskSettlement = startTaskAction(harness.app).catch((error) => error)
+    })
+    expect(events).toEqual(['schedule'])
+
+    await act(async () => {
+      resolveSchedule(scheduled)
+      await scheduleOperation
+    })
+    await waitFor(() => expect(events).toEqual(['schedule', 'task']))
+    await act(async () => {
+      rejectTask(new Error(`${apiMethod} failed`))
+      await taskSettlement
+    })
+
+    expect(harness.app.tasks).toEqual(expect.arrayContaining([scheduled.task]))
+    expect(harness.app.tasks.find((task) => task.id === 't1')).toMatchObject({ status: 'pending' })
+    expect(harness.app.taskAdjustments).toEqual([])
+    expect(harness.app.exerciseCache[`set:${scheduled.exerciseSet.id}`]).toEqual(scheduled.exerciseSet)
+    expect(harness.app.errors).toEqual([scheduled.error])
+  },
+)
+
+test.each(taskFailureCases)(
+  'runs a successful scheduled variant after an earlier task %s fails and rolls back',
+  async (_, apiMethod, startTaskAction) => {
+    // Catches schedule racing a task rollback instead of starting from the post-rollback task collection.
+    const due = validError({
+      status: 'verification_due',
+      redoHistory: [{ attemptedAt: '2026-08-06T00:00:00.000Z', answer: '2x', isCorrect: true, timeSpent: 20 }],
+    })
+    const scheduled = scheduledErrorVariant(due)
+    const events = []
+    let rejectTask
+    let resolveSchedule
+    const api = createApi({
+      bootstrap: () => Promise.resolve({ ...bootData, errors: [due] }),
+      [apiMethod]: () => new Promise((_, reject) => {
+        events.push('task')
+        rejectTask = reject
+      }),
+      scheduleErrorVariant: () => new Promise((resolve) => {
+        events.push('schedule')
+        resolveSchedule = resolve
+      }),
+    })
+    const harness = await renderApp(api)
+    let taskSettlement
+    let scheduleOperation
+
+    act(() => {
+      taskSettlement = startTaskAction(harness.app).catch((error) => error)
+      scheduleOperation = harness.app.scheduleErrorVariant('e1')
+    })
+    expect(events).toEqual(['task'])
+
+    await act(async () => {
+      rejectTask(new Error(`${apiMethod} failed`))
+      await taskSettlement
+    })
+    await waitFor(() => expect(events).toEqual(['task', 'schedule']))
+    await act(async () => {
+      resolveSchedule(scheduled)
+      await scheduleOperation
+    })
+
+    expect(harness.app.tasks).toEqual(expect.arrayContaining([scheduled.task]))
+    expect(harness.app.tasks.find((task) => task.id === 't1')).toMatchObject({ status: 'pending' })
+    expect(harness.app.taskAdjustments).toEqual([])
+    expect(harness.app.exerciseCache[`set:${scheduled.exerciseSet.id}`]).toEqual(scheduled.exerciseSet)
+    expect(harness.app.errors).toEqual([scheduled.error])
+  },
+)
 
 test('verifies the linked variant optimistically and rejects mastery until complete evidence exists', async () => {
   // Catches mastery being reachable from a correct redo alone or the exact gate message being hidden.

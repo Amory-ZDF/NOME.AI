@@ -75,6 +75,24 @@ afterEach(async () => {
   await resetMockState()
 })
 
+const mutateStoredState = (recipe) => {
+  const storageKey = 'nome-ai.student-state.v1'
+  const envelope = JSON.parse(localStorage.getItem(storageKey))
+  recipe(envelope.data)
+  localStorage.setItem(storageKey, JSON.stringify(envelope))
+}
+
+const prepareScheduledError = async () => {
+  await resetMockState()
+  await submitRedo('e1', {
+    attemptedAt: '2026-08-06T10:00:00.000Z',
+    answer: '5',
+    isCorrect: true,
+    timeSpent: 45,
+  })
+  return scheduleErrorVariant('e1')
+}
+
 test('completeTask survives a fresh bootstrap', async () => {
   // Catches a mock adapter mutation that acknowledges completion without storing it.
   await resetMockState()
@@ -766,5 +784,189 @@ test('uses the documented real diagnosis routes and request bodies', async () =>
   } finally {
     vi.doUnmock('./client')
     vi.resetModules()
+  }
+})
+
+test.each([
+  ['set id differs from its persisted key', (state, scheduled) => {
+    state.exerciseSets[scheduled.exerciseSet.id].id = 'tampered-set-id'
+  }],
+  ['set taskId is empty', (state, scheduled) => {
+    state.exerciseSets[scheduled.exerciseSet.id].taskId = ''
+  }],
+  ['set taskId points to a different task', (state, scheduled) => {
+    state.exerciseSets[scheduled.exerciseSet.id].taskId = 't1'
+  }],
+  ['set taskId identifies duplicate tasks', (state, scheduled) => {
+    state.tasks.push(structuredClone(scheduled.task))
+  }],
+  ['linked task exerciseSetId differs', (state, scheduled) => {
+    state.tasks = state.tasks.map((task) => (task.id === scheduled.task.id
+      ? { ...task, exerciseSetId: 'another-set' }
+      : task))
+  }],
+  ['linked task source differs', (state, scheduled) => {
+    state.tasks = state.tasks.map((task) => (task.id === scheduled.task.id
+      ? { ...task, sourceQuestionId: 'another-question' }
+      : task))
+  }],
+  ['linked task error differs', (state, scheduled) => {
+    state.tasks = state.tasks.map((task) => (task.id === scheduled.task.id
+      ? { ...task, verificationForErrorId: 'another-error' }
+      : task))
+  }],
+  ['generated set has no question', (state, scheduled) => {
+    state.exerciseSets[scheduled.exerciseSet.id].questions = []
+  }],
+  ['generated question source differs', (state, scheduled) => {
+    state.exerciseSets[scheduled.exerciseSet.id].questions[0].variantOf = 'another-question'
+  }],
+])('rejects verification atomically when the persisted provenance chain is broken: %s', async (_, tamper) => {
+  // Catches partial provenance checks accepting a task/set that is merely adjacent to the linked IDs.
+  const scheduled = await prepareScheduledError()
+  mutateStoredState((state) => tamper(state, scheduled))
+  const before = await bootstrap()
+
+  await expect(verifyErrorVariant('e1', {
+    variantId: scheduled.exerciseSet.id,
+    isCorrect: true,
+    verifiedAt: '2026-08-06T11:00:00.000Z',
+  })).rejects.toMatchObject({ code: 'INVALID_INPUT' })
+
+  expect((await bootstrap()).errors).toEqual(before.errors)
+})
+
+test('maps malformed and out-of-order redo evidence to typed validation errors without mutation', async () => {
+  // Catches domain TypeError/RedoChronologyError escaping the API boundary or saving a rejected attempt.
+  await resetMockState()
+  const seedErrors = (await bootstrap()).errors
+
+  await expect(submitRedo('e1', {
+    attemptedAt: '2026-02-30',
+    answer: '5',
+    isCorrect: true,
+    timeSpent: 10,
+  })).rejects.toMatchObject({ code: 'INVALID_INPUT' })
+  expect((await bootstrap()).errors).toEqual(seedErrors)
+
+  const first = {
+    attemptedAt: '2026-08-06T10:00:00.000Z',
+    answer: '5',
+    isCorrect: true,
+    timeSpent: 10,
+  }
+  await submitRedo('e1', first)
+  const beforeReplay = (await bootstrap()).errors
+  await expect(submitRedo('e1', { ...first, answer: 'replayed' })).rejects.toMatchObject({
+    code: 'INVALID_INPUT',
+  })
+  expect((await bootstrap()).errors).toEqual(beforeReplay)
+})
+
+test('rejects exact verification replay and an equal-time conflict without changing audit state', async () => {
+  // Catches a no-op clone from recordVariantVerification being mistaken for an applied transition.
+  const scheduled = await prepareScheduledError()
+  const accepted = {
+    variantId: scheduled.exerciseSet.id,
+    isCorrect: true,
+    verifiedAt: '2026-08-06T11:00:00.000Z',
+  }
+  await verifyErrorVariant('e1', accepted)
+  const beforeReplay = (await bootstrap()).errors
+
+  await expect(verifyErrorVariant('e1', accepted)).rejects.toMatchObject({ code: 'INVALID_INPUT' })
+  expect((await bootstrap()).errors).toEqual(beforeReplay)
+
+  await expect(verifyErrorVariant('e1', { ...accepted, isCorrect: false })).rejects.toMatchObject({
+    code: 'INVALID_INPUT',
+  })
+  expect((await bootstrap()).errors).toEqual(beforeReplay)
+})
+
+test.each([
+  ['unsupported question type', { type: 'essay' }],
+  ['fractional difficulty', { difficulty: 2.5 }],
+  ['out-of-range difficulty', { difficulty: 6 }],
+  ['zero repeat count', { repeatCount: 0 }],
+  ['fractional repeat count', { repeatCount: 1.5 }],
+  ['fractional choice index', { options: ['A', 'B'], correctIndex: 0.5 }],
+  ['out-of-range choice index', { options: ['A', 'B'], correctIndex: 2 }],
+  ['fractional hint dependency', { hintDependency: 1.5 }],
+  ['invalid first occurrence', { firstOccurredAt: '2026-02-30' }],
+  ['invalid last occurrence', { lastOccurredAt: 'not-a-date' }],
+  ['invalid occurrence timestamp', { occurrences: ['2026-08-40'] }],
+  ['blank occurrence identity', { occurrenceKeys: [''] }],
+  ['duplicate occurrence identities', { occurrenceKeys: ['occurrence-1', 'occurrence-1'] }],
+  ['invalid occurrence record timestamp', {
+    occurrenceKeys: ['occurrence-1'],
+    occurrenceRecords: [{ key: 'occurrence-1', occurredAt: 'tomorrow' }],
+  }],
+  ['mismatched occurrence record identity', {
+    occurrenceKeys: ['occurrence-1'],
+    occurrenceRecords: [{ key: 'occurrence-2', occurredAt: '2026-08-06' }],
+  }],
+  ['incomplete redo evidence', { redoHistory: [{ attemptedAt: '2026-08-06', isCorrect: true }] }],
+  ['invalid redo timestamp', {
+    redoHistory: [{ attemptedAt: '2026-13-01', answer: '5', isCorrect: true, timeSpent: 10 }],
+  }],
+  ['invalid variant verification timestamp', {
+    verificationVariantId: 'variant-1',
+    variantVerifiedAt: 'not-a-date',
+    variantVerification: { variantId: 'variant-1', isCorrect: true, verifiedAt: 'not-a-date' },
+  }],
+  ['mismatched variant verification id', {
+    verificationVariantId: 'variant-1',
+    variantVerifiedAt: '2026-08-07',
+    variantVerification: { variantId: 'variant-2', isCorrect: true, verifiedAt: '2026-08-07' },
+  }],
+  ['non-record mark scheme point', { markSchemePoints: ['M1'] }],
+  ['mistyped passage evidence', { passageEvidence: [42] }],
+])('rejects an invalid extended ErrorItem atomically: %s', async (_, patch) => {
+  // Catches a loose boundary admitting shapes that chronology, rendering, or persistence cannot trust.
+  await resetMockState()
+  const before = (await bootstrap()).errors
+  const item = makeError({
+    id: 'strict-error',
+    questionId: 'strict-question',
+    ...patch,
+  })
+
+  await expect(upsertErrors([item])).rejects.toMatchObject({ code: 'INVALID_INPUT' })
+  expect((await bootstrap()).errors).toEqual(before)
+})
+
+test.each(['expression', 'habit'])('upserts a valid %s error card under the seven-type contract', async (errorType) => {
+  await resetMockState()
+  const item = makeError({
+    id: `error-${errorType}`,
+    questionId: `question-${errorType}`,
+    errorType,
+    type: null,
+    difficulty: null,
+    occurrences: ['2026-08-06'],
+    occurrenceKeys: [`session:s-${errorType}:question:question-${errorType}`],
+    occurrenceRecords: [{
+      key: `session:s-${errorType}:question:question-${errorType}`,
+      occurredAt: '2026-08-06',
+    }],
+    markSchemePoints: [{ phrase: 'State the required evidence' }],
+    passageEvidence: ['The passage states the evidence.'],
+  })
+
+  await expect(upsertErrors([item])).resolves.toMatchObject({
+    errors: expect.arrayContaining([expect.objectContaining({ id: item.id, errorType })]),
+  })
+})
+
+test('validates the optional verificationForErrorId task field', async () => {
+  await resetMockState()
+  const validTask = makeTask({ id: 'task-verification', verificationForErrorId: 'error-1' })
+  await expect(createTask(validTask)).resolves.toEqual({ task: validTask })
+
+  for (const [index, verificationForErrorId] of ['', '   ', null, 42].entries()) {
+    await expect(createTask(makeTask({
+      id: `task-invalid-verification-${index}`,
+      verificationForErrorId,
+    }))).rejects.toMatchObject({ code: 'INVALID_INPUT' })
   }
 })

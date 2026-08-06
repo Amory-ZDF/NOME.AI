@@ -347,13 +347,15 @@ export function AppProvider({ children, services = defaultAppServices }) {
   const scheduleErrorVariant = useCallback((id) => {
     const sourceError = errorsRef.current.find((error) => error.id === id)
     if (!sourceError) return Promise.reject(new Error('Error item was not found.'))
-    return runAction(`error:variant:${id}`, 'errors', () => ({
+    return runAction(`error:variant:${id}`, 'tasks', () => ({
       snapshot: null,
       optimistic: () => {},
       request: async () => {
         const result = await services.api.scheduleErrorVariant(id)
         if (mounted.current && (
           !isCompleteVariantResult(result, sourceError.questionId)
+          || result.exerciseSet.taskId !== result.task.id
+          || result.exerciseSet.questions.length !== 1
           || result.task.verificationForErrorId !== id
           || result.error?.id !== id
           || result.error.questionId !== sourceError.questionId
