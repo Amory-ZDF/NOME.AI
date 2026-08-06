@@ -244,6 +244,140 @@ describe('verification lifecycle', () => {
     expect(canMarkMastered(verified)).toBe(true)
   })
 
+  test.each([false, true])('ignores a stale %s verification after newer trusted evidence', (isCorrect) => {
+    const item = recordVariantVerification(
+      attachVerificationVariant(applyRedoAttempt({
+        status: 'reviewing',
+        repeatCount: 1,
+        redoHistory: [],
+      }, { ...correctRedo, attemptedAt: '2026-08-06T10:00:00Z' }), 'variant-1'),
+      { variantId: 'variant-1', isCorrect: true, verifiedAt: '2026-08-08T09:00:00Z' },
+    )
+    const result = { variantId: 'variant-1', isCorrect, verifiedAt: '2026-08-07T09:00:00Z' }
+    const beforeItem = structuredClone(item)
+    const beforeResult = structuredClone(result)
+
+    const next = recordVariantVerification(item, result)
+
+    expect(next).toEqual(beforeItem)
+    expect(next).not.toBe(item)
+    expect(item).toEqual(beforeItem)
+    expect(result).toEqual(beforeResult)
+  })
+
+  test('rejects verification evidence that predates the latest redo and cannot master from a forged proof', () => {
+    const due = attachVerificationVariant(applyRedoAttempt({
+      status: 'reviewing',
+      repeatCount: 1,
+      redoHistory: [],
+    }, { ...correctRedo, attemptedAt: '2026-08-08T09:00:00Z' }), 'variant-1')
+    const staleResult = { variantId: 'variant-1', isCorrect: true, verifiedAt: '2026-08-07T09:00:00Z' }
+    const before = structuredClone(due)
+
+    expect(recordVariantVerification(due, staleResult)).toEqual(before)
+    expect(canMarkMastered({
+      ...due,
+      variantVerifiedAt: staleResult.verifiedAt,
+      variantVerification: staleResult,
+    })).toBe(false)
+    expect(due).toEqual(before)
+  })
+
+  test('keeps equal-time conflicting results unchanged and identical replay idempotent', () => {
+    const verification = { variantId: 'variant-1', isCorrect: true, verifiedAt: '2026-08-08T09:00:00Z' }
+    const item = recordVariantVerification(
+      attachVerificationVariant(applyRedoAttempt({
+        status: 'reviewing',
+        repeatCount: 1,
+        redoHistory: [],
+      }, correctRedo), 'variant-1'),
+      verification,
+    )
+    const before = structuredClone(item)
+
+    const conflict = recordVariantVerification(item, { ...verification, isCorrect: false })
+    const replay = recordVariantVerification(item, verification)
+
+    expect(conflict).toEqual(before)
+    expect(replay).toEqual(before)
+    expect(conflict).not.toBe(item)
+    expect(replay).not.toBe(item)
+    expect(item).toEqual(before)
+  })
+
+  test('allows a later valid verification result to update the lifecycle', () => {
+    const item = recordVariantVerification(
+      attachVerificationVariant(applyRedoAttempt({
+        status: 'reviewing',
+        repeatCount: 1,
+        redoHistory: [],
+      }, correctRedo), 'variant-1'),
+      { variantId: 'variant-1', isCorrect: true, verifiedAt: '2026-08-08T09:00:00Z' },
+    )
+
+    const next = recordVariantVerification(item, {
+      variantId: 'variant-1',
+      isCorrect: false,
+      verifiedAt: '2026-08-09T09:00:00Z',
+    })
+
+    expect(next).toMatchObject({
+      status: 'reviewing',
+      variantVerifiedAt: null,
+      variantVerification: {
+        variantId: 'variant-1',
+        isCorrect: false,
+        verifiedAt: '2026-08-09T09:00:00Z',
+      },
+    })
+  })
+
+  test('orders RFC3339 evidence by instant across timezone offsets', () => {
+    const due = attachVerificationVariant(applyRedoAttempt({
+      status: 'reviewing',
+      repeatCount: 1,
+      redoHistory: [],
+    }, { ...correctRedo, attemptedAt: '2026-08-08T10:00:00+08:00' }), 'variant-1')
+    const before = structuredClone(due)
+
+    expect(recordVariantVerification(due, {
+      variantId: 'variant-1',
+      isCorrect: true,
+      verifiedAt: '2026-08-08T01:59:59Z',
+    })).toEqual(before)
+
+    const later = recordVariantVerification(due, {
+      variantId: 'variant-1',
+      isCorrect: true,
+      verifiedAt: '2026-08-08T02:00:01Z',
+    })
+    expect(canMarkMastered(later)).toBe(true)
+    expect(due).toEqual(before)
+  })
+
+  test('orders date-only evidence by calendar day', () => {
+    const due = attachVerificationVariant(applyRedoAttempt({
+      status: 'reviewing',
+      repeatCount: 1,
+      redoHistory: [],
+    }, { ...correctRedo, attemptedAt: '2026-08-08' }), 'variant-1')
+    const before = structuredClone(due)
+
+    expect(recordVariantVerification(due, {
+      variantId: 'variant-1',
+      isCorrect: true,
+      verifiedAt: '2026-08-07',
+    })).toEqual(before)
+
+    const later = recordVariantVerification(due, {
+      variantId: 'variant-1',
+      isCorrect: true,
+      verifiedAt: '2026-08-09',
+    })
+    expect(canMarkMastered(later)).toBe(true)
+    expect(due).toEqual(before)
+  })
+
   test('a mismatched verification result makes no trusted transition', () => {
     const due = attachVerificationVariant(applyRedoAttempt({
       status: 'reviewing',
