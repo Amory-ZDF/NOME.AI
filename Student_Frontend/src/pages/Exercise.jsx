@@ -2,7 +2,8 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { motion, AnimatePresence } from 'framer-motion'
 import { useApp } from '../store/AppStore'
-import { exerciseSets, bankExerciseSets, checkAnswer, isThrowaway } from '../data/mockData'
+import { exerciseSets, bankExerciseSets } from '../data/mockData'
+import { gradeAnswer, validateAttempt } from '../features/exercise/answerRules'
 import { Icon, Badge, Stars, MathHTML } from '../components/ui'
 
 // ---------- Timer (PRD §2.6 silent timing) ----------
@@ -232,11 +233,12 @@ export default function Exercise({ bankMode = false }) {
 
   // Submit a single question (PRD §2.7)
   const submitQuestion = () => {
-    if (isThrowaway(state.answer)) {
-      showToast('Please answer seriously first — empty or random input cannot be submitted', 'error')
+    const validation = validateAttempt(state.answer)
+    if (!validation.valid) {
+      showToast(validation.message, 'error')
       return
     }
-    const isCorrect = checkAnswer(q, state.answer)
+    const { isCorrect } = gradeAnswer(q, validation.value)
     const attempt = { answer: state.answer, isCorrect }
     if (isCorrect) {
       setState(q.id, {

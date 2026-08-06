@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { motion } from 'framer-motion'
 import { useApp } from '../store/AppStore'
-import { isThrowaway } from '../data/mockData'
+import { gradeAnswer, validateAttempt } from '../features/exercise/answerRules'
 import { Icon, Badge, MathHTML } from '../components/ui'
 
 // PRD §4.4 redo mode: single-question focus, no AI hints
@@ -28,18 +28,12 @@ export default function ErrorRedo() {
   const mastering = isActionPending(`markErrorMastered:${item?.id}`)
 
   const submit = async () => {
-    if (isThrowaway(answer)) {
+    const validation = validateAttempt(answer)
+    if (!validation.valid) {
       showToast('Please answer seriously first', 'error')
       return
     }
-    const normalized = answer.trim().toLowerCase()
-    let isCorrect
-    if (item.options && item.correctIndex != null) {
-      const letter = ['a', 'b', 'c', 'd'][item.correctIndex]
-      isCorrect = normalized === letter || normalized.startsWith(letter)
-    } else {
-      isCorrect = item.acceptKeywords.some((k) => normalized.includes(k.toLowerCase()))
-    }
+    const { isCorrect } = gradeAnswer(item, validation.value)
     try {
       await recordRedo(item.id, { answer, isCorrect, timeSpent: 0 })
       setResult({ isCorrect })

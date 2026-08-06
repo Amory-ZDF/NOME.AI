@@ -331,7 +331,7 @@ export const bankExerciseSets = {
 }
 
 // ---------------- Grading ----------------
-export function checkAnswer(question, answer) {
+function checkAnswer(question, answer) {
   const text = (answer || '').toString().trim()
   if (!text) return false
   const normalized = text.toLowerCase().replace(/\s+/g, ' ')
@@ -347,7 +347,7 @@ export function checkAnswer(question, answer) {
 }
 
 // Anti-throwaway: empty or pure random symbols
-export function isThrowaway(answer) {
+function isThrowaway(answer) {
   const text = (answer || '').toString().trim()
   if (!text) return true
   if (text.length < 1) return true
