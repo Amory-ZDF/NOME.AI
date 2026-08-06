@@ -56,6 +56,7 @@ function TaskItem({ task, isNextUp, onRequestAdjustment }) {
         <div className="flex items-center gap-2 flex-wrap">
           <span className={`font-medium text-[15px] ${done ? 'line-through text-warm-stone' : ''}`}>{task.title}</span>
           {isNextUp && <Badge tone="teal">Next up</Badge>}
+          {task.adjustmentStatus === 'submitted' && <Badge tone="teal">Adjustment submitted</Badge>}
           {task.isOverdue && <Badge tone="amber">Overdue</Badge>}
           <Badge tone="stone">{task.subject}</Badge>
           <PriorityBadge priority={task.priority} />

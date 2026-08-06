@@ -46,6 +46,7 @@ test('submits a detailed adjustment request without removing the task', async ()
 
   expect(await screen.findByText(/Adjustment request sent to your teacher/i)).toBeInTheDocument()
   expect(screen.getByText('Math P3 Ch7 Review')).toBeInTheDocument()
+  expect(screen.getByText('Adjustment submitted')).toBeVisible()
   expect(reportTaskAdjustment).toHaveBeenCalledWith('teacher', {
     id: 'adjustment-id', taskId: 'teacher', reason: 'time_conflict', details: 'Mock exam preparation', availableMinutes: 20,
     proposedDueAt: new Date('2026-08-08T12:00').toISOString(), createdAt: '2026-08-06T10:00:00.000Z', status: 'submitted',
