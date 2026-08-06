@@ -388,7 +388,7 @@ export function AppProvider({ children, services = defaultAppServices }) {
         },
       })) || [],
     }
-    return runAction(`exercise:submit:${savedSession.sessionId}`, 'exerciseSessions', () => ({
+    return runAction(`exercise:submit:${savedSession.sessionId}`, 'tasks', () => ({
       snapshot: lastSessionRef.current,
       optimistic: () => replaceLastSession(savedSession),
       request: async () => {

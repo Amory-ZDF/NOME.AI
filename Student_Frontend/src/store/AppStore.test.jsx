@@ -297,6 +297,75 @@ test.each([
 })
 
 test.each([
+  ['task action first', ['task-action', 'session']],
+  ['session first', ['session', 'task-action']],
+])('serializes session completion with existing task actions: %s', async (_, order) => {
+  // Catches a failed sibling task rollback restoring a snapshot from before the session completed t1.
+  const starts = []
+  let resolveSession
+  let rejectTaskTwo
+  const submitSession = vi.fn((session) => {
+    starts.push(`submit:${session.taskId}`)
+    return new Promise((resolve) => { resolveSession = resolve })
+  })
+  const completeTask = vi.fn((id) => {
+    starts.push(`complete:${id}`)
+    if (id === 't2') return new Promise((_, reject) => { rejectTaskTwo = reject })
+    return Promise.resolve({ task: { id, type: 'teacher_assigned', status: 'completed' } })
+  })
+  const harness = await renderApp(createApi({
+    bootstrap: () => Promise.resolve({
+      ...bootData,
+      tasks: [
+        { id: 't1', type: 'teacher_assigned', status: 'pending' },
+        { id: 't2', type: 'teacher_assigned', status: 'pending' },
+      ],
+    }),
+    submitSession,
+    completeTask,
+  }))
+  const session = { sessionId: 's-cross-task', taskId: 't1', completedAt: '2026-08-06T00:00:00.000Z', questions: [] }
+  let sessionOperation
+  let taskTwoSettlement
+
+  act(() => {
+    for (const operation of order) {
+      if (operation === 'session') {
+        sessionOperation = harness.app.saveSession(session)
+      } else {
+        taskTwoSettlement = harness.app.completeTask('t2').catch((error) => error)
+      }
+    }
+  })
+
+  expect(starts).toEqual([order[0] === 'session' ? 'submit:t1' : 'complete:t2'])
+  if (order[0] === 'session') {
+    await act(async () => {
+      resolveSession({ sessionId: session.sessionId })
+      await sessionOperation
+    })
+    await waitFor(() => expect(starts).toEqual(['submit:t1', 'complete:t1', 'complete:t2']))
+    await act(async () => { rejectTaskTwo(new Error('t2 failed')); await taskTwoSettlement })
+  } else {
+    await act(async () => { rejectTaskTwo(new Error('t2 failed')); await taskTwoSettlement })
+    await waitFor(() => expect(starts).toEqual(['complete:t2', 'submit:t1']))
+    await act(async () => {
+      resolveSession({ sessionId: session.sessionId })
+      await sessionOperation
+    })
+  }
+
+  expect(harness.app.lastSession).toMatchObject({ sessionId: session.sessionId, taskId: 't1' })
+  expect(harness.app.tasks).toEqual([
+    expect.objectContaining({ id: 't1', status: 'completed' }),
+    expect.objectContaining({ id: 't2', status: 'pending' }),
+  ])
+  expect(submitSession).toHaveBeenCalledTimes(1)
+  expect(harness.app.isActionPending('exercise:submit:s-cross-task')).toBe(false)
+  expect(harness.app.isActionPending('task:complete:t2')).toBe(false)
+})
+
+test.each([
   ['null response', null],
   ['empty response', {}],
   ['wrong task id', { task: { id: 't2', status: 'completed' } }],
