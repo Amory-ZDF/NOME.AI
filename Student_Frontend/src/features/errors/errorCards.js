@@ -27,8 +27,6 @@ const ERROR_CARD_STATUSES = new Set([
   'mastered',
 ])
 
-const PRIVILEGED_INCOMING_STATUSES = new Set(['verification_due', 'mastered'])
-
 const isRecord = (value) => value !== null && typeof value === 'object' && !Array.isArray(value)
 const nonemptyString = (value) => (typeof value === 'string' && value.trim() ? value.trim() : null)
 const firstPresent = (...values) => values.find((value) => value !== undefined && value !== null)
@@ -281,9 +279,9 @@ const normalizeQuestionId = (card, id) => {
 }
 
 const normalizeStatus = (status, source) => {
+  if (source === 'incoming') return 'pending_review'
   const candidate = nonemptyString(status)
   if (!ERROR_CARD_STATUSES.has(candidate)) return 'pending_review'
-  if (source === 'incoming' && PRIVILEGED_INCOMING_STATUSES.has(candidate)) return 'pending_review'
   return candidate
 }
 
@@ -334,8 +332,12 @@ const mergeRepeatedCard = (current, incoming) => {
   ])
   const occurrences = occurrenceRecords.map((record) => record.occurredAt).filter(Boolean)
   const occurrenceKeys = occurrenceRecords.map((record) => record.key)
-  const recurrenceIncrement = newOccurrenceRecords.length
-  const hasNewRecurrence = recurrenceIncrement > 0
+  const repeatCount = Math.max(
+    current.repeatCount + newOccurrenceRecords.length,
+    incoming.repeatCount,
+    occurrenceRecords.length,
+  )
+  const hasNewRecurrence = repeatCount > current.repeatCount
 
   return {
     ...current,
@@ -351,7 +353,7 @@ const mergeRepeatedCard = (current, incoming) => {
     lastOccurredAt: occurrences.at(-1)
       ?? incoming.lastOccurredAt
       ?? current.lastOccurredAt,
-    repeatCount: current.repeatCount + recurrenceIncrement,
+    repeatCount,
     status: hasNewRecurrence ? 'pending_review' : current.status,
     redoHistory: mergeRedoHistory(current.redoHistory, incoming.redoHistory),
     verificationVariantId: hasNewRecurrence ? null : current.verificationVariantId,

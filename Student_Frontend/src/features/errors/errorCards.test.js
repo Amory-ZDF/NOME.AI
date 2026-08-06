@@ -411,4 +411,110 @@ describe('mergeErrorCards', () => {
       { id: 'malformed-two', questionId: 'missing-question:malformed-two' },
     ])
   })
+
+  test('keeps an incoming aggregate repeat count monotonic when it also adds a new occurrence', () => {
+    const merged = mergeErrorCards([{
+      id: 'e1',
+      questionId: 'q1',
+      repeatCount: 4,
+      occurrences: ['2026-08-01'],
+      status: 'verification_due',
+      verificationVariantId: 'variant-old',
+      variantVerifiedAt: '2026-08-02',
+      redoHistory: [{ attemptedAt: '2026-08-02', answer: '42', isCorrect: true }],
+    }], [{
+      id: 'e2',
+      questionId: 'q1',
+      repeatCount: 7,
+      occurrences: ['2026-08-03'],
+      status: 'reviewing',
+    }])
+
+    expect(merged[0]).toMatchObject({
+      id: 'e1',
+      repeatCount: 7,
+      occurrences: ['2026-08-01', '2026-08-03'],
+      status: 'pending_review',
+      verificationVariantId: null,
+      variantVerifiedAt: null,
+      redoHistory: [{ attemptedAt: '2026-08-02', answer: '42', isCorrect: true }],
+    })
+  })
+
+  test('treats a higher aggregate count as recurrence even when occurrence identity collides', () => {
+    const merged = mergeErrorCards([{
+      id: 'e1',
+      questionId: 'q1',
+      repeatCount: 4,
+      occurrences: ['2026-08-01'],
+      occurrenceKeys: ['legacy:q1:2026-08-01'],
+      status: 'mastered',
+      verificationVariantId: 'variant-old',
+      variantVerifiedAt: '2026-08-02',
+      redoHistory: [{ attemptedAt: '2026-08-02', answer: '42', isCorrect: true }],
+    }], [{
+      id: 'e2',
+      questionId: 'q1',
+      repeatCount: 7,
+      occurrences: ['2026-08-01'],
+      occurrenceKeys: ['legacy:q1:2026-08-01'],
+      status: 'reviewing',
+    }])
+
+    expect(merged[0]).toMatchObject({
+      id: 'e1',
+      repeatCount: 7,
+      occurrences: ['2026-08-01'],
+      status: 'pending_review',
+      verificationVariantId: null,
+      variantVerifiedAt: null,
+      redoHistory: [{ attemptedAt: '2026-08-02', answer: '42', isCorrect: true }],
+    })
+  })
+
+  test('keeps lifecycle and count unchanged for equal or lower idempotent aggregate input', () => {
+    const existing = [{
+      id: 'e1',
+      questionId: 'q1',
+      repeatCount: 7,
+      occurrences: ['2026-08-01'],
+      occurrenceKeys: ['legacy:q1:2026-08-01'],
+      status: 'verification_due',
+      verificationVariantId: 'variant-current',
+      variantVerifiedAt: '2026-08-02',
+    }]
+    const sameOccurrence = {
+      id: 'replay',
+      questionId: 'q1',
+      occurrences: ['2026-08-01'],
+      occurrenceKeys: ['legacy:q1:2026-08-01'],
+      status: 'reviewing',
+    }
+
+    const equal = mergeErrorCards(existing, [{ ...sameOccurrence, repeatCount: 7 }])[0]
+    const lower = mergeErrorCards(existing, [{ ...sameOccurrence, repeatCount: 5 }])[0]
+
+    for (const card of [equal, lower]) {
+      expect(card).toMatchObject({
+        repeatCount: 7,
+        status: 'verification_due',
+        verificationVariantId: 'variant-current',
+        variantVerifiedAt: '2026-08-02',
+      })
+    }
+  })
+
+  test('normalizes an incoming reviewing card to pending review', () => {
+    const merged = mergeErrorCards([], [{
+      id: 'e1',
+      questionId: 'q1',
+      status: 'reviewing',
+    }])
+
+    expect(merged[0]).toMatchObject({
+      status: 'pending_review',
+      verificationVariantId: null,
+      variantVerifiedAt: null,
+    })
+  })
 })
