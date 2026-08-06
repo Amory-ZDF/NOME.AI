@@ -17,7 +17,7 @@ const initialDraft = {
   proposedDueAt: '',
 }
 
-export function TaskAdjustmentModal({ task, open, onClose, returnFocusTarget }) {
+export function TaskAdjustmentModal({ task, open, onClose, returnFocusTarget, fallbackFocusTarget }) {
   const { requestTaskAdjustment, isActionPending } = useApp()
   const reasonRef = useRef(null)
   const [draft, setDraft] = useState(initialDraft)
@@ -59,7 +59,7 @@ export function TaskAdjustmentModal({ task, open, onClose, returnFocusTarget }) 
   }
 
   return (
-    <Modal open={open} onClose={close} title="Adjust task" initialFocusRef={reasonRef} returnFocusTarget={returnFocusTarget}>
+    <Modal open={open} onClose={close} title="Adjust task" initialFocusRef={reasonRef} returnFocusTarget={returnFocusTarget} fallbackFocusTarget={fallbackFocusTarget}>
       <form onSubmit={submit}>
         <p className="text-sm text-warm-stone mb-4">Tell your teacher what needs to change for “{task?.title}”.</p>
 

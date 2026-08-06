@@ -10,6 +10,7 @@ function TaskItem({ task, isNextUp, onRequestAdjustment }) {
   const navigate = useNavigate()
   const { completeTask, showToast, isActionPending, taskAdjustments } = useApp()
   const [menuOpen, setMenuOpen] = useState(false)
+  const checkboxRef = useRef(null)
   const moreButtonRef = useRef(null)
   const done = task.status === 'completed'
   const canRequestAdjustment = isTaskAdjustmentEligible(task, taskAdjustments)
@@ -36,6 +37,7 @@ function TaskItem({ task, isNextUp, onRequestAdjustment }) {
     <motion.div layout variants={fadeUpItem} className={`group flex items-start gap-3 px-4 py-3.5 rounded-comp transition-colors ${done ? 'opacity-50' : 'hover:bg-teal-tint/60 cursor-pointer'}`} onClick={openExercise}>
       {/* Checkbox (spring animation) */}
       <motion.button
+        ref={checkboxRef}
         whileTap={{ scale: 0.85 }}
         className={`mt-0.5 w-5 h-5 shrink-0 rounded border-2 flex items-center justify-center transition-colors ${
           done ? 'bg-success-green border-success-green' : 'border-warm-stone/40 hover:border-deep-teal'
@@ -91,7 +93,7 @@ function TaskItem({ task, isNextUp, onRequestAdjustment }) {
         <AnimatePresence>
           {menuOpen && (
             <motion.div role="menu" initial={{ opacity: 0, y: 4 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }} className="absolute right-0 top-7 bg-pure-surface border border-whisper-line rounded-comp py-1 w-36 z-10">
-              <button className="w-full text-left px-3 py-2 text-sm text-warm-stone hover:bg-warm-paper hover:text-error-red" role="menuitem" aria-label="I can't complete this task" onClick={() => { setMenuOpen(false); onRequestAdjustment(task, moreButtonRef.current) }}>
+              <button className="w-full text-left px-3 py-2 text-sm text-warm-stone hover:bg-warm-paper hover:text-error-red" role="menuitem" aria-label="I can't complete this task" onClick={() => { setMenuOpen(false); onRequestAdjustment(task, moreButtonRef.current, checkboxRef.current) }}>
                 Can&apos;t complete — report to teacher
               </button>
             </motion.div>
@@ -130,10 +132,10 @@ export function TaskList({ tasks, limit, now = new Date(), availableMinutes = In
         />
       ) : (
         <motion.div variants={staggerContainer} initial="hidden" animate="show" className="-mx-2">
-          {shown.map((task) => <TaskItem key={task.id} task={task} isNextUp={task.id === nextTaskId} onRequestAdjustment={(selectedTask, returnFocusTarget) => setAdjustment({ task: selectedTask, returnFocusTarget })} />)}
+          {shown.map((task) => <TaskItem key={task.id} task={task} isNextUp={task.id === nextTaskId} onRequestAdjustment={(selectedTask, returnFocusTarget, fallbackFocusTarget) => setAdjustment({ task: selectedTask, returnFocusTarget, fallbackFocusTarget })} />)}
         </motion.div>
       )}
-      <TaskAdjustmentModal task={adjustment?.task} open={Boolean(adjustment)} returnFocusTarget={adjustment?.returnFocusTarget} onClose={() => setAdjustment(null)} />
+      <TaskAdjustmentModal task={adjustment?.task} open={Boolean(adjustment)} returnFocusTarget={adjustment?.returnFocusTarget} fallbackFocusTarget={adjustment?.fallbackFocusTarget} onClose={() => setAdjustment(null)} />
     </section>
   )
 }

@@ -54,6 +54,19 @@ test('submits a detailed adjustment request without removing the task', async ()
   })
 })
 
+test('restores focus to the task checkbox when successful submission removes the options trigger', async () => {
+  const user = userEvent.setup()
+  renderStudentApp(<App services={servicesFor()} />)
+
+  await openAdjustment(user)
+  await completeDraft(user)
+  await user.click(screen.getByRole('button', { name: 'Send adjustment request' }))
+
+  await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Adjust task' })).not.toBeInTheDocument())
+  expect(screen.queryByRole('button', { name: /more options for Math P3/i })).not.toBeInTheDocument()
+  expect(screen.getByRole('checkbox', { name: /Mark Math P3 Ch7 Review complete/i })).toHaveFocus()
+})
+
 test('shows field validation errors without sending an invalid adjustment request', async () => {
   const user = userEvent.setup()
   const reportTaskAdjustment = vi.fn()

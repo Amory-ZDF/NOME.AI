@@ -86,7 +86,7 @@ export function Toggle({ checked, onChange, label }) {
 }
 
 // Modal
-export function Modal({ open, onClose, title, children, width = 'max-w-lg', initialFocusRef, returnFocusTarget }) {
+export function Modal({ open, onClose, title, children, width = 'max-w-lg', initialFocusRef, returnFocusTarget, fallbackFocusTarget }) {
   const dialogRef = useRef(null)
   const onCloseRef = useRef(onClose)
   const titleId = useId()
@@ -95,7 +95,7 @@ export function Modal({ open, onClose, title, children, width = 'max-w-lg', init
   useEffect(() => {
     if (!open) return undefined
 
-    const restoreTarget = returnFocusTarget || document.activeElement
+    const restoreTargets = [returnFocusTarget, fallbackFocusTarget, document.activeElement]
     const dialog = dialogRef.current
     const focusableSelector = 'button:not([disabled]):not([tabindex="-1"]), select:not([disabled]), textarea:not([disabled]), input:not([disabled]), a[href], [tabindex]:not([tabindex="-1"])'
     const focusable = () => Array.from(dialog?.querySelectorAll(focusableSelector) ?? [])
@@ -131,9 +131,9 @@ export function Modal({ open, onClose, title, children, width = 'max-w-lg', init
     document.addEventListener('keydown', handleKeyDown)
     return () => {
       document.removeEventListener('keydown', handleKeyDown)
-      if (restoreTarget?.isConnected) restoreTarget.focus()
+      restoreTargets.find((target) => target?.isConnected)?.focus()
     }
-  }, [initialFocusRef, open, returnFocusTarget])
+  }, [fallbackFocusTarget, initialFocusRef, open, returnFocusTarget])
 
   return (
     <AnimatePresence>
