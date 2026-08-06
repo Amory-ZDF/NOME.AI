@@ -26,7 +26,7 @@ export function submitAttempt(progress, question, answer, submittedAt) {
   return {
     ...progress,
     answer: validation.value,
-    status: isCorrect ? 'correct' : 'wrong',
+    status: progress.status === 'correct' || isCorrect ? 'correct' : 'wrong',
     attempts,
     hintLevel: firstWrongAttempt ? Math.max(1, progress.hintLevel) : progress.hintLevel,
     solvedAtHintLevel: isCorrect ? (progress.solvedAtHintLevel ?? progress.hintLevel) : progress.solvedAtHintLevel,
@@ -35,6 +35,7 @@ export function submitAttempt(progress, question, answer, submittedAt) {
 }
 
 export function unlockNextHint(progress) {
+  if (progress.status === 'correct') return { ...progress, transitionError: 'ALREADY_SOLVED' }
   const hasWrongAttempt = progress.status === 'wrong' || progress.attempts.some((attempt) => !attempt.isCorrect)
   if (!hasWrongAttempt) return { ...progress, transitionError: 'ATTEMPT_REQUIRED' }
 
@@ -43,13 +44,13 @@ export function unlockNextHint(progress) {
 
 export function canSubmitSession(progressById) {
   const progress = Object.values(progressById)
-  return progress.length > 0 && progress.every((item) => item.status !== 'unanswered')
+  return progress.length > 0 && progress.every((item) => item.status === 'wrong' || item.status === 'correct')
 }
 
 export function buildSession({ set, progressById, elapsedSeconds, sessionId, completedAt }) {
   return {
     sessionId,
-    taskId: set.taskId,
+    taskId: set.taskId ?? null,
     taskTitle: set.title,
     subject: set.subject,
     completedAt,

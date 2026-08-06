@@ -40,10 +40,10 @@ test('does not append invalid attempts or alter progress', () => {
 })
 
 test('does not auto-unlock further hints after subsequent wrong attempts', () => {
-  const progress = { ...createQuestionProgress('q1'), status: 'wrong', hintLevel: 3, attempts: [] }
-  const result = submitAttempt(progress, { acceptKeywords: ['42'] }, '41', '2026-08-06T10:00:00Z')
+  const firstWrong = submitAttempt(createQuestionProgress('q1'), { acceptKeywords: ['42'] }, '41', '2026-08-06T10:00:00Z')
+  const result = submitAttempt(firstWrong, { acceptKeywords: ['42'] }, '40', '2026-08-06T10:01:00Z')
 
-  expect(result).toMatchObject({ status: 'wrong', hintLevel: 3 })
+  expect(result).toMatchObject({ status: 'wrong', hintLevel: 1 })
 })
 
 test('keeps inputs immutable during state transitions', () => {
@@ -58,6 +58,8 @@ test('keeps inputs immutable during state transitions', () => {
 test('requires every question to have a valid attempt before session submission', () => {
   expect(canSubmitSession({})).toBe(false)
   expect(canSubmitSession({ q1: createQuestionProgress('q1') })).toBe(false)
+  expect(canSubmitSession({ q1: { status: 'invalid' } })).toBe(false)
+  expect(canSubmitSession({ q1: {} })).toBe(false)
   expect(canSubmitSession({
     q1: { ...createQuestionProgress('q1'), status: 'wrong' },
     q2: { ...createQuestionProgress('q2'), status: 'correct' },
@@ -95,4 +97,26 @@ test('builds a deterministic session with mapped result fields and rounded minut
   })
   expect(buildSession(input)).toEqual(session)
   expect(input).toEqual(snapshot)
+})
+
+test('uses null taskId for a bank set', () => {
+  const session = buildSession({
+    set: { title: 'Bank practice', subject: 'Math', questions: [] },
+    progressById: {}, elapsedSeconds: 0, sessionId: 's-bank', completedAt: '2026-08-06T10:00:00Z',
+  })
+
+  expect(session.taskId).toBeNull()
+})
+
+test('preserves solved progress after later attempts and hint requests', () => {
+  const question = { acceptKeywords: ['42'] }
+  const firstWrong = submitAttempt(createQuestionProgress('q1'), question, '41', '2026-08-06T10:00:00Z')
+  const withHints = unlockNextHint(unlockNextHint(firstWrong))
+  const solved = submitAttempt(withHints, question, '42', '2026-08-06T10:01:00Z')
+  const laterWrong = submitAttempt(solved, question, '40', '2026-08-06T10:02:00Z')
+  const hintRequest = unlockNextHint(laterWrong)
+
+  expect(laterWrong).toMatchObject({ status: 'correct', solvedAtHintLevel: 3, hintLevel: 3 })
+  expect(laterWrong.attempts).toHaveLength(3)
+  expect(hintRequest).toMatchObject({ status: 'correct', hintLevel: 3, transitionError: 'ALREADY_SOLVED' })
 })
