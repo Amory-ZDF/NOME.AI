@@ -23,8 +23,14 @@ function createApi(overrides = {}) {
     getBankExerciseSet: (setId) => Promise.resolve(bankExerciseSets[setId]),
     submitSession: (session) => Promise.resolve({ sessionId: session.sessionId }),
     generateVariant: (sourceQuestionId) => Promise.resolve({
-      exerciseSet: { id: `variant-${sourceQuestionId}`, taskId: `variant-task-${sourceQuestionId}`, title: 'Variant practice', subject: 'A-Level Math', questions: [] },
-      task: { id: `variant-task-${sourceQuestionId}`, title: 'Independent transfer practice', status: 'pending' },
+      exerciseSet: {
+        id: `variant-${sourceQuestionId}`,
+        taskId: `variant-task-${sourceQuestionId}`,
+        title: 'Variant practice',
+        subject: 'A-Level Math',
+        questions: [{ ...exerciseSets['set-t1'].questions[0], id: `variant-${sourceQuestionId}-q1`, order: 1 }],
+      },
+      task: { id: `variant-task-${sourceQuestionId}`, title: 'Independent transfer practice', exerciseSetId: `variant-${sourceQuestionId}`, type: 'ai_recommended', status: 'pending' },
     }),
     updateSettings: (patch) => Promise.resolve({ settings: patch }),
     ...overrides,
@@ -53,15 +59,15 @@ async function attemptTaskExercise() {
   await screen.findByText('IELTS Reading · Cambridge 18 Test 2 P1')
 
   fireEvent.click(screen.getAllByRole('radio')[1])
-  fireEvent.click(screen.getAllByRole('button', { name: /check my answer/i })[0])
+  fireEvent.click(screen.getByRole('button', { name: /Submit answer from answer area.*check my answer/i }))
 
   fireEvent.click(screen.getByTitle('Question 2'))
   fireEvent.click(screen.getAllByRole('radio')[1])
-  fireEvent.click(screen.getAllByRole('button', { name: /check my answer/i })[0])
+  fireEvent.click(screen.getByRole('button', { name: /Submit answer from answer area.*check my answer/i }))
 
   fireEvent.click(screen.getByTitle('Question 3'))
   fireEvent.change(screen.getByRole('textbox'), { target: { value: '25%' } })
-  fireEvent.click(screen.getAllByRole('button', { name: /check my answer/i })[0])
+  fireEvent.click(screen.getByRole('button', { name: /Submit answer from answer area.*check my answer/i }))
 }
 
 function LocationProbe() {
@@ -125,7 +131,7 @@ test('Exercise waits for session persistence and stays on the exercise when it f
   )
   const radios = await screen.findAllByRole('radio')
   fireEvent.click(radios[0])
-  fireEvent.click(screen.getAllByRole('button', { name: /check my answer/i })[0])
+  fireEvent.click(screen.getByRole('button', { name: /Submit answer from answer area.*check my answer/i }))
   fireEvent.click(await screen.findByRole('button', { name: /Finish/i }))
 
   expect(screen.getByTestId('location')).toHaveTextContent('/bank/exercise/bq3')

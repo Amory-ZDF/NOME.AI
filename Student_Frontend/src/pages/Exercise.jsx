@@ -38,6 +38,71 @@ const transitionMessages = {
   ALREADY_SOLVED: 'This question is already solved.',
 }
 
+const supportedQuestionTypes = new Set(['choice', 'fill_blank', 'calculation', 'proof', 'reading', 'writing'])
+const isRecord = (value) => value !== null && typeof value === 'object' && !Array.isArray(value)
+const isNonemptyString = (value) => typeof value === 'string' && value.trim().length > 0
+
+function hasCompleteHints(hints) {
+  if (!Array.isArray(hints) || hints.length !== 5) return false
+  const levels = new Set()
+  for (const hint of hints) {
+    if (!isRecord(hint)
+      || !Number.isInteger(hint.level)
+      || hint.level < 1
+      || hint.level > 5
+      || !isNonemptyString(hint.title)
+      || !isNonemptyString(hint.content)) return false
+    levels.add(hint.level)
+  }
+  return levels.size === 5 && [1, 2, 3, 4, 5].every((level) => levels.has(level))
+}
+
+function isRenderableQuestion(question) {
+  if (!isRecord(question)
+    || !isNonemptyString(question.id)
+    || !isNonemptyString(question.content)
+    || !isNonemptyString(question.topic)
+    || !Number.isFinite(question.order)
+    || !Number.isFinite(question.difficulty)
+    || !supportedQuestionTypes.has(question.type)
+    || !isNonemptyString(question.correctDisplay)
+    || !isNonemptyString(question.errorType)
+    || !Array.isArray(question.acceptKeywords)
+    || question.acceptKeywords.length === 0
+    || !question.acceptKeywords.every(isNonemptyString)
+    || !hasCompleteHints(question.hints)) return false
+
+  if (question.type !== 'choice') return true
+  return Array.isArray(question.options)
+    && question.options.length > 0
+    && question.options.every(isNonemptyString)
+    && Number.isInteger(question.correctIndex)
+    && question.correctIndex >= 0
+    && question.correctIndex < question.options.length
+}
+
+function isRenderableExerciseSet(exerciseSet) {
+  if (!isRecord(exerciseSet)
+    || !isNonemptyString(exerciseSet.title)
+    || !isNonemptyString(exerciseSet.subject)
+    || !Array.isArray(exerciseSet.questions)
+    || exerciseSet.questions.length === 0
+    || !exerciseSet.questions.every(isRenderableQuestion)) return false
+  const ids = exerciseSet.questions.map((question) => question.id)
+  return new Set(ids).size === ids.length
+}
+
+function isCompleteVariantResult(result) {
+  if (!isRecord(result) || !isRenderableExerciseSet(result.exerciseSet) || !isRecord(result.task)) return false
+  const { exerciseSet, task } = result
+  return isNonemptyString(exerciseSet.id)
+    && isNonemptyString(task.id)
+    && isNonemptyString(task.title)
+    && task.exerciseSetId === exerciseSet.id
+    && task.type === 'ai_recommended'
+    && task.status === 'pending'
+}
+
 function ExplanationSection({ title, children }) {
   if (!children) return null
   return (
@@ -123,7 +188,7 @@ function AiPanel({
         <p className="italic text-warm-stone text-sm leading-6 text-center py-6">
           &quot;Try solving this on your own first.<br />An incomplete attempt is fine — write down your thinking.&quot;
         </p>
-        <button className="zb-btn-primary w-full" onClick={onSubmit} aria-label="Submit answer — check my answer">
+        <button className="zb-btn-primary w-full" onClick={onSubmit} aria-label="Submit answer from AI tutor — check my answer">
           <Icon name="fact_check" size={16} /> I&apos;m done — check my answer
         </button>
         <button className="zb-btn-ghost w-full" onClick={onUnlockHint} aria-label="Get a hint">
@@ -182,7 +247,7 @@ function AiPanel({
       ) : (
         <p className="text-xs text-warm-stone text-center">All hints unlocked — review the full solution and try again</p>
       )}
-      <button className="zb-btn-ghost w-full" onClick={onSubmit} aria-label="Submit answer — check my answer">
+      <button className="zb-btn-ghost w-full" onClick={onSubmit} aria-label="Submit answer from AI tutor — check my answer">
         <Icon name="edit" size={16} /> Edit answer &amp; resubmit
       </button>
     </div>
@@ -274,13 +339,16 @@ function LoadingExercise() {
   )
 }
 
-function MissingExercise({ error, onBack }) {
+function MissingExercise({ error, onBack, onRetry }) {
   return (
     <div className="min-h-screen flex flex-col items-center justify-center gap-3">
       <Icon name="error_outline" size={40} className="text-warm-stone" />
       <p className="text-warm-stone">This exercise doesn&apos;t exist or has expired</p>
       {error?.message && <p role="alert" className="text-sm text-error-red">{error.message}</p>}
-      <button className="zb-btn-ghost" onClick={onBack}>Back to Home</button>
+      <div className="flex items-center gap-2">
+        <button className="zb-btn-primary" onClick={onRetry}>Retry loading</button>
+        <button className="zb-btn-ghost" onClick={onBack}>Back to Home</button>
+      </div>
     </div>
   )
 }
@@ -298,6 +366,9 @@ export default function Exercise({ bankMode = false }) {
   } = useApp()
   const loadKey = bankMode ? `bank:${qId}` : `task:${taskId}`
   const timer = useTimer(loadKey)
+  const mountedRef = useRef(false)
+  const currentLoadKeyRef = useRef(loadKey)
+  currentLoadKeyRef.current = loadKey
   const secondsRef = useRef(0)
   const submitTransactionRef = useRef(false)
   const [submitTransactionPending, setSubmitTransactionPending] = useState(false)
@@ -308,6 +379,14 @@ export default function Exercise({ bankMode = false }) {
   const [current, setCurrent] = useState(0)
   const [progressById, setProgressById] = useState({})
   const [variantTasks, setVariantTasks] = useState({})
+  const [loadRetry, setLoadRetry] = useState(0)
+
+  useEffect(() => {
+    mountedRef.current = true
+    return () => { mountedRef.current = false }
+  }, [])
+
+  const isCurrentPage = (key) => mountedRef.current && currentLoadKeyRef.current === key
 
   useEffect(() => {
     let active = true
@@ -327,11 +406,11 @@ export default function Exercise({ bankMode = false }) {
       : loadExerciseSet({ taskId })
 
     request.then((loadedSet) => {
-      if (!active) return
-      if (!loadedSet || !Array.isArray(loadedSet.questions) || loadedSet.questions.length === 0) {
+      if (!active || !isCurrentPage(loadKey)) return
+      if (!isRenderableExerciseSet(loadedSet)) {
         setSettledLoadKey(loadKey)
         setLoadStatus('error')
-        setLoadError(new Error('No questions are available for this exercise.'))
+        setLoadError(new Error('Exercise data is incomplete or invalid.'))
         return
       }
       setExerciseSet(loadedSet)
@@ -341,14 +420,14 @@ export default function Exercise({ bankMode = false }) {
       setSettledLoadKey(loadKey)
       setLoadStatus('ready')
     }).catch((error) => {
-      if (!active) return
+      if (!active || !isCurrentPage(loadKey)) return
       setLoadError(error)
       setSettledLoadKey(loadKey)
       setLoadStatus('error')
     })
 
     return () => { active = false }
-  }, [bankMode, loadExerciseSet, loadKey, qId, taskId])
+  }, [bankMode, loadExerciseSet, loadKey, loadRetry, qId, taskId])
 
   useEffect(() => {
     const interval = setInterval(() => { secondsRef.current += 1 }, 1000)
@@ -357,7 +436,13 @@ export default function Exercise({ bankMode = false }) {
 
   if (loadStatus === 'loading' || settledLoadKey !== loadKey) return <LoadingExercise />
   if (loadStatus === 'error' || !set) {
-    return <MissingExercise error={loadError} onBack={() => navigate(bankMode ? '/bank' : '/')} />
+    return (
+      <MissingExercise
+        error={loadError}
+        onBack={() => navigate(bankMode ? '/bank' : '/')}
+        onRetry={() => setLoadRetry((attempt) => attempt + 1)}
+      />
+    )
   }
 
   const questions = set.questions
@@ -405,6 +490,7 @@ export default function Exercise({ bankMode = false }) {
       return
     }
     if (submitTransactionRef.current) return
+    const actionLoadKey = loadKey
     submitTransactionRef.current = true
     setSubmitTransactionPending(true)
     try {
@@ -413,6 +499,7 @@ export default function Exercise({ bankMode = false }) {
         progressById,
         elapsedSeconds: secondsRef.current,
       }))
+      if (!isCurrentPage(actionLoadKey)) return
       const persistedId = typeof persisted?.sessionId === 'string' ? persisted.sessionId.trim() : ''
       if (!persistedId) {
         showToast('Session saved without a valid reference. Please try submitting again.', 'error')
@@ -422,6 +509,7 @@ export default function Exercise({ bankMode = false }) {
     } catch {
       // AppStore displays persistence failures; retaining local progress allows a retry.
     } finally {
+      if (!isCurrentPage(actionLoadKey)) return
       submitTransactionRef.current = false
       setSubmitTransactionPending(false)
     }
@@ -433,13 +521,15 @@ export default function Exercise({ bankMode = false }) {
   }
 
   const createIndependentVariant = async () => {
+    const actionLoadKey = loadKey
     try {
       const result = await generateVariant(q)
-      const createdTask = result?.task
-      if (!createdTask || typeof createdTask.title !== 'string' || createdTask.title.trim().length === 0) {
-        showToast('The variant task could not be created. Please try again.', 'error')
+      if (!isCurrentPage(actionLoadKey)) return
+      if (!isCompleteVariantResult(result)) {
+        showToast('The generated variant is incomplete. Please try again.', 'error')
         return
       }
+      const createdTask = result.task
       setVariantTasks((currentTasks) => ({ ...currentTasks, [q.id]: createdTask }))
       showToast('Variant task added to your task list', 'success')
     } catch {
@@ -546,7 +636,7 @@ export default function Exercise({ bankMode = false }) {
                 {current === questions.length - 1 ? 'Finish' : 'Next'} <Icon name="chevron_right" size={16} />
               </button>
             ) : (
-              <button className="zb-btn-primary !h-9" onClick={submitQuestion} aria-label="Submit answer — check my answer">
+              <button className="zb-btn-primary !h-9" onClick={submitQuestion} aria-label="Submit answer from answer area — check my answer">
                 <Icon name="fact_check" size={16} /> {state.attempts.length > 0 ? 'Resubmit' : 'I\'m done — check my answer'}
               </button>
             )}
