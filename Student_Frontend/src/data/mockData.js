@@ -330,30 +330,6 @@ export const bankExerciseSets = {
   ]},
 }
 
-// ---------------- Grading ----------------
-function checkAnswer(question, answer) {
-  const text = (answer || '').toString().trim()
-  if (!text) return false
-  const normalized = text.toLowerCase().replace(/\s+/g, ' ')
-  if (question.correctIndex != null && question.options) {
-    const letter = ['a', 'b', 'c', 'd'][question.correctIndex]
-    // choice: match option letter or full option text
-    if (normalized === letter) return true
-    const chosen = normalized.replace(/^[abcd][.、)\s]*/, '')
-    const correctText = question.options[question.correctIndex].substring(2).trim().toLowerCase()
-    return chosen === correctText || question.options.some((o, i) => i === question.correctIndex && normalized.startsWith(o[0].toLowerCase()))
-  }
-  return question.acceptKeywords.some((k) => normalized.includes(k.toLowerCase()))
-}
-
-// Anti-throwaway: empty or pure random symbols
-function isThrowaway(answer) {
-  const text = (answer || '').toString().trim()
-  if (!text) return true
-  if (text.length < 1) return true
-  return /^[^a-zA-Z0-9\u4e00-\u9fa5]+$/.test(text)
-}
-
 // ---------------- Error book ----------------
 export const initialErrors = [
   {
