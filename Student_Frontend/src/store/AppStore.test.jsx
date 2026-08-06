@@ -999,6 +999,33 @@ test('authors task/error/note/session IDs and reads the injected clock once for 
   expect(nowCalls - bootClockReads).toBe(4)
 })
 
+test('never exposes forged mastery from public addErrors and rolls it back when the boundary rejects', async () => {
+  // Catches the compatibility action optimistically trusting caller-owned lifecycle fields.
+  let rejectAdd
+  const addErrors = vi.fn(() => new Promise((_, reject) => { rejectAdd = reject }))
+  const harness = await renderApp(createApi({ addErrors }))
+  const forged = validError({
+    id: 'forged-mastered-error',
+    questionId: 'forged-mastered-question',
+    status: 'mastered',
+    redoHistory: [{ attemptedAt: '2026-08-06', answer: '2x', isCorrect: true, timeSpent: 10 }],
+    verificationVariantId: 'forged-variant',
+    variantVerifiedAt: '2026-08-07',
+    variantVerification: { variantId: 'forged-variant', isCorrect: true, verifiedAt: '2026-08-07' },
+  })
+  let operation
+
+  act(() => { operation = harness.app.addErrors([forged]) })
+  const optimisticStatus = harness.app.errors.find((error) => error.id === forged.id)?.status
+  await act(async () => {
+    rejectAdd(new Error('Invalid fresh recurrence lifecycle'))
+    await operation.catch(() => undefined)
+  })
+
+  expect(optimisticStatus).not.toBe('mastered')
+  expect(harness.app.errors.find((error) => error.id === forged.id)).toBeUndefined()
+})
+
 test('settles a deferred provider action without consuming success data after unmount', async () => {
   // Characterizes the action generation guard: removing it runs the note commit after unmount.
   let resolveCreate

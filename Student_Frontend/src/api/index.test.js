@@ -198,8 +198,12 @@ test('addErrors returns and persists the submitted errors', async () => {
   await resetMockState()
   const items = [makeError()]
 
-  await expect(addErrors(items)).resolves.toEqual({ errors: items })
-  await expect(bootstrap()).resolves.toMatchObject({ errors: expect.arrayContaining(items) })
+  await expect(addErrors(items)).resolves.toMatchObject({
+    errors: expect.arrayContaining([expect.objectContaining(items[0])]),
+  })
+  await expect(bootstrap()).resolves.toMatchObject({
+    errors: expect.arrayContaining([expect.objectContaining(items[0])]),
+  })
 })
 
 test('submitRedo persists redo history and error review state', async () => {
@@ -459,11 +463,26 @@ test('addErrors deduplicates a submitted batch and persisted question IDs', asyn
   // Catches batch duplicates being added twice or persisted dedupe returning a phantom success.
   await resetMockState()
   const first = makeError({ id: 'e-batch-1', questionId: 'q-batch' })
-  const duplicate = makeError({ id: 'e-batch-2', questionId: 'q-batch' })
+  const duplicate = makeError({
+    id: 'e-batch-2',
+    questionId: 'q-batch',
+    occurrences: first.occurrences,
+    occurrenceKeys: first.occurrenceKeys,
+    occurrenceRecords: first.occurrenceRecords,
+  })
 
-  await expect(addErrors([first, duplicate])).resolves.toEqual({ errors: [first] })
-  await expect(addErrors([{ ...duplicate, id: 'e-batch-3' }])).resolves.toEqual({ errors: [] })
-  expect((await bootstrap()).errors.filter((error) => error.questionId === 'q-batch')).toEqual([first])
+  const firstResult = await addErrors([first, duplicate])
+  const retryResult = await addErrors([{ ...duplicate, id: 'e-batch-3' }])
+  const canonical = expect.objectContaining({
+    id: first.id,
+    questionId: first.questionId,
+    repeatCount: 1,
+    occurrenceKeys: first.occurrenceKeys,
+  })
+
+  expect(firstResult.errors.filter((error) => error.questionId === 'q-batch')).toEqual([canonical])
+  expect(retryResult.errors.filter((error) => error.questionId === 'q-batch')).toEqual([canonical])
+  expect((await bootstrap()).errors.filter((error) => error.questionId === 'q-batch')).toEqual([canonical])
 })
 
 test('addErrors rejects malformed items with a typed error', async () => {
@@ -647,7 +666,7 @@ test('rejects malformed or colliding error upserts atomically', async () => {
   expect((await bootstrap()).errors).toEqual(before)
 })
 
-test.each([
+const strictOccurrenceCases = [
   ['missing occurrence keys', { occurrenceKeys: undefined }],
   ['missing occurrence records', { occurrenceRecords: undefined }],
   ['repeat count above the unique identity count', { repeatCount: 2 }],
@@ -660,7 +679,16 @@ test.each([
     repeatCount: 1,
   }],
   ['a forged legacy aggregate marker', { hasIncompleteOccurrenceHistory: true }],
-])('rejects an untrusted occurrence aggregate atomically: %s', async (_, patch) => {
+]
+
+const errorBatchWriters = [
+  ['addErrors', addErrors],
+  ['upsertErrors', upsertErrors],
+]
+
+test.each(errorBatchWriters.flatMap(([writerName, write]) => (
+  strictOccurrenceCases.map(([caseName, patch]) => [writerName, caseName, write, patch])
+)))('%s rejects an untrusted occurrence aggregate atomically: %s', async (_, __, write, patch) => {
   // Catches incoming cards claiming recurrence totals that cannot be derived from stable identities.
   await resetMockState()
   const before = (await bootstrap()).errors
@@ -674,16 +702,84 @@ test.each([
     ...patch,
   })
 
-  await expect(upsertErrors([validBeforeFailure, invalid]))
+  await expect(write([validBeforeFailure, invalid]))
     .rejects.toMatchObject({ code: 'INVALID_INPUT' })
   expect((await bootstrap()).errors).toEqual(before)
 })
 
-test('keeps legacy addErrors callers compatible without trusting them as recurrence upserts', async () => {
+test.each(errorBatchWriters.flatMap(([writerName, write]) => ([
+  [writerName, 'a forged mastered status', write, { status: 'mastered' }],
+  [writerName, 'a fake correct redo', write, {
+    redoHistory: [{ attemptedAt: '2026-08-06', answer: '2x', isCorrect: true, timeSpent: 10 }],
+  }],
+  [writerName, 'a fake verification audit', write, {
+    verificationVariantId: 'forged-variant',
+    variantVerifiedAt: '2026-08-07',
+    variantVerification: { variantId: 'forged-variant', isCorrect: true, verifiedAt: '2026-08-07' },
+  }],
+])))('%s rejects fresh recurrence evidence containing %s atomically', async (_, __, write, patch) => {
+  // Catches lifecycle evidence being raw-persisted or silently sanitized instead of rejected at the boundary.
   await resetMockState()
+  const before = (await bootstrap()).errors
+  const validBeforeFailure = makeError({
+    id: 'fresh-lifecycle-valid',
+    questionId: 'fresh-lifecycle-valid-question',
+  })
+  const forged = makeError({
+    id: 'fresh-lifecycle-forged',
+    questionId: 'fresh-lifecycle-forged-question',
+    ...patch,
+  })
+
+  await expect(write([validBeforeFailure, forged]))
+    .rejects.toMatchObject({ code: 'INVALID_INPUT' })
+  expect((await bootstrap()).errors).toEqual(before)
+})
+
+test.each(errorBatchWriters)('%s snapshots validated recurrence evidence before the async write', async (_, write) => {
+  // Catches caller mutation during repository latency bypassing validation of lifecycle and identities.
+  await resetMockState()
+  const item = makeError({
+    id: 'snapshot-error',
+    questionId: 'snapshot-question',
+  })
+  const originalOccurrenceKeys = [...item.occurrenceKeys]
+  const batch = [item]
+
+  const operation = write(batch)
+  item.status = 'mastered'
+  item.redoHistory.push({ attemptedAt: '2026-08-07', answer: '2x', isCorrect: true, timeSpent: 10 })
+  item.verificationVariantId = 'forged-variant'
+  item.variantVerifiedAt = '2026-08-08'
+  item.variantVerification = { variantId: 'forged-variant', isCorrect: true, verifiedAt: '2026-08-08' }
+  item.occurrences.push('2026-08-07')
+  item.occurrenceKeys.push('forged-occurrence')
+  item.occurrenceRecords.push({ key: 'forged-occurrence', occurredAt: '2026-08-07' })
+  item.repeatCount = 2
+  batch.push(makeError({ id: 'late-pushed-error', questionId: 'late-pushed-question' }))
+
+  const { errors } = await operation
+  const stored = errors.find((error) => error.id === 'snapshot-error')
+  expect(stored).toMatchObject({
+    status: 'pending_review',
+    redoHistory: [],
+    verificationVariantId: null,
+    variantVerifiedAt: null,
+    variantVerification: null,
+    occurrenceKeys: originalOccurrenceKeys,
+    repeatCount: 1,
+  })
+  expect(errors.some((error) => error.id === 'late-pushed-error')).toBe(false)
+})
+
+test('rejects incoming legacy aggregates but safely migrates an already persisted aggregate', async () => {
+  await resetMockState()
+  const before = (await bootstrap()).errors
   const legacy = makeError({
     id: 'legacy-add-error',
     questionId: 'legacy-add-question',
+    firstOccurredAt: '2026-08-01',
+    lastOccurredAt: '2026-08-01',
     occurrences: undefined,
     occurrenceKeys: undefined,
     occurrenceRecords: undefined,
@@ -691,12 +787,34 @@ test('keeps legacy addErrors callers compatible without trusting them as recurre
     repeatCount: 4,
   })
 
-  await expect(addErrors([legacy])).resolves.toEqual({ errors: [legacy] })
+  await expect(addErrors([legacy])).rejects.toMatchObject({ code: 'INVALID_INPUT' })
+  expect((await bootstrap()).errors).toEqual(before)
+
+  mutateStoredState((state) => { state.errors = [legacy] })
   await expect(bootstrap()).resolves.toMatchObject({
-    errors: expect.arrayContaining([
-      expect.objectContaining({ id: legacy.id, repeatCount: 4 }),
-    ]),
+    errors: [expect.objectContaining({
+      id: legacy.id,
+      repeatCount: 4,
+      hasIncompleteOccurrenceHistory: true,
+    })],
   })
+
+  const fresh = makeError({
+    id: 'fresh-after-legacy',
+    questionId: legacy.questionId,
+    firstOccurredAt: '2026-08-06',
+    lastOccurredAt: '2026-08-06',
+  })
+  const { errors } = await upsertErrors([fresh])
+  expect(errors).toEqual([
+    expect.objectContaining({
+      id: legacy.id,
+      questionId: legacy.questionId,
+      repeatCount: 5,
+      hasIncompleteOccurrenceHistory: true,
+      occurrenceKeys: expect.arrayContaining(fresh.occurrenceKeys),
+    }),
+  ])
 })
 
 test('persists the redo, scheduled variant, correct verification, and guarded mastery as one provenance chain', async () => {

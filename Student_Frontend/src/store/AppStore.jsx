@@ -282,17 +282,11 @@ export function AppProvider({ children, services = defaultAppServices }) {
     }))
     return runAction('addErrors', 'errors', () => ({
       snapshot: errorsRef.current,
-      optimistic: () => replaceErrors((() => {
-        const questionIds = new Set(errorsRef.current.map((error) => error.questionId))
-        const fresh = authoredItems.filter((item) => {
-          if (questionIds.has(item.questionId)) return false
-          questionIds.add(item.questionId)
-          return true
-        })
-        return [...fresh, ...errorsRef.current]
-      })()),
+      optimistic: () => replaceErrors(mergeErrorCards(errorsRef.current, authoredItems)),
       request: () => services.api.addErrors(authoredItems),
-      commit: () => {},
+      commit: (result) => {
+        if (Array.isArray(result?.errors)) replaceErrors(result.errors)
+      },
       rollback: replaceErrors,
     }))
   }, [replaceErrors, runAction, services])

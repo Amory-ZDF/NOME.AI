@@ -341,11 +341,26 @@ const assertStableOccurrenceIdentity = (error) => {
   }
 }
 
-const assertErrorBatch = (items, { strictIdentity = false } = {}) => {
+const assertFreshRecurrenceEvidence = (error) => {
+  if (error.status !== 'pending_review') {
+    throw invalid('Incoming errors must start in pending_review')
+  }
+  if (error.redoHistory.length !== 0) {
+    throw invalid('Incoming errors cannot contain redo history')
+  }
+  for (const field of ['verificationVariantId', 'variantVerifiedAt', 'variantVerification']) {
+    if (error[field] !== undefined && error[field] !== null) {
+      throw invalid(`Incoming errors cannot contain ${field}`)
+    }
+  }
+}
+
+const assertErrorBatch = (items, { strictIdentity = false, freshRecurrence = false } = {}) => {
   if (!Array.isArray(items)) throw invalid('Error batch must be an array')
   items.forEach((item) => {
     assertError(item)
     if (strictIdentity) assertStableOccurrenceIdentity(item)
+    if (freshRecurrence) assertFreshRecurrenceEvidence(item)
   })
 }
 
@@ -358,6 +373,21 @@ const assertNoErrorIdCollisions = (current, items) => {
     }
     questionById.set(item.id, item.questionId)
   })
+}
+
+const persistFreshErrorBatch = async (items) => {
+  let trustedItems
+  try {
+    trustedItems = structuredClone(items)
+  } catch {
+    throw invalid('Error batch must contain serializable evidence')
+  }
+  assertErrorBatch(trustedItems, { strictIdentity: true, freshRecurrence: true })
+  const state = await repository.update((current) => {
+    assertNoErrorIdCollisions(current, trustedItems)
+    return { ...current, errors: mergeErrorCards(current.errors, trustedItems) }
+  })
+  return { errors: state.errors }
 }
 
 const findQuestion = (current, questionId) => {
@@ -497,33 +527,12 @@ export const getBankExerciseSet = async (setId) => {
 // ---------- Error book ----------
 export const addErrors = async (items) => {
   if (!isMockMode) return http.post('/api/errors/batch', { items })
-  assertErrorBatch(items)
-  let added = []
-  await repository.update((current) => {
-    const entityIds = new Set(current.errors.map((error) => error.id))
-    items.forEach((item) => {
-      if (entityIds.has(item.id)) throw duplicate('Error', item.id)
-      entityIds.add(item.id)
-    })
-    const questionIds = new Set(current.errors.map((error) => error.questionId))
-    added = items.filter((item) => {
-      if (questionIds.has(item.questionId)) return false
-      questionIds.add(item.questionId)
-      return true
-    })
-    return { ...current, errors: [...added, ...current.errors] }
-  })
-  return { errors: added }
+  return persistFreshErrorBatch(items)
 }
 
 export const upsertErrors = async (items) => {
   if (!isMockMode) return http.post('/api/errors/batch', { items })
-  assertErrorBatch(items, { strictIdentity: true })
-  const state = await repository.update((current) => {
-    assertNoErrorIdCollisions(current, items)
-    return { ...current, errors: mergeErrorCards(current.errors, items) }
-  })
-  return { errors: state.errors }
+  return persistFreshErrorBatch(items)
 }
 
 export const markErrorMastered = async (id) => {

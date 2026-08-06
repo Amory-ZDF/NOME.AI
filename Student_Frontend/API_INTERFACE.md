@@ -174,18 +174,18 @@ One-shot load of everything the student shell needs. Frontend calls it once on m
 | `occurrenceKeys` | string[] | Unique non-empty stable identities, normally `session:{sessionId}:question:{questionId}` |
 | `occurrenceRecords` | `{ key, occurredAt }[]` | Unique non-empty keys with valid timestamps; when keys and records are both supplied, they must align exactly |
 | `repeatCount` | positive integer | Number of distinct recurrence identities |
-| `hasIncompleteOccurrenceHistory` | boolean? | Server-owned legacy migration marker; incoming upserts must omit it or send `false` |
-| `status` | enum | `pending_review` \| `reviewing` \| `verification_due` \| `mastered` |
+| `hasIncompleteOccurrenceHistory` | boolean? | Server-owned legacy migration marker; incoming batches must omit it or send `false` |
+| `status` | enum | `pending_review` \| `reviewing` \| `verification_due` \| `mastered`; batch input must use `pending_review` |
 | `studentAnswer` | string | |
 | `correctAnswer` | string | |
 | `analysis` | string | |
 | `acceptKeywords` | string[] | For redo grading |
 | `options` | string[]? | For choice-type redos |
 | `correctIndex` | non-negative integer? | Must be smaller than `options.length` |
-| `redoHistory` | RedoAttempt[] | |
-| `verificationVariantId` | string \| null | Exact generated exercise-set id linked for independent verification |
-| `variantVerifiedAt` | string \| null | Timestamp of the latest accepted correct verification |
-| `variantVerification` | VariantVerification \| null | Full audit result for the linked variant |
+| `redoHistory` | RedoAttempt[] | Server-owned lifecycle evidence; batch input must use `[]` |
+| `verificationVariantId` | string \| null | Server-owned exact generated exercise-set id; batch input must omit it or use `null` |
+| `variantVerifiedAt` | string \| null | Server-owned timestamp of the latest accepted correct verification; batch input must omit it or use `null` |
+| `variantVerification` | VariantVerification \| null | Server-owned audit result for the linked variant; batch input must omit it or use `null` |
 | `understandingExplanation` / `scoringExplanation` | string? | Preserved A-Level diagnostic evidence |
 | `markSchemePoints` | object[]? | Preserved A-Level mark-scheme evidence; every element must be a record |
 | `passageEvidence` | string \| string[]? | Preserved IELTS passage evidence |
@@ -274,7 +274,7 @@ One-shot load of everything the student shell needs. Frontend calls it once on m
 ### Error book
 | Endpoint | Body | Notes |
 |---|---|---|
-| `POST /api/errors/batch` | `{ "items": ErrorItem[] }` | Upsert by `questionId`; count only distinct occurrence identities |
+| `POST /api/errors/batch` | `{ "items": ErrorItem[] }` | Upsert fresh recurrence evidence by `questionId`; count only distinct occurrence identities |
 | `POST /api/errors/{id}/redo` | RedoAttempt | Correct sets `verification_due`; wrong sets `pending_review`; both clear stale verification evidence |
 | `POST /api/errors/{id}/variant` | none | Atomically create the independent variant set/task and link both to the exact error id |
 | `POST /api/errors/{id}/verification` | VariantVerification | Accept only the exact linked task/set/error provenance and chronological evidence |
@@ -283,11 +283,13 @@ One-shot load of everything the student shell needs. Frontend calls it once on m
 Error batches are validated atomically. In addition to the field constraints above, each redo entry
 must contain all four `RedoAttempt` fields, every verification audit must be internally consistent,
 and `passageEvidence` must be a string or an array of strings. An invalid item rejects the whole
-batch without changing persisted state. Upserts must include non-empty `occurrenceKeys` and matching
-`occurrenceRecords`; the unique identity count must equal `repeatCount`. Clients cannot set
-`hasIncompleteOccurrenceHistory: true` to claim a larger legacy aggregate. That marker is retained
-only while normalizing already persisted legacy cards. `expression` and `habit` are valid normalized
-error types.
+batch without changing persisted state. Every batch item is fresh recurrence evidence: it must use
+`status: "pending_review"`, an empty `redoHistory`, and null or absent verification fields. Lifecycle
+state and mastery evidence are written only by their dedicated server endpoints. Batch items must
+also include non-empty `occurrenceKeys` and matching `occurrenceRecords`; the unique identity count
+must equal `repeatCount`. Clients cannot set `hasIncompleteOccurrenceHistory: true` to claim a larger
+legacy aggregate. That marker is retained only while normalizing already persisted legacy cards.
+`expression` and `habit` are valid normalized error types.
 
 Mastery chronology is strict: a correct redo alone is not mastery. It first moves the item to
 `verification_due`; the backend then schedules one independent variant. A correct verification
