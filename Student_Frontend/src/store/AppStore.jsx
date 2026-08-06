@@ -3,6 +3,7 @@ import { runRecoverableAction } from './actionRunner'
 import { defaultAppServices } from './services'
 import { buildAdjustmentRequest } from '../features/tasks/adjustmentRules'
 import { isTaskAdjustmentEligible } from '../features/tasks/taskRules'
+import { isCompleteVariantResult, isRenderableExerciseSet } from '../features/exercise/exerciseContracts'
 
 const AppContext = createContext(null)
 
@@ -344,9 +345,15 @@ export function AppProvider({ children, services = defaultAppServices }) {
     load = runAction(publicActionKey, `exerciseCache:${cacheKey}`, () => ({
       snapshot: null,
       optimistic: () => {},
-      request: () => (taskId
-        ? services.api.getExerciseSet(taskId)
-        : services.api.getBankExerciseSet(bankSetId)),
+      request: async () => {
+        const exerciseSet = await (taskId
+          ? services.api.getExerciseSet(taskId)
+          : services.api.getBankExerciseSet(bankSetId))
+        if (mounted.current && !isRenderableExerciseSet(exerciseSet)) {
+          throw new Error('Exercise data is incomplete or invalid.')
+        }
+        return exerciseSet
+      },
       commit: (exerciseSet) => {
         replaceExerciseCache({ ...exerciseCacheRef.current, [cacheKey]: exerciseSet })
       },
@@ -445,7 +452,13 @@ export function AppProvider({ children, services = defaultAppServices }) {
     return runAction(`exercise:variant:${questionId}`, 'tasks', () => ({
       snapshot: null,
       optimistic: () => {},
-      request: () => services.api.generateVariant(questionId),
+      request: async () => {
+        const result = await services.api.generateVariant(questionId)
+        if (mounted.current && !isCompleteVariantResult(result)) {
+          throw new Error('The generated variant is incomplete. Please try again.')
+        }
+        return result
+      },
       commit: (result) => {
         if (result?.exerciseSet?.id) {
           replaceExerciseCache({

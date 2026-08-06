@@ -13,6 +13,52 @@ const bootData = {
   settings: { tone: 50 },
 }
 
+const completeHints = () => [1, 2, 3, 4, 5].map((level) => ({
+  level,
+  title: `Hint ${level}`,
+  content: `Hint content ${level}`,
+}))
+
+const validQuestion = (overrides = {}) => ({
+  id: 'q1',
+  order: 1,
+  type: 'calculation',
+  topic: 'Calculus - Differentiation',
+  difficulty: 2,
+  content: 'Differentiate x squared.',
+  acceptKeywords: ['2x'],
+  correctDisplay: '2x',
+  errorType: 'method',
+  hints: completeHints(),
+  ...overrides,
+})
+
+const validExerciseSet = (overrides = {}) => ({
+  taskId: 't1',
+  title: 'Task set',
+  subject: 'A-Level Math',
+  questions: [validQuestion()],
+  ...overrides,
+})
+
+const validVariant = (overrides = {}) => {
+  const exerciseSet = {
+    ...validExerciseSet({ id: 'variant-1', taskId: 'variant-task-1', title: 'Variant' }),
+    ...overrides.exerciseSet,
+  }
+  const task = overrides.task === null
+    ? null
+    : {
+        id: 'variant-task-1',
+        title: 'Variant',
+        exerciseSetId: exerciseSet.id,
+        type: 'ai_recommended',
+        status: 'pending',
+        ...overrides.task,
+      }
+  return { exerciseSet, task }
+}
+
 function createApi(overrides = {}) {
   return {
     bootstrap: () => Promise.resolve(bootData),
@@ -24,13 +70,10 @@ function createApi(overrides = {}) {
     submitRedo: () => Promise.resolve({ error: { id: 'e1' } }),
     createNote: (note) => Promise.resolve({ note }),
     updateNote: () => Promise.resolve({ note: { id: 'n1' } }),
-    getExerciseSet: (taskId) => Promise.resolve({ taskId, title: 'Task set', subject: 'Math', questions: [] }),
-    getBankExerciseSet: (setId) => Promise.resolve({ id: setId, taskId: null, title: 'Bank set', subject: 'Math', questions: [] }),
+    getExerciseSet: (taskId) => Promise.resolve(validExerciseSet({ taskId })),
+    getBankExerciseSet: (setId) => Promise.resolve(validExerciseSet({ id: setId, taskId: null, title: 'Bank set' })),
     submitSession: () => Promise.resolve({ sessionId: 's1' }),
-    generateVariant: () => Promise.resolve({
-      exerciseSet: { id: 'variant-1', taskId: 'variant-task-1', title: 'Variant', subject: 'Math', questions: [] },
-      task: { id: 'variant-task-1', status: 'pending' },
-    }),
+    generateVariant: () => Promise.resolve(validVariant()),
     updateSettings: () => Promise.resolve({ settings: bootData.settings }),
     ...overrides,
   }
@@ -102,7 +145,7 @@ test('deduplicates concurrent exercise loads, exposes the exact pending key, and
   expect(second).toBe(first)
   expect(getExerciseSet).toHaveBeenCalledTimes(1)
   await waitFor(() => expect(harness.app.isActionPending('exercise:load:t1')).toBe(true))
-  const set = { taskId: 't1', title: 'Loaded set', subject: 'Math', questions: [{ id: 'q1' }] }
+  const set = validExerciseSet({ taskId: 't1', title: 'Loaded set' })
   await act(async () => {
     resolveLoad(set)
     await Promise.all([first, second])
@@ -121,7 +164,7 @@ test('loads bank sets through the bank API and retries cleanly after a failed lo
     attempts += 1
     return attempts === 1
       ? Promise.reject(new Error('bank offline'))
-      : Promise.resolve({ id, title: 'Bank set', subject: 'Math', questions: [] })
+      : Promise.resolve(validExerciseSet({ id, taskId: null, title: 'Bank set' }))
   })
   const harness = await renderApp(createApi({ getBankExerciseSet }))
 
@@ -139,12 +182,37 @@ test('loads bank sets through the bank API and retries cleanly after a failed lo
 })
 
 test.each([
+  ['a null question', validExerciseSet({ questions: [null] })],
+  ['invalid choice options', validExerciseSet({ questions: [validQuestion({ type: 'choice', options: null, correctIndex: 0 })] })],
+  ['missing hints', validExerciseSet({ questions: [validQuestion({ hints: null })] })],
+])('rejects and never caches an exercise response with %s, then retries the same route', async (_, malformedSet) => {
+  const recoveredSet = validExerciseSet({ taskId: 'invalid-task', title: 'Recovered set' })
+  const getExerciseSet = vi.fn()
+    .mockResolvedValueOnce(malformedSet)
+    .mockResolvedValueOnce(recoveredSet)
+  const harness = await renderApp(createApi({ getExerciseSet }))
+
+  await act(async () => {
+    await expect(harness.app.loadExerciseSet({ taskId: 'invalid-task' }))
+      .rejects.toThrow('Exercise data is incomplete or invalid.')
+  })
+  expect(harness.app.exerciseCache['task:invalid-task']).toBeUndefined()
+  expect(harness.app.isActionPending('exercise:load:invalid-task')).toBe(false)
+
+  await act(async () => {
+    await expect(harness.app.loadExerciseSet({ taskId: 'invalid-task' })).resolves.toEqual(recoveredSet)
+  })
+  expect(getExerciseSet).toHaveBeenCalledTimes(2)
+  expect(harness.app.exerciseCache['task:invalid-task']).toEqual(recoveredSet)
+})
+
+test.each([
   ['task first', ['task', 'bank']],
   ['bank first', ['bank', 'task']],
 ])('keeps task and bank cache entries separate when the raw IDs match: %s', async (_, order) => {
   // Catches either source returning a cached set loaded through the other route.
-  const getExerciseSet = vi.fn((id) => Promise.resolve({ kind: 'task', taskId: id, questions: [] }))
-  const getBankExerciseSet = vi.fn((id) => Promise.resolve({ kind: 'bank', id, questions: [] }))
+  const getExerciseSet = vi.fn((id) => Promise.resolve(validExerciseSet({ kind: 'task', taskId: id })))
+  const getBankExerciseSet = vi.fn((id) => Promise.resolve(validExerciseSet({ kind: 'bank', id, taskId: null, title: 'Bank set' })))
   const harness = await renderApp(createApi({ getExerciseSet, getBankExerciseSet }))
   const results = {}
 
@@ -187,13 +255,13 @@ test('deduplicates same-source loads while task and bank collisions run independ
   await waitFor(() => expect(harness.app.isActionPending('exercise:load:same')).toBe(true))
 
   await act(async () => {
-    resolveTask({ kind: 'task', taskId: 'same', questions: [] })
+    resolveTask(validExerciseSet({ kind: 'task', taskId: 'same' }))
     await taskLoad
   })
   expect(harness.app.isActionPending('exercise:load:same')).toBe(true)
 
   await act(async () => {
-    resolveBank({ kind: 'bank', id: 'same', questions: [] })
+    resolveBank(validExerciseSet({ kind: 'bank', id: 'same', taskId: null, title: 'Bank set' }))
     await bankLoad
   })
   expect(harness.app.isActionPending('exercise:load:same')).toBe(false)
@@ -488,10 +556,7 @@ test('rolls back lastSession when session persistence itself fails', async () =>
 test('stores generated variants in cache and adds their task only once', async () => {
   // Catches an L6 response that is returned to the page but never becomes store-visible state.
   let resolveVariant
-  const result = {
-    exerciseSet: { id: 'variant-1', taskId: 'variant-task-1', title: 'Variant', subject: 'Math', questions: [] },
-    task: { id: 'variant-task-1', type: 'ai_recommended', status: 'pending' },
-  }
+  const result = validVariant()
   const generateVariant = vi.fn(() => new Promise((resolve) => { resolveVariant = resolve }))
   const harness = await renderApp(createApi({ generateVariant }))
   const source = { id: 'q-source', topic: 'Calculus - Differentiation' }
@@ -510,6 +575,39 @@ test('stores generated variants in cache and adds their task only once', async (
   expect(harness.app.tasks.filter((task) => task.id === 'variant-task-1')).toHaveLength(1)
 })
 
+test.each([
+  ['a missing task', () => validVariant({ task: null })],
+  ['a missing task ID', () => validVariant({ task: { id: '' } })],
+  ['a missing exercise-set ID', () => validVariant({ exerciseSet: { id: '' } })],
+  ['a mismatched exercise-set ID', () => validVariant({ task: { exerciseSetId: 'another-set' } })],
+  ['a non-recommended task type', () => validVariant({ task: { type: 'teacher_assigned' } })],
+  ['a non-pending task status', () => validVariant({ task: { status: 'completed' } })],
+  ['an empty generated question list', () => validVariant({ exerciseSet: { questions: [] } })],
+])('rejects a generated variant with %s without mutating cache or tasks, then retries', async (_, makeMalformedResult) => {
+  const recoveredResult = validVariant()
+  const generateVariant = vi.fn()
+    .mockResolvedValueOnce(makeMalformedResult())
+    .mockResolvedValueOnce(recoveredResult)
+  const harness = await renderApp(createApi({ generateVariant }))
+  const originalTasks = [...harness.app.tasks]
+  const source = { id: 'q-invalid-variant', topic: 'Calculus - Differentiation' }
+
+  await act(async () => {
+    await expect(harness.app.generateVariant(source))
+      .rejects.toThrow('The generated variant is incomplete. Please try again.')
+  })
+  expect(harness.app.exerciseCache).toEqual({})
+  expect(harness.app.tasks).toEqual(originalTasks)
+  expect(harness.app.isActionPending('exercise:variant:q-invalid-variant')).toBe(false)
+
+  await act(async () => {
+    await expect(harness.app.generateVariant(source)).resolves.toEqual(recoveredResult)
+  })
+  expect(generateVariant).toHaveBeenCalledTimes(2)
+  expect(harness.app.exerciseCache['set:variant-1']).toEqual(recoveredResult.exerciseSet)
+  expect(harness.app.tasks).toContainEqual(recoveredResult.task)
+})
+
 test('does not consume a late exercise load after provider unmount', async () => {
   // Catches new exercise actions bypassing the existing mounted/action-generation guard.
   let resolveLoad
@@ -521,7 +619,7 @@ test('does not consume a late exercise load after provider unmount', async () =>
   harness.view.unmount()
 
   await act(async () => {
-    resolveLoad({ taskId: 't1', get title() { titleReads += 1; return 'Late set' }, questions: [] })
+    resolveLoad({ ...validExerciseSet({ taskId: 't1' }), get title() { titleReads += 1; return 'Late set' } })
     await operation
   })
   expect(titleReads).toBe(0)

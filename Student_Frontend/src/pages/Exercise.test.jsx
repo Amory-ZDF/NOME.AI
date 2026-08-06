@@ -167,6 +167,20 @@ test('retries a failed load for the same route and renders the recovered set', a
   expect(getExerciseSet).toHaveBeenCalledTimes(2)
 })
 
+test('does not cache a malformed load and recovers when the same route is retried', async () => {
+  const getExerciseSet = vi.fn()
+    .mockResolvedValueOnce(exerciseSet({ questions: [null] }))
+    .mockResolvedValueOnce(exerciseSet({ title: 'Recovered after invalid data' }))
+  renderStudentApp(<App services={servicesFor(createApi({ getExerciseSet }))} />, { route: '/exercise/retry-invalid-task' })
+
+  expect(await screen.findByText(/doesn't exist or has expired/i)).toBeInTheDocument()
+  expect(screen.getByRole('alert')).toHaveTextContent(/exercise data is incomplete or invalid/i)
+  await userEvent.click(screen.getByRole('button', { name: 'Retry loading' }))
+
+  expect(await screen.findByText('Recovered after invalid data')).toBeInTheDocument()
+  expect(getExerciseSet).toHaveBeenCalledTimes(2)
+})
+
 test.each([
   ['a null question', exerciseSet({ questions: [null] })],
   ['choice options that are not an array', exerciseSet({ questions: [question({ type: 'choice', options: null, correctIndex: 0 })] })],
