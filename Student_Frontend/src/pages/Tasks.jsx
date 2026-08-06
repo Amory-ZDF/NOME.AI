@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { useApp } from '../store/AppStore'
-import { TaskList } from './Home'
+import { TaskList } from '../features/tasks/TaskList'
+import { filterTasks } from '../features/tasks/taskRules'
 
 const tabs = [
   { key: 'all', label: 'All' },
@@ -10,15 +11,11 @@ const tabs = [
 ]
 
 export default function Tasks() {
-  const { tasks } = useApp()
+  const { tasks, learningSummary } = useApp()
   const [tab, setTab] = useState('all')
+  const now = new Date()
 
-  const filtered = tasks.filter((t) => {
-    if (tab === 'pending') return t.status === 'pending'
-    if (tab === 'overdue') return t.isOverdue
-    if (tab === 'completed') return t.status === 'completed'
-    return true
-  })
+  const filtered = filterTasks(tasks, tab, now)
 
   return (
     <div className="max-w-content mx-auto px-4 lg:px-0 py-8">
@@ -44,7 +41,7 @@ export default function Tasks() {
         ))}
       </div>
 
-      <TaskList tasks={filtered} />
+      <TaskList tasks={filtered} now={now} availableMinutes={60} weakTopics={learningSummary?.weakTopics ?? []} />
     </div>
   )
 }

@@ -72,7 +72,7 @@ test('a failed Home completion rolls back and never schedules local removal', as
   renderStudentApp(<App services={servicesFor(api)} />)
   const taskTitle = await screen.findByText('Physics Chapter 3 · Momentum Conservation Practice')
   const taskRow = taskTitle.closest('.group')
-  const checkbox = within(taskRow).getAllByRole('button')[0]
+  const checkbox = within(taskRow).getByRole('checkbox', { name: /Physics Chapter 3/i })
 
   fireEvent.click(checkbox)
   expect(taskTitle).toHaveClass('line-through')
