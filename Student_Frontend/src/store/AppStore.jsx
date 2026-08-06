@@ -29,9 +29,11 @@ export function AppProvider({ children, services = defaultAppServices }) {
   const bootRequest = useRef(0)
   const actionGeneration = useRef(0)
   const actionCounts = useRef(new Map())
+  const pendingActionCounts = useRef(new Map())
   const collectionQueues = useRef(new Map())
   const exerciseLoads = useRef(new Map())
   const persistedSessionIds = useRef(new Set())
+  const canonicalSessionIds = useRef(new Map())
   const tasksRef = useRef([])
   const taskAdjustmentsRef = useRef([])
   const errorsRef = useRef([])
@@ -95,7 +97,9 @@ export function AppProvider({ children, services = defaultAppServices }) {
       setNoteFolders(data.noteFolders)
       replaceSettings(data.settings)
       replaceExerciseCache({})
-      persistedSessionIds.current = new Set(Object.keys(data.sessions || {}))
+      const persistedIds = Object.keys(data.sessions || {})
+      persistedSessionIds.current = new Set(persistedIds)
+      canonicalSessionIds.current = new Map(persistedIds.map((id) => [id, id]))
       setBootStatus('ready')
       return data
     } catch (error) {
@@ -119,18 +123,21 @@ export function AppProvider({ children, services = defaultAppServices }) {
     }
   }, [retryBootstrap])
 
-  const runAction = useCallback((key, collection, createOptions) => {
-    if (actionCounts.current.has(key)) {
+  const runAction = useCallback((key, collection, createOptions, actionOptions = {}) => {
+    const operationKey = actionOptions.operationKey || key
+    const pendingKey = actionOptions.pendingKey || key
+    if (actionCounts.current.has(operationKey)) {
       const error = new Error('This task action is already in progress.')
       showToast(error.message, 'error')
       return Promise.reject(error)
     }
     const generation = actionGeneration.current
-    const count = actionCounts.current.get(key) || 0
-    actionCounts.current.set(key, count + 1)
+    const count = actionCounts.current.get(operationKey) || 0
+    actionCounts.current.set(operationKey, count + 1)
+    pendingActionCounts.current.set(pendingKey, (pendingActionCounts.current.get(pendingKey) || 0) + 1)
     setPendingActions((current) => {
       const next = new Set(current)
-      next.add(key)
+      next.add(pendingKey)
       return next
     })
 
@@ -149,15 +156,21 @@ export function AppProvider({ children, services = defaultAppServices }) {
     const operation = previous ? previous.catch(() => undefined).then(start) : start()
     let queued
     queued = operation.finally(() => {
-      const remaining = (actionCounts.current.get(key) || 1) - 1
+      const remaining = (actionCounts.current.get(operationKey) || 1) - 1
       if (remaining > 0) {
-        actionCounts.current.set(key, remaining)
+        actionCounts.current.set(operationKey, remaining)
       } else {
-        actionCounts.current.delete(key)
+        actionCounts.current.delete(operationKey)
+      }
+      const pendingRemaining = (pendingActionCounts.current.get(pendingKey) || 1) - 1
+      if (pendingRemaining > 0) {
+        pendingActionCounts.current.set(pendingKey, pendingRemaining)
+      } else {
+        pendingActionCounts.current.delete(pendingKey)
         if (mounted.current) {
           setPendingActions((current) => {
             const next = new Set(current)
-            next.delete(key)
+            next.delete(pendingKey)
             return next
           })
         }
@@ -318,26 +331,30 @@ export function AppProvider({ children, services = defaultAppServices }) {
     if (typeof id !== 'string' || id.trim().length === 0 || (taskId && bankSetId)) {
       return Promise.reject(new Error('Provide exactly one exercise set identifier.'))
     }
-    const cached = exerciseCacheRef.current[id]
+    const source = taskId ? 'task' : 'bank'
+    const cacheKey = `${source}:${id}`
+    const publicActionKey = `exercise:load:${id}`
+    const operationKey = `${publicActionKey}:${source}`
+    const cached = exerciseCacheRef.current[cacheKey]
     if (cached) return Promise.resolve(cached)
-    const activeLoad = exerciseLoads.current.get(id)
+    const activeLoad = exerciseLoads.current.get(cacheKey)
     if (activeLoad) return activeLoad
 
     let load
-    load = runAction(`exercise:load:${id}`, 'exerciseCache', () => ({
+    load = runAction(publicActionKey, `exerciseCache:${cacheKey}`, () => ({
       snapshot: null,
       optimistic: () => {},
       request: () => (taskId
         ? services.api.getExerciseSet(taskId)
         : services.api.getBankExerciseSet(bankSetId)),
       commit: (exerciseSet) => {
-        replaceExerciseCache({ ...exerciseCacheRef.current, [id]: exerciseSet })
+        replaceExerciseCache({ ...exerciseCacheRef.current, [cacheKey]: exerciseSet })
       },
       rollback: () => {},
-    })).finally(() => {
-      if (exerciseLoads.current.get(id) === load) exerciseLoads.current.delete(id)
+    }), { operationKey, pendingKey: publicActionKey }).finally(() => {
+      if (exerciseLoads.current.get(cacheKey) === load) exerciseLoads.current.delete(cacheKey)
     })
-    exerciseLoads.current.set(id, load)
+    exerciseLoads.current.set(cacheKey, load)
     return load
   }, [replaceExerciseCache, runAction, services])
 
@@ -371,28 +388,44 @@ export function AppProvider({ children, services = defaultAppServices }) {
         },
       })) || [],
     }
-    return runAction(`exercise:submit:${savedSession.sessionId}`, savedSession.taskId ? 'tasks' : 'session', () => ({
+    return runAction(`exercise:submit:${savedSession.sessionId}`, 'exerciseSessions', () => ({
       snapshot: lastSessionRef.current,
       optimistic: () => replaceLastSession(savedSession),
       request: async () => {
-        let sessionResult = { sessionId: savedSession.sessionId }
+        let sessionResult = {
+          sessionId: canonicalSessionIds.current.get(savedSession.sessionId) || savedSession.sessionId,
+        }
         if (!persistedSessionIds.current.has(savedSession.sessionId)) {
-          sessionResult = await services.api.submitSession(savedSession)
+          const submitted = await services.api.submitSession(savedSession)
+          const returnedId = typeof submitted?.sessionId === 'string' ? submitted.sessionId.trim() : ''
+          const canonicalId = returnedId
+            && (returnedId === savedSession.sessionId || !persistedSessionIds.current.has(returnedId))
+            ? returnedId
+            : savedSession.sessionId
           persistedSessionIds.current.add(savedSession.sessionId)
+          persistedSessionIds.current.add(canonicalId)
+          canonicalSessionIds.current.set(savedSession.sessionId, canonicalId)
+          canonicalSessionIds.current.set(canonicalId, canonicalId)
+          sessionResult = {
+            ...(submitted !== null && typeof submitted === 'object' && !Array.isArray(submitted) ? submitted : {}),
+            sessionId: canonicalId,
+          }
         }
 
         if (!savedSession.taskId) return { ...sessionResult, completionPending: false }
         try {
           const completion = await services.api.completeTask(savedSession.taskId)
-          return { ...sessionResult, task: completion?.task, completionPending: false }
+          const completedTask = completion?.task
+          if (completedTask?.id !== savedSession.taskId || completedTask.status !== 'completed') {
+            return { ...sessionResult, completionPending: true }
+          }
+          return { ...sessionResult, task: completedTask, completionPending: false }
         } catch (completionError) {
           return { ...sessionResult, completionError, completionPending: true }
         }
       },
       commit: (result) => {
-        replaceLastSession(result?.sessionId && result.sessionId !== savedSession.sessionId
-          ? { ...savedSession, sessionId: result.sessionId }
-          : savedSession)
+        replaceLastSession({ ...savedSession, sessionId: result.sessionId })
         if (result?.task) {
           replaceTasks(tasksRef.current.map((task) => (
             task.id === result.task.id ? { ...task, ...result.task } : task
@@ -417,7 +450,7 @@ export function AppProvider({ children, services = defaultAppServices }) {
         if (result?.exerciseSet?.id) {
           replaceExerciseCache({
             ...exerciseCacheRef.current,
-            [result.exerciseSet.id]: result.exerciseSet,
+            [`set:${result.exerciseSet.id}`]: result.exerciseSet,
           })
         }
         if (result?.task && !tasksRef.current.some((task) => task.id === result.task.id)) {

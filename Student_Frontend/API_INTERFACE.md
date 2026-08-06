@@ -286,7 +286,7 @@ Question fields plus `result`:
 | `result.attempts` | `{ answer, submittedAt, isCorrect }[]` | |
 | `result.hintsUsed` | number | 0–5 |
 | `result.solvedAtHintLevel` | number \| null | null if never solved |
-| `result.handwritingUsed` | boolean | Whether handwriting mode was used for this question |
+| `result.handwritingUsed` | boolean? | Whether handwriting mode was used; legacy sessions may omit it, while the current exercise engine always sends it |
 
 ### Settings
 | Endpoint | Body |

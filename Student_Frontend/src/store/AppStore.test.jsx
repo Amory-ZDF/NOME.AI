@@ -108,7 +108,7 @@ test('deduplicates concurrent exercise loads, exposes the exact pending key, and
     await Promise.all([first, second])
   })
 
-  expect(harness.app.exerciseCache.t1).toEqual(set)
+  expect(harness.app.exerciseCache['task:t1']).toEqual(set)
   expect(harness.app.isActionPending('exercise:load:t1')).toBe(false)
   await expect(harness.app.loadExerciseSet({ taskId: 't1' })).resolves.toEqual(set)
   expect(getExerciseSet).toHaveBeenCalledTimes(1)
@@ -128,14 +128,77 @@ test('loads bank sets through the bank API and retries cleanly after a failed lo
   await act(async () => {
     await expect(harness.app.loadExerciseSet({ bankSetId: 'bq1' })).rejects.toThrow('bank offline')
   })
-  expect(harness.app.exerciseCache.bq1).toBeUndefined()
+  expect(harness.app.exerciseCache['bank:bq1']).toBeUndefined()
   expect(harness.app.isActionPending('exercise:load:bq1')).toBe(false)
 
   await act(async () => {
     await expect(harness.app.loadExerciseSet({ bankSetId: 'bq1' })).resolves.toMatchObject({ id: 'bq1' })
   })
   expect(getBankExerciseSet).toHaveBeenCalledTimes(2)
-  expect(harness.app.exerciseCache.bq1).toMatchObject({ id: 'bq1' })
+  expect(harness.app.exerciseCache['bank:bq1']).toMatchObject({ id: 'bq1' })
+})
+
+test.each([
+  ['task first', ['task', 'bank']],
+  ['bank first', ['bank', 'task']],
+])('keeps task and bank cache entries separate when the raw IDs match: %s', async (_, order) => {
+  // Catches either source returning a cached set loaded through the other route.
+  const getExerciseSet = vi.fn((id) => Promise.resolve({ kind: 'task', taskId: id, questions: [] }))
+  const getBankExerciseSet = vi.fn((id) => Promise.resolve({ kind: 'bank', id, questions: [] }))
+  const harness = await renderApp(createApi({ getExerciseSet, getBankExerciseSet }))
+  const results = {}
+
+  for (const source of order) {
+    await act(async () => {
+      results[source] = source === 'task'
+        ? await harness.app.loadExerciseSet({ taskId: 'same' })
+        : await harness.app.loadExerciseSet({ bankSetId: 'same' })
+    })
+  }
+
+  expect(results.task).toMatchObject({ kind: 'task', taskId: 'same' })
+  expect(results.bank).toMatchObject({ kind: 'bank', id: 'same' })
+  expect(harness.app.exerciseCache['task:same']).toEqual(results.task)
+  expect(harness.app.exerciseCache['bank:same']).toEqual(results.bank)
+  expect(getExerciseSet).toHaveBeenCalledTimes(1)
+  expect(getBankExerciseSet).toHaveBeenCalledTimes(1)
+})
+
+test('deduplicates same-source loads while task and bank collisions run independently under one public pending key', async () => {
+  // Catches the shared raw ID deduping different sources or clearing public pending after only one source settles.
+  let resolveTask
+  let resolveBank
+  const getExerciseSet = vi.fn(() => new Promise((resolve) => { resolveTask = resolve }))
+  const getBankExerciseSet = vi.fn(() => new Promise((resolve) => { resolveBank = resolve }))
+  const harness = await renderApp(createApi({ getExerciseSet, getBankExerciseSet }))
+  let taskLoad
+  let duplicateTaskLoad
+  let bankLoad
+
+  act(() => {
+    taskLoad = harness.app.loadExerciseSet({ taskId: 'same' })
+    duplicateTaskLoad = harness.app.loadExerciseSet({ taskId: 'same' })
+    bankLoad = harness.app.loadExerciseSet({ bankSetId: 'same' })
+  })
+
+  expect(duplicateTaskLoad).toBe(taskLoad)
+  expect(getExerciseSet).toHaveBeenCalledTimes(1)
+  expect(getBankExerciseSet).toHaveBeenCalledTimes(1)
+  await waitFor(() => expect(harness.app.isActionPending('exercise:load:same')).toBe(true))
+
+  await act(async () => {
+    resolveTask({ kind: 'task', taskId: 'same', questions: [] })
+    await taskLoad
+  })
+  expect(harness.app.isActionPending('exercise:load:same')).toBe(true)
+
+  await act(async () => {
+    resolveBank({ kind: 'bank', id: 'same', questions: [] })
+    await bankLoad
+  })
+  expect(harness.app.isActionPending('exercise:load:same')).toBe(false)
+  expect(harness.app.exerciseCache['task:same']).toMatchObject({ kind: 'task' })
+  expect(harness.app.exerciseCache['bank:same']).toMatchObject({ kind: 'bank' })
 })
 
 test('persists a session before completing its task and merges the returned task', async () => {
@@ -190,6 +253,156 @@ test('keeps a saved session and safely retries task completion without submittin
   expect(harness.app.tasks[0]).toMatchObject({ id: 't1', status: 'completed' })
 })
 
+test.each([
+  ['bank failure before task success', ['bank', 'task']],
+  ['task success before bank failure', ['task', 'bank']],
+])('serializes every session so a rollback cannot overwrite a successful lastSession: %s', async (_, order) => {
+  // Catches task and bank sessions using different collection queues and racing whole-state rollback snapshots.
+  const starts = []
+  const deferred = {}
+  const submitSession = vi.fn((session) => {
+    const kind = session.taskId ? 'task' : 'bank'
+    starts.push(kind)
+    return new Promise((resolve, reject) => { deferred[kind] = { resolve, reject } })
+  })
+  const harness = await renderApp(createApi({
+    submitSession,
+    completeTask: (id) => Promise.resolve({ task: { id, type: 'teacher_assigned', status: 'completed' } }),
+  }))
+  const sessions = {
+    task: { sessionId: `s-task-${order[0]}`, taskId: 't1', completedAt: '2026-08-06T00:00:00.000Z', questions: [] },
+    bank: { sessionId: `s-bank-${order[0]}`, taskId: null, completedAt: '2026-08-06T00:00:00.000Z', questions: [] },
+  }
+  const operations = {}
+
+  act(() => {
+    for (const kind of order) operations[kind] = harness.app.saveSession(sessions[kind])
+  })
+  const bankSettlement = operations.bank.catch((error) => error)
+
+  expect(starts).toEqual([order[0]])
+  const first = order[0]
+  if (first === 'bank') {
+    await act(async () => { deferred.bank.reject(new Error('bank failed')); await bankSettlement })
+    await waitFor(() => expect(starts).toEqual(['bank', 'task']))
+    await act(async () => { deferred.task.resolve({ sessionId: sessions.task.sessionId }); await operations.task })
+  } else {
+    await act(async () => { deferred.task.resolve({ sessionId: sessions.task.sessionId }); await operations.task })
+    await waitFor(() => expect(starts).toEqual(['task', 'bank']))
+    await act(async () => { deferred.bank.reject(new Error('bank failed')); await bankSettlement })
+  }
+
+  expect(harness.app.lastSession).toMatchObject({ sessionId: sessions.task.sessionId, taskId: 't1' })
+  expect(harness.app.tasks.find((task) => task.id === 't1')).toMatchObject({ status: 'completed' })
+})
+
+test.each([
+  ['null response', null],
+  ['empty response', {}],
+  ['wrong task id', { task: { id: 't2', status: 'completed' } }],
+  ['pending task status', { task: { id: 't1', status: 'pending' } }],
+])('keeps completion pending for a malformed completion result: %s', async (_, invalidCompletion) => {
+  // Catches a resolved but unconfirmed completion being treated as success or merged into another task.
+  let completionAttempt = 0
+  const submitSession = vi.fn((session) => Promise.resolve({ sessionId: session.sessionId }))
+  const completeTask = vi.fn(() => {
+    completionAttempt += 1
+    return Promise.resolve(completionAttempt === 1
+      ? invalidCompletion
+      : { task: { id: 't1', type: 'teacher_assigned', status: 'completed' } })
+  })
+  const harness = await renderApp(createApi({
+    bootstrap: () => Promise.resolve({
+      ...bootData,
+      tasks: [
+        { id: 't1', type: 'teacher_assigned', status: 'pending' },
+        { id: 't2', type: 'teacher_assigned', status: 'pending' },
+      ],
+    }),
+    submitSession,
+    completeTask,
+  }))
+  const session = { sessionId: `s-invalid-${completionAttempt}-${String(invalidCompletion)}`, taskId: 't1', completedAt: '2026-08-06T00:00:00.000Z', questions: [] }
+
+  await act(async () => {
+    await expect(harness.app.saveSession(session)).resolves.toMatchObject({
+      sessionId: session.sessionId,
+      completionPending: true,
+    })
+  })
+  expect(harness.app.lastSession).toMatchObject({ sessionId: session.sessionId })
+  expect(harness.app.tasks).toEqual([
+    expect.objectContaining({ id: 't1', status: 'pending' }),
+    expect.objectContaining({ id: 't2', status: 'pending' }),
+  ])
+  expect(harness.app.toast).toMatchObject({ message: 'Session saved; task completion will retry' })
+
+  await act(async () => {
+    await expect(harness.app.saveSession(session)).resolves.toMatchObject({ completionPending: false })
+  })
+  expect(submitSession).toHaveBeenCalledTimes(1)
+  expect(completeTask).toHaveBeenCalledTimes(2)
+  expect(harness.app.tasks.find((task) => task.id === 't1')).toMatchObject({ status: 'completed' })
+})
+
+test('adopts a canonical session ID and retries it without another session POST', async () => {
+  // Catches canonical IDs being shown but not remembered as already persisted.
+  const submitSession = vi.fn(() => Promise.resolve({ sessionId: 'canonical-session' }))
+  const harness = await renderApp(createApi({ submitSession }))
+  const request = { sessionId: 'request-session', taskId: null, completedAt: '2026-08-06T00:00:00.000Z', questions: [] }
+
+  let firstResult
+  await act(async () => { firstResult = await harness.app.saveSession(request) })
+  expect(firstResult).toMatchObject({ sessionId: 'canonical-session' })
+  expect(harness.app.lastSession).toMatchObject({ sessionId: 'canonical-session' })
+
+  await act(async () => {
+    await expect(harness.app.saveSession(harness.app.lastSession)).resolves.toMatchObject({ sessionId: 'canonical-session' })
+  })
+  expect(submitSession).toHaveBeenCalledTimes(1)
+})
+
+test.each([
+  ['null', null],
+  ['empty object', {}],
+  ['blank ID', { sessionId: '   ' }],
+  ['mistyped ID', { sessionId: 42 }],
+])('falls back to the request session ID for a malformed submit response: %s', async (_, response) => {
+  // Catches durable session writes returning an unusable ID to the page/store.
+  const submitSession = vi.fn(() => Promise.resolve(response))
+  const harness = await renderApp(createApi({ submitSession }))
+  const request = { sessionId: 'request-fallback', taskId: null, completedAt: '2026-08-06T00:00:00.000Z', questions: [] }
+
+  let result
+  await act(async () => { result = await harness.app.saveSession(request) })
+
+  expect(result).toMatchObject({ sessionId: 'request-fallback', completionPending: false })
+  expect(harness.app.lastSession).toMatchObject({ sessionId: 'request-fallback' })
+  await act(async () => { await harness.app.saveSession(harness.app.lastSession) })
+  expect(submitSession).toHaveBeenCalledTimes(1)
+})
+
+test('does not associate a canonical response ID that already belongs to another session', async () => {
+  // Catches a conflicting server ID replacing the request identity and making retries target the wrong record.
+  const submitSession = vi.fn(() => Promise.resolve({ sessionId: 'existing-session' }))
+  const harness = await renderApp(createApi({
+    bootstrap: () => Promise.resolve({
+      ...bootData,
+      sessions: { 'existing-session': { sessionId: 'existing-session', taskId: null } },
+    }),
+    submitSession,
+  }))
+  const request = { sessionId: 'new-request', taskId: null, completedAt: '2026-08-06T00:00:00.000Z', questions: [] }
+
+  let result
+  await act(async () => { result = await harness.app.saveSession(request) })
+
+  expect(result).toMatchObject({ sessionId: 'new-request' })
+  expect(harness.app.lastSession).toMatchObject({ sessionId: 'new-request' })
+  await act(async () => { await harness.app.saveSession(harness.app.lastSession) })
+  expect(submitSession).toHaveBeenCalledTimes(1)
+})
+
 test('rolls back lastSession when session persistence itself fails', async () => {
   // Catches optimistic session state being retained even though no durable save occurred.
   const harness = await renderApp(createApi({ submitSession: () => Promise.reject(new Error('session offline')) }))
@@ -220,7 +433,7 @@ test('stores generated variants in cache and adds their task only once', async (
   await act(async () => { resolveVariant(result); await first })
 
   expect(generateVariant).toHaveBeenCalledWith('q-source')
-  expect(harness.app.exerciseCache['variant-1']).toEqual(result.exerciseSet)
+  expect(harness.app.exerciseCache['set:variant-1']).toEqual(result.exerciseSet)
   expect(harness.app.tasks).toContainEqual(result.task)
 
   generateVariant.mockResolvedValueOnce(result)
