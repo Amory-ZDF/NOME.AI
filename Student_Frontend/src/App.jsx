@@ -14,7 +14,7 @@ import Bank from './pages/Bank'
 import Profile from './pages/Profile'
 
 function Shell() {
-  const { toast } = useApp()
+  const { toast, bootStatus, bootError, retryBootstrap } = useApp()
   const location = useLocation()
 
   // Scroll to top on route change
@@ -29,29 +29,39 @@ function Shell() {
     <div className="min-h-screen flex flex-col">
       {!bareLayout && <TopNav />}
       <main className="flex-1">
-        <Routes>
-          <Route path="/" element={<Home />} />
-          <Route path="/tasks" element={<Tasks />} />
-          <Route path="/exercise/:taskId" element={<Exercise />} />
-          <Route path="/summary/:sessionId" element={<Summary />} />
-          <Route path="/errors" element={<Errors />} />
-          <Route path="/errors/review/:id" element={<ErrorRedo />} />
-          <Route path="/notes" element={<Notes />} />
-          <Route path="/notes/:id" element={<Notes />} />
-          <Route path="/bank" element={<Bank />} />
-          <Route path="/bank/exercise/:qId" element={<Exercise bankMode />} />
-          <Route path="/profile" element={<Profile />} />
-          <Route path="*" element={<Home />} />
-        </Routes>
+        {bootStatus === 'error' ? (
+          <section className="min-h-[calc(100vh-3.5rem)] flex items-center justify-center px-4">
+            <div className="zb-card max-w-md w-full text-center py-10">
+              <h1 className="text-xl font-bold tracking-tight">We couldn&apos;t load your learning data</h1>
+              <p role="alert" className="text-sm text-warm-stone mt-2">{bootError?.message || 'Please check your connection and try again.'}</p>
+              <button className="zb-btn-primary mt-6" onClick={retryBootstrap}>Retry loading</button>
+            </div>
+          </section>
+        ) : (
+          <Routes>
+            <Route path="/" element={<Home />} />
+            <Route path="/tasks" element={<Tasks />} />
+            <Route path="/exercise/:taskId" element={<Exercise />} />
+            <Route path="/summary/:sessionId" element={<Summary />} />
+            <Route path="/errors" element={<Errors />} />
+            <Route path="/errors/review/:id" element={<ErrorRedo />} />
+            <Route path="/notes" element={<Notes />} />
+            <Route path="/notes/:id" element={<Notes />} />
+            <Route path="/bank" element={<Bank />} />
+            <Route path="/bank/exercise/:qId" element={<Exercise bankMode />} />
+            <Route path="/profile" element={<Profile />} />
+            <Route path="*" element={<Home />} />
+          </Routes>
+        )}
       </main>
       <Toast toast={toast} />
     </div>
   )
 }
 
-export default function App() {
+export default function App({ services }) {
   return (
-    <AppProvider>
+    <AppProvider services={services}>
       <Shell />
     </AppProvider>
   )
