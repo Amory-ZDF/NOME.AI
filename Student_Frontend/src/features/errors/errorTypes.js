@@ -21,6 +21,25 @@ export const ERROR_TYPE_META = Object.freeze({
 const validErrorTypes = new Set(ERROR_TYPES)
 const isRecord = (value) => value !== null && typeof value === 'object' && !Array.isArray(value)
 const nonemptyString = (value) => (typeof value === 'string' && value.trim() ? value.trim() : null)
+const regexWordCharacter = /[\p{L}\p{N}_]/u
+
+const normalizePhraseText = (value) => (
+  nonemptyString(value)?.normalize('NFKC').toLocaleLowerCase().replace(/\s+/gu, ' ').trim() ?? ''
+)
+
+const escapeRegularExpression = (value) => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+
+const containsRequiredPhrase = (answer, phrase) => {
+  const normalizedAnswer = normalizePhraseText(answer)
+  const normalizedPhrase = normalizePhraseText(phrase)
+  if (!normalizedAnswer || !normalizedPhrase) return false
+
+  const characters = [...normalizedPhrase]
+  const phrasePattern = normalizedPhrase.split(' ').map(escapeRegularExpression).join('\\s+')
+  const leftBoundary = regexWordCharacter.test(characters[0]) ? '(?:^|[^\\p{L}\\p{N}_])' : ''
+  const rightBoundary = regexWordCharacter.test(characters.at(-1)) ? '(?=$|[^\\p{L}\\p{N}_])' : ''
+  return new RegExp(`${leftBoundary}${phrasePattern}${rightBoundary}`, 'u').test(normalizedAnswer)
+}
 
 const markSchemePhrase = (point) => {
   if (typeof point === 'string') return nonemptyString(point)
@@ -56,8 +75,7 @@ function hasCorrectMethodButMissingMarkSchemePhrases(question, result) {
 
   const requiredPhrases = requiredMarkSchemePhrases(question)
   if (requiredPhrases.length === 0 || !isRecord(attempt)) return false
-  const answer = nonemptyString(attempt.answer)?.toLocaleLowerCase() ?? ''
-  return requiredPhrases.some((phrase) => !answer.includes(phrase.toLocaleLowerCase()))
+  return requiredPhrases.some((phrase) => !containsRequiredPhrase(attempt.answer, phrase))
 }
 
 const avoidablePattern = (attempt) => {
@@ -73,11 +91,15 @@ function hasRepeatedAvoidablePattern(result) {
   return recentPatterns[0] !== null && recentPatterns.every((pattern) => pattern === recentPatterns[0])
 }
 
+function isUnanswered(result) {
+  return isRecord(result) && result.status === 'unanswered'
+}
+
 export function normalizeErrorType(question, result) {
   const safeQuestion = isRecord(question) ? question : {}
   const safeResult = isRecord(result) ? result : {}
 
-  if (safeResult.status === 'unanswered') return 'execution'
+  if (isUnanswered(safeResult)) return 'execution'
   if (hasRepeatedAvoidablePattern(safeResult)) return 'habit'
   if (hasCorrectMethodButMissingMarkSchemePhrases(safeQuestion, safeResult)) return 'expression'
   return validErrorTypes.has(safeQuestion.errorType) ? safeQuestion.errorType : 'knowledge'
