@@ -4,6 +4,7 @@ import {
   applyNotePatch,
   NoteVersionError,
   normalizeNoteSuggestions,
+  sanitizePersistedNote,
   undoLastNoteVersion,
 } from './noteVersions'
 import { initialNotes } from '../../data/mockData'
@@ -56,6 +57,67 @@ const expectVersionError = (action, code) => {
     expect(error.code).toBe(code)
   }
 }
+
+describe('persisted note contract', () => {
+  test('keeps minimal legacy notes versionable but requires complete fields at persistence boundaries', () => {
+    const minimal = {
+      id: 'minimal-note',
+      title: 'Minimal note',
+      tags: [],
+      content: [{ t: 'p', v: 'Still editable' }],
+      linkedTopics: [],
+      linkedErrors: [],
+    }
+
+    expect(applyNotePatch(minimal, { title: 'Edited minimal note' }, editOptions))
+      .toMatchObject({ title: 'Edited minimal note', version: 2 })
+    expectVersionError(() => sanitizePersistedNote(minimal), 'INVALID_NOTE')
+    expect(sanitizePersistedNote(makeNote())).toEqual(makeNote())
+  })
+
+  test.each([
+    'id', 'title', 'folderId', 'folderPath', 'tags', 'linkedTopics', 'linkedErrors',
+    'source', 'createdAt', 'updatedAt', 'content', 'aiSuggestions',
+  ])('rejects a persisted note missing required field %s', (field) => {
+    const note = makeNote()
+    Reflect.deleteProperty(note, field)
+    expectVersionError(() => sanitizePersistedNote(note), 'INVALID_NOTE')
+  })
+
+  test.each([
+    'data:image/png;base64,AA==',
+    'base64:AA==',
+    'raw:010203',
+  ])('rejects an image raw-data carrier reference: %s', (reference) => {
+    expectVersionError(() => sanitizePersistedNote(makeNote({
+      content: [{ t: 'image', v: 'Unsafe image', reference, alt: 'Unsafe image' }],
+    })), 'INVALID_NOTE')
+  })
+
+  test('rejects a raw carrier reference nested in suggestion content', () => {
+    expectVersionError(() => sanitizePersistedNote(makeNote({
+      aiSuggestions: [{
+        id: 'unsafe-suggestion',
+        type: 'append_content',
+        content: [{
+          t: 'image', v: 'Inline image', reference: 'data:image/png;base64,AA==', alt: 'Inline image',
+        }],
+      }],
+    })), 'INVALID_NOTE')
+  })
+
+  test('accepts the documented Task 5 object reference shape', () => {
+    const note = makeNote({
+      content: [{
+        t: 'image',
+        v: 'Stored diagram',
+        reference: 'object://notes/diagram-1',
+        alt: 'A stored diagram',
+      }],
+    })
+    expect(sanitizePersistedNote(note)).toEqual(note)
+  })
+})
 
 describe('applyNotePatch', () => {
   test('records an exact immutable previous-version snapshot for a meaningful edit', () => {

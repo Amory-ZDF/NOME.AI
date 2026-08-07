@@ -32,17 +32,20 @@ import {
   confirmMaterialClassification,
   MaterialProcessorError,
   processMaterialJob,
+  sanitizeClassificationPatch,
 } from '../features/materials/mockMaterialProcessor'
 import {
   applyNoteOrganization,
   applyNotePatch,
   NoteVersionError,
+  sanitizePersistedNote,
   sanitizeNote,
   undoLastNoteVersion,
 } from '../features/materials/noteVersions'
 import {
   MaterialContractError,
   sanitizeUploadJob,
+  sanitizeUploadJobs,
 } from '../features/materials/materialContracts'
 
 const repository = createMockRepository({ seedFactory: createSeedState })
@@ -73,6 +76,11 @@ const invalidUploadState = (message = 'The upload job is not in a valid state fo
 const invalidUploadMetadata = (message = 'Upload metadata contains invalid fields') => new ApiError(message, {
   status: 400,
   code: 'INVALID_UPLOAD_METADATA',
+})
+const invalidUploadResponse = (cause) => new ApiError('Material API response is invalid', {
+  status: 502,
+  code: 'INVALID_UPLOAD_RESPONSE',
+  cause,
 })
 const masteryGateNotMet = () => new ApiError('Complete the independent variant before marking this mastered', {
   status: 409,
@@ -152,6 +160,7 @@ const normalizeLegacyNote = (note) => {
 
 const needsMaterialMigration = (state) => (
   !Array.isArray(state.uploadJobs)
+  || sanitizeUploadJobs(state.uploadJobs).length !== state.uploadJobs.length
   || !Array.isArray(state.notes)
   || state.notes.some((note) => !hasOwn(note, 'version') && !hasOwn(note, 'versions'))
 )
@@ -160,7 +169,7 @@ const normalizeMaterialState = (state) => {
   if (!needsMaterialMigration(state)) return state
   return {
     ...state,
-    uploadJobs: Array.isArray(state.uploadJobs) ? state.uploadJobs : [],
+    uploadJobs: sanitizeUploadJobs(state.uploadJobs),
     notes: Array.isArray(state.notes) ? state.notes.map(normalizeLegacyNote) : [],
   }
 }
@@ -169,6 +178,42 @@ const persistMaterialMigration = async () => {
   const current = await repository.read((state) => state)
   if (!needsMaterialMigration(current)) return current
   return repository.update(normalizeMaterialState)
+}
+
+const uploadMetadataCommand = (job) => Object.fromEntries(
+  [...UPLOAD_METADATA_FIELDS]
+    .filter((field) => hasOwn(job, field))
+    .map((field) => [field, job[field]]),
+)
+
+const sanitizeUploadSuccess = (response, { expectedId, expectedStatus }) => {
+  try {
+    if (!isPlainRecord(response)) throw new MaterialContractError()
+    const job = sanitizeUploadJob(response.job, { expectedId })
+    if (job.status !== expectedStatus) throw new MaterialContractError()
+    return { job }
+  } catch (error) {
+    if (error instanceof ApiError) throw error
+    throw invalidUploadResponse(error)
+  }
+}
+
+const sanitizeConfirmSuccess = (response, id) => {
+  const { job } = sanitizeUploadSuccess(response, { expectedId: id, expectedStatus: 'completed' })
+  try {
+    const note = sanitizePersistedNote(response.note, {
+      expectedId: `note-${id}`,
+      expectedSourceJobId: id,
+    })
+    return { job, note }
+  } catch (error) {
+    throw invalidUploadResponse(error)
+  }
+}
+
+const sanitizeBootstrapUploadJobs = (data) => {
+  if (!isPlainRecord(data)) return data
+  return { ...data, uploadJobs: sanitizeUploadJobs(data.uploadJobs) }
 }
 
 const throwIfAborted = (signal) => {
@@ -716,9 +761,9 @@ const updateVersionedNote = async (id, recipe) => {
 }
 
 // ---------- Bootstrap (GET /api/student/bootstrap) ----------
-export function bootstrap() {
-  if (!isMockMode) return http.get('/api/student/bootstrap')
-  return persistMaterialMigration()
+export async function bootstrap() {
+  if (!isMockMode) return sanitizeBootstrapUploadJobs(await http.get('/api/student/bootstrap'))
+  return sanitizeBootstrapUploadJobs(await persistMaterialMigration())
 }
 
 export async function resetMockState() {
@@ -913,13 +958,22 @@ export const createNote = async (note) => {
   } catch (error) {
     mapMaterialDomainError(error)
   }
-  if (!isMockMode) return http.post('/api/notes', persistedNote)
+  if (!isMockMode) {
+    const response = await http.post('/api/notes', persistedNote)
+    try {
+      return { note: sanitizePersistedNote(response?.note, { expectedId: persistedNote.id }) }
+    } catch (error) {
+      throw invalidUploadResponse(error)
+    }
+  }
   const state = await repository.update((current) => {
     const materialState = normalizeMaterialState(current)
     if (materialState.notes.some((item) => item.id === persistedNote.id)) throw duplicate('Note', persistedNote.id)
     return { ...materialState, notes: [persistedNote, ...materialState.notes] }
   })
-  return { note: state.notes.find((item) => item.id === persistedNote.id) }
+  return { note: sanitizePersistedNote(state.notes.find((item) => item.id === persistedNote.id), {
+    expectedId: persistedNote.id,
+  }) }
 }
 export const updateNote = async (id, patch, options = {}) => {
   const command = snapshotNoteCommand(patch, options)
@@ -960,25 +1014,38 @@ export const undoNote = async (id, options = {}) => {
 
 // ---------- Material uploads ----------
 export const createUploadJob = async (metadata, options = {}) => {
-  if (!isMockMode) return http.post('/api/material-uploads', metadata, { signal: options?.signal })
-  throwIfAborted(options?.signal)
   const job = snapshotUploadMetadata(metadata)
+  const command = uploadMetadataCommand(job)
+  if (!isMockMode) {
+    return sanitizeUploadSuccess(
+      await http.post('/api/material-uploads', command, { signal: options?.signal }),
+      { expectedId: job.id, expectedStatus: 'queued' },
+    )
+  }
+  throwIfAborted(options?.signal)
   const state = await repository.update((current) => {
     throwIfAborted(options?.signal)
     const materialState = normalizeMaterialState(current)
     if (materialState.uploadJobs.some((item) => item.id === job.id)) throw duplicate('Upload job', job.id)
     return { ...materialState, uploadJobs: [job, ...materialState.uploadJobs] }
   })
-  return { job: state.uploadJobs.find((item) => item.id === job.id) }
+  return sanitizeUploadSuccess(
+    { job: state.uploadJobs.find((item) => item.id === job.id) },
+    { expectedId: job.id, expectedStatus: 'queued' },
+  )
 }
 
 export const processUploadJob = async (id, options = {}) => {
+  assertUploadId(id)
   if (!isMockMode) {
     try {
-      return await http.post(
-        `/api/material-uploads/${encodeURIComponent(id)}/process`,
-        undefined,
-        { signal: options?.signal },
+      return sanitizeUploadSuccess(
+        await http.post(
+          `/api/material-uploads/${encodeURIComponent(id)}/process`,
+          undefined,
+          { signal: options?.signal },
+        ),
+        { expectedId: id, expectedStatus: 'needs_confirmation' },
       )
     } catch (error) {
       if (error instanceof ApiError) {
@@ -992,7 +1059,6 @@ export const processUploadJob = async (id, options = {}) => {
       throw error
     }
   }
-  assertUploadId(id)
   throwIfAborted(options?.signal)
   if (await waitForPendingCancellation(id)) throw uploadCancelled()
   throwIfAborted(options?.signal)
@@ -1034,7 +1100,10 @@ export const processUploadJob = async (id, options = {}) => {
       if (currentJob.status !== 'processing') throw invalidUploadState('Only processing uploads can finish classification')
       return replaceUploadJob(materialState, processed)
     })
-    return { job: findUploadJob(state, id) }
+    return sanitizeUploadSuccess(
+      { job: findUploadJob(state, id) },
+      { expectedId: id, expectedStatus: 'needs_confirmation' },
+    )
   } catch (error) {
     if (!processingJob) mapMaterialDomainError(error)
     if (error?.name === 'AbortError') {
@@ -1071,14 +1140,19 @@ export const processUploadJob = async (id, options = {}) => {
 }
 
 export const confirmUploadJob = async (id, patch, options = {}) => {
-  if (!isMockMode) return http.post(
-    `/api/material-uploads/${encodeURIComponent(id)}/confirm`,
-    patch,
-    { signal: options?.signal },
-  )
   assertUploadId(id)
+  let confirmationPatch
+  try {
+    confirmationPatch = sanitizeClassificationPatch(patch)
+  } catch (error) {
+    mapMaterialDomainError(error)
+  }
+  if (!isMockMode) return sanitizeConfirmSuccess(await http.post(
+    `/api/material-uploads/${encodeURIComponent(id)}/confirm`,
+    confirmationPatch,
+    { signal: options?.signal },
+  ), id)
   throwIfAborted(options?.signal)
-  const confirmationPatch = cloneCommand(patch, () => invalid('Classification patch must be serializable'))
   try {
     let confirmed
     await repository.update((current) => {
@@ -1091,6 +1165,7 @@ export const confirmUploadJob = async (id, patch, options = {}) => {
         throw invalidUploadState('Only uploads awaiting confirmation can be confirmed')
       }
       confirmed = confirmMaterialClassification(job, confirmationPatch)
+      confirmed = sanitizeConfirmSuccess(confirmed, id)
       if (materialState.notes.some((note) => note.id === confirmed.note.id)) {
         throw duplicate('Note', confirmed.note.id)
       }
@@ -1099,19 +1174,19 @@ export const confirmUploadJob = async (id, patch, options = {}) => {
         notes: [confirmed.note, ...materialState.notes],
       }
     })
-    return structuredClone(confirmed)
+    return sanitizeConfirmSuccess(confirmed, id)
   } catch (error) {
     mapMaterialDomainError(error)
   }
 }
 
 export const cancelUploadJob = async (id, options = {}) => {
-  if (!isMockMode) return http.post(
+  assertUploadId(id)
+  if (!isMockMode) return sanitizeUploadSuccess(await http.post(
     `/api/material-uploads/${encodeURIComponent(id)}/cancel`,
     undefined,
     { signal: options?.signal },
-  )
-  assertUploadId(id)
+  ), { expectedId: id, expectedStatus: 'cancelled' })
   throwIfAborted(options?.signal)
   const priorAttempt = pendingUploadCancellations.get(id)
   if (priorAttempt) await priorAttempt.settled
@@ -1133,7 +1208,10 @@ export const cancelUploadJob = async (id, options = {}) => {
     })
     const job = findUploadJob(state, id)
     durableCancellation = job?.status === 'cancelled'
-    return { job }
+    return sanitizeUploadSuccess(
+      { job },
+      { expectedId: id, expectedStatus: 'cancelled' },
+    )
   } catch (error) {
     mapMaterialDomainError(error)
   } finally {

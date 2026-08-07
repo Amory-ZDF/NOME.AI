@@ -36,6 +36,10 @@ const NOTE_FIELDS = new Set([
   'source', 'createdAt', 'updatedAt', 'versions', 'version',
 ])
 const CONTENT_FIELDS = new Set(['t', 'v', 'reference', 'alt'])
+const PERSISTED_NOTE_REQUIRED_FIELDS = Object.freeze([
+  'id', 'title', 'folderId', 'folderPath', 'tags', 'linkedTopics', 'linkedErrors',
+  'source', 'createdAt', 'updatedAt', 'content', 'aiSuggestions',
+])
 const SUGGESTION_FIELDS = new Set([
   'id', 'type', 'message', 'tag', 'value', 'content', 'blocks', 'topicId', 'errorId',
 ])
@@ -269,7 +273,29 @@ const cloneAndValidateNote = (note) => {
   return clone
 }
 
-export const sanitizeNote = (note) => cloneAndValidateNote(note)
+const isRawCarrierReference = (reference) => (
+  /^(?:data|base64|raw):/i.test(reference.trim()) || /;base64,/i.test(reference)
+)
+
+const contentHasRawCarrier = (content) => content.some((block) => (
+  hasOwn(block, 'reference') && isRawCarrierReference(block.reference)
+))
+
+export const sanitizePersistedNote = (note, { expectedId, expectedSourceJobId } = {}) => {
+  const clone = cloneAndValidateNote(note)
+  if (PERSISTED_NOTE_REQUIRED_FIELDS.some((field) => !hasOwn(clone, field))) invalidNote()
+  if (expectedId !== undefined && clone.id !== expectedId) invalidNote()
+  if (expectedSourceJobId !== undefined && clone.sourceJobId !== expectedSourceJobId) invalidNote()
+  if (contentHasRawCarrier(clone.content)) invalidNote()
+  if (clone.versions.some((snapshot) => contentHasRawCarrier(snapshot.content))) invalidNote()
+  if (clone.aiSuggestions.some((suggestion) => (
+    (hasOwn(suggestion, 'content') && contentHasRawCarrier(suggestion.content))
+    || (hasOwn(suggestion, 'blocks') && contentHasRawCarrier(suggestion.blocks))
+  ))) invalidNote()
+  return clone
+}
+
+export const sanitizeNote = (note, options) => sanitizePersistedNote(note, options)
 
 const cloneAndValidatePatch = (patch) => {
   const clone = cloneJson(patch, invalidPatch)

@@ -30,6 +30,7 @@ import {
 import { isCompleteVariantResult } from '../features/exercise/exerciseContracts'
 import { MATERIAL_TYPES, MAX_FILE_BYTES } from '../features/materials/materialRules'
 import { normalizeNoteSuggestions } from '../features/materials/noteVersions'
+import { MATERIAL_FIXTURES } from '../data/materialFixtures'
 
 const makeTask = (overrides = {}) => ({
   id: 't-new', title: 'New task', type: 'ai_recommended', subject: 'A-Level Math',
@@ -57,6 +58,40 @@ const makeUploadMetadata = (overrides = {}) => ({
   size: 1000,
   materialType: 'handwritten_draft',
   createdAt: '2026-08-07T08:00:00.000Z',
+  ...overrides,
+})
+
+const makeUploadJob = (overrides = {}) => ({
+  ...makeUploadMetadata(),
+  updatedAt: '2026-08-07T08:00:00.000Z',
+  progress: 0,
+  status: 'queued',
+  ...overrides,
+})
+
+const makeClassifiedUploadJob = (overrides = {}) => makeUploadJob({
+  status: 'needs_confirmation',
+  progress: 100,
+  result: structuredClone(MATERIAL_FIXTURES.alevel_handwritten_calculus_note),
+  ...overrides,
+})
+
+const makeConfirmedNote = (jobId = 'job-1', overrides = {}) => ({
+  ...makeNote({
+    id: `note-${jobId}`,
+    materialType: 'handwritten_draft',
+    examBoard: 'Cambridge International',
+    subject: 'A-Level Math',
+    chapter: 'Calculus',
+    questionBlocks: structuredClone(MATERIAL_FIXTURES.alevel_handwritten_calculus_note.questionBlocks),
+    answerBlocks: structuredClone(MATERIAL_FIXTURES.alevel_handwritten_calculus_note.answerBlocks),
+    content: structuredClone(MATERIAL_FIXTURES.alevel_handwritten_calculus_note.content),
+    linkedTopics: structuredClone(MATERIAL_FIXTURES.alevel_handwritten_calculus_note.linkedTopics),
+    sourceJobId: jobId,
+    source: 'handwritten',
+    versions: [],
+    version: 1,
+  }),
   ...overrides,
 })
 
@@ -443,6 +478,112 @@ test('snapshots upload metadata, enforces exact file boundaries, and rejects byt
   expect((await bootstrap()).uploadJobs.map(({ id }) => id)).toEqual(['job-snapshot'])
 })
 
+test('filters polluted upload jobs from mock bootstrap and removes them from later lifecycle reads', async () => {
+  // Catches bootstrap returning an unsafe persisted job that later endpoints can propagate.
+  await resetMockState()
+  await createUploadJob(makeUploadMetadata({ id: 'job-safe-bootstrap' }))
+  mutateStoredState((state) => {
+    state.uploadJobs.unshift(makeUploadJob({ id: 'job-polluted-bootstrap', rawBytes: 'AA==' }))
+  })
+
+  const data = await bootstrap()
+  expect(data.uploadJobs.map(({ id }) => id)).toEqual(['job-safe-bootstrap'])
+  await expect(processUploadJob('job-polluted-bootstrap')).rejects.toMatchObject({
+    code: 'NOT_FOUND',
+  })
+})
+
+test('validates real upload commands before transport', async () => {
+  // Catches real mode bypassing the strict metadata/id/classification command boundary.
+  const post = vi.fn()
+  vi.resetModules()
+  vi.doMock('./client', () => ({
+    ApiError: class ApiError extends Error {
+      constructor(message, options = {}) { super(message); Object.assign(this, options) }
+    },
+    http: { post },
+    isMockMode: false,
+  }))
+
+  try {
+    const realApi = await import('./index')
+    const cyclicPatch = { subject: 'A-Level Math' }
+    cyclicPatch.self = cyclicPatch
+
+    await expect(realApi.createUploadJob(makeUploadMetadata({ rawBytes: 'AA==' })))
+      .rejects.toMatchObject({ code: 'INVALID_UPLOAD_METADATA' })
+    await expect(realApi.confirmUploadJob('   ', {}))
+      .rejects.toMatchObject({ code: 'INVALID_INPUT' })
+    await expect(realApi.confirmUploadJob('job-1', { rawBytes: 'AA==' }))
+      .rejects.toMatchObject({ code: 'INVALID_CLASSIFICATION_PATCH' })
+    await expect(realApi.confirmUploadJob('job-1', { content: new Uint8Array([1]) }))
+      .rejects.toMatchObject({ code: 'INVALID_CLASSIFICATION_PATCH' })
+    await expect(realApi.confirmUploadJob('job-1', cyclicPatch))
+      .rejects.toMatchObject({ code: 'INVALID_CLASSIFICATION_PATCH' })
+    expect(post).not.toHaveBeenCalled()
+  } finally {
+    vi.doUnmock('./client')
+    vi.resetModules()
+  }
+})
+
+test.each([
+  ['create', (api) => api.createUploadJob(makeUploadMetadata()), { job: makeUploadJob({ status: 'cancelled' }) }],
+  ['process', (api) => api.processUploadJob('job-1'), { job: makeUploadJob() }],
+  ['confirm', (api) => api.confirmUploadJob('job-1', {}), { job: makeClassifiedUploadJob(), note: makeConfirmedNote() }],
+  ['cancel', (api) => api.cancelUploadJob('job-1'), { job: makeUploadJob({ status: 'failed', progress: 1, failure: { code: 'FAILED', message: 'Nope' } }) }],
+])('rejects a real %s success response with the wrong action status', async (_, invoke, response) => {
+  // Catches structurally valid but semantically impossible success responses crossing the API boundary.
+  const post = vi.fn(() => Promise.resolve(response))
+  vi.resetModules()
+  vi.doMock('./client', () => ({
+    ApiError: class ApiError extends Error {
+      constructor(message, options = {}) { super(message); Object.assign(this, options) }
+    },
+    http: { post },
+    isMockMode: false,
+  }))
+
+  try {
+    const realApi = await import('./index')
+    await expect(invoke(realApi)).rejects.toMatchObject({ code: 'INVALID_UPLOAD_RESPONSE' })
+  } finally {
+    vi.doUnmock('./client')
+    vi.resetModules()
+  }
+})
+
+test('filters polluted real bootstrap jobs and atomically rejects a forged confirm note', async () => {
+  // Catches real bootstrap/confirm responses bypassing recursive job and persisted-note validation.
+  const validJob = makeUploadJob({ id: 'job-safe-real' })
+  const completedJob = makeClassifiedUploadJob({ id: 'job-1', status: 'completed' })
+  const forgedNote = makeConfirmedNote('job-1', { rawBytes: 'AA==' })
+  const get = vi.fn(() => Promise.resolve({
+    tasks: [],
+    notes: [],
+    uploadJobs: [makeUploadJob({ id: 'job-polluted-real', rawBytes: 'AA==' }), validJob],
+  }))
+  const post = vi.fn(() => Promise.resolve({ job: completedJob, note: forgedNote }))
+  vi.resetModules()
+  vi.doMock('./client', () => ({
+    ApiError: class ApiError extends Error {
+      constructor(message, options = {}) { super(message); Object.assign(this, options) }
+    },
+    http: { get, post },
+    isMockMode: false,
+  }))
+
+  try {
+    const realApi = await import('./index')
+    await expect(realApi.bootstrap()).resolves.toMatchObject({ uploadJobs: [validJob] })
+    await expect(realApi.confirmUploadJob('job-1', {}))
+      .rejects.toMatchObject({ code: 'INVALID_UPLOAD_RESPONSE' })
+  } finally {
+    vi.doUnmock('./client')
+    vi.resetModules()
+  }
+})
+
 test.each([
   ['create', async () => {}, (signal) => createUploadJob(makeUploadMetadata({ id: 'job-abort-create' }), { signal }), 'job-abort-create', undefined],
   ['process', () => createUploadJob(makeUploadMetadata({ id: 'job-abort-process' })), (signal) => processUploadJob('job-abort-process', { signal }), 'job-abort-process', 'queued'],
@@ -599,8 +740,39 @@ test('a cancellation persisted before a late abort still resolves as durable can
     .toMatchObject({ status: 'cancelled' })
 })
 
-test('persists a safe failed processing state and retries it after the cause is repaired', async () => {
-  // Catches processor failures being reset to queued or exposing stack/cause/raw input in durable state.
+test('settles concurrent same-id cancellations with one abort and cleans coordination state', async () => {
+  // Catches overlapping waiters overwriting each other's attempt record or leaving a reusable id blocked.
+  await resetMockState()
+  await createUploadJob(makeUploadMetadata({ id: 'job-multi-cancel' }))
+  const controller = new AbortController()
+  const first = cancelUploadJob('job-multi-cancel').then(
+    (value) => ({ value }), (error) => ({ error }),
+  )
+  const aborted = cancelUploadJob('job-multi-cancel', { signal: controller.signal }).then(
+    (value) => ({ value }), (error) => ({ error }),
+  )
+  const third = cancelUploadJob('job-multi-cancel').then(
+    (value) => ({ value }), (error) => ({ error }),
+  )
+  controller.abort()
+
+  const [firstOutcome, abortedOutcome, thirdOutcome] = await Promise.all([first, aborted, third])
+  expect(firstOutcome.value).toMatchObject({ job: { status: 'cancelled' } })
+  expect(abortedOutcome.error).toMatchObject({ name: 'AbortError' })
+  expect(thirdOutcome.value).toMatchObject({ job: { status: 'cancelled' } })
+  expect((await bootstrap()).uploadJobs.find(({ id }) => id === 'job-multi-cancel'))
+    .toMatchObject({ status: 'cancelled' })
+
+  localStorage.clear()
+  await bootstrap()
+  await createUploadJob(makeUploadMetadata({ id: 'job-multi-cancel' }))
+  await expect(processUploadJob('job-multi-cancel')).resolves.toMatchObject({
+    job: { status: 'needs_confirmation' },
+  })
+})
+
+test('filters a corrupted persisted job before processing and permits a clean same-id retry', async () => {
+  // Catches a corrupted bootstrap job reaching the processor or remaining as an unrecoverable phantom id.
   await resetMockState()
   await createUploadJob(makeUploadMetadata({ id: 'job-retry' }))
   mutateStoredState((state) => {
@@ -609,35 +781,13 @@ test('persists a safe failed processing state and retries it after the cause is 
     ))
   })
 
-  const error = await processUploadJob('job-retry').catch((caught) => caught)
-  expect(error).toMatchObject({
-    name: 'ApiError',
-    status: 400,
-    code: 'INVALID_MATERIAL_JOB',
-    job: {
-      id: 'job-retry',
-      status: 'failed',
-      progress: 1,
-      failure: {
-        code: 'INVALID_MATERIAL_JOB',
-        message: 'Material job is missing valid upload metadata',
-      },
-    },
+  await expect(processUploadJob('job-retry')).rejects.toMatchObject({
+    name: 'ApiError', status: 404, code: 'NOT_FOUND',
   })
-  expect(Object.keys(error.job.failure).sort()).toEqual(['code', 'message'])
-  expect(error.job.failure).not.toHaveProperty('stack')
-  expect(error.job.failure).not.toHaveProperty('cause')
-  expect(error.job.failure).not.toHaveProperty('rawBytes')
-
-  const reloadedFailure = (await bootstrap()).uploadJobs.find(({ id }) => id === 'job-retry')
-  expect(reloadedFailure).toEqual(error.job)
+  expect((await bootstrap()).uploadJobs.find(({ id }) => id === 'job-retry')).toBeUndefined()
   expect((await listNotes()).notes.some(({ sourceJobId }) => sourceJobId === 'job-retry')).toBe(false)
 
-  mutateStoredState((state) => {
-    state.uploadJobs = state.uploadJobs.map((job) => (
-      job.id === 'job-retry' ? { ...job, materialType: 'handwritten_draft' } : job
-    ))
-  })
+  await createUploadJob(makeUploadMetadata({ id: 'job-retry' }))
   const retried = await processUploadJob('job-retry')
   expect(retried.job).toMatchObject({
     id: 'job-retry',
@@ -811,7 +961,24 @@ test('serializes concurrent note edits and rejects unknown or invalid note comma
 test('uses the documented real material and note routes with exact bodies', async () => {
   // Catches real-mode paths or request bodies drifting while the repository-backed adapter stays green.
   const get = vi.fn((path) => Promise.resolve({ path }))
-  const post = vi.fn((path, body) => Promise.resolve({ path, body }))
+  const post = vi.fn((path, body) => {
+    if (path === '/api/material-uploads') {
+      return Promise.resolve({ job: { ...body, updatedAt: body.createdAt, progress: 0, status: 'queued' } })
+    }
+    if (path.endsWith('/process')) {
+      return Promise.resolve({ job: makeClassifiedUploadJob({ id: 'job/1' }) })
+    }
+    if (path.endsWith('/confirm')) {
+      return Promise.resolve({
+        job: makeClassifiedUploadJob({ id: 'job/1', status: 'completed' }),
+        note: makeConfirmedNote('job/1'),
+      })
+    }
+    if (path.endsWith('/cancel')) {
+      return Promise.resolve({ job: makeUploadJob({ id: 'job/1', status: 'cancelled' }) })
+    }
+    return Promise.resolve({ path, body })
+  })
   const patch = vi.fn((path, body) => Promise.resolve({ path, body }))
   vi.resetModules()
   vi.doMock('./client', () => ({

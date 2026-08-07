@@ -413,6 +413,12 @@ rejects unknown keys and non-plain/non-dense JSON anywhere in the object. `undef
 accessors, custom prototypes, cycles, `Blob`, typed arrays, and raw/base64 carrier fields fail with
 `INVALID_NOTE` before storage mutation or a real transport call.
 
+Versioning helpers may normalize a minimal legacy note in memory, but persistence boundaries are
+stricter. Create and material confirmation require `id`, `title`, `folderId`, `folderPath`, `tags`,
+`linkedTopics`, `linkedErrors`, `source`, `createdAt`, `updatedAt`, `content`, and `aiSuggestions`;
+`version`/`versions` may be supplied together or are initialized to version 1. Image/object references
+must be durable references; `data:`, `base64:`, `raw:`, and inline `;base64,` references are rejected.
+
 ### Material uploads
 
 | Endpoint | Body | Response | Notes |
@@ -439,6 +445,17 @@ object with the exact documented top-level fields. `result` must match the compl
 `MaterialClassificationResult` schema recursively. `failure` must be exactly the flat
 `{ code, message }` object and is legal only for a `failed` job. Invalid jobs are filtered during
 bootstrap/replacement and cannot be inserted by a forged success or error response.
+
+Bootstrap uses stable filtering: invalid persisted jobs are omitted and removed from mock storage, so
+later lifecycle calls see `NOT_FOUND` instead of propagating polluted data. Successful action responses
+are projected to contract fields and must preserve the requested id with the exact action state:
+create `queued`, process `needs_confirmation`, confirm `completed`, and cancel `cancelled`; otherwise
+the adapter rejects with `INVALID_UPLOAD_RESPONSE`. The Store independently enforces the legal prior
+state and requires an existing same-id job for every action except create.
+
+Confirmation validates the completed job and full persisted note before committing either. The note id
+must be `note-{jobId}`, `sourceJobId` must equal the job id, and an existing deterministic note id cannot
+be replaced by a confirmation response.
 
 A processing failure response uses the envelope
 `{ "code": string, "message": string, "data": { "job": MaterialUploadJob } }`. The client exposes

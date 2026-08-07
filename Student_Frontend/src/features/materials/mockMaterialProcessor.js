@@ -206,6 +206,17 @@ const deriveNoteSource = (materialType) => {
   return 'typed'
 }
 
+export function sanitizeClassificationPatch(patch) {
+  if (!isRecord(patch)) {
+    fail('INVALID_CLASSIFICATION_PATCH', 'Classification patch must be an object')
+  }
+  const cloned = clonePatch(patch)
+  if (!isValidPatch(cloned)) {
+    fail('INVALID_CLASSIFICATION_PATCH', 'Classification patch contains invalid fields')
+  }
+  return cloned
+}
+
 export function processMaterialJob(job, options) {
   if (!isRecord(job)) {
     fail('INVALID_MATERIAL_JOB', 'Material job must be an object')
@@ -254,16 +265,11 @@ export function confirmMaterialClassification(job, patch) {
       'Only classified jobs awaiting confirmation can be confirmed',
     )
   }
-  if (!isRecord(patch)) {
-    fail('INVALID_CLASSIFICATION_PATCH', 'Classification patch must be an object')
-  }
-  if (!isValidPatch(patch)) {
-    fail('INVALID_CLASSIFICATION_PATCH', 'Classification patch contains invalid fields')
-  }
+  const validatedPatch = sanitizeClassificationPatch(patch)
 
   const confirmedResult = {
     ...cloneResult(job.result),
-    ...clonePatch(patch),
+    ...validatedPatch,
   }
   if (!isClassificationResult(confirmedResult)) {
     fail('INVALID_CLASSIFICATION_PATCH', 'Classification patch contains invalid fields')

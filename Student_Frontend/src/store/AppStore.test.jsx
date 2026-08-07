@@ -1783,7 +1783,7 @@ test('authors upload identity once, exposes upload:create, and rejects an unsafe
   const queuedWithBytes = validUploadJob({ id: 'generated-id', size: 3, rawBytes: new Uint8Array([1, 2, 3]) })
   await act(async () => {
     resolveCreate({ job: queuedWithBytes })
-    await operation
+    await expect(operation).rejects.toMatchObject({ code: 'INVALID_UPLOAD_RESPONSE' })
   })
   expect(harness.app.uploadJobs).toEqual([])
   expect(harness.app.isActionPending('upload:create')).toBe(false)
@@ -1803,6 +1803,90 @@ test('filters recursively unsafe upload jobs during bootstrap', async () => {
   }))
 
   expect(harness.app.uploadJobs).toEqual([safe])
+})
+
+test.each([
+  ['create returning a non-queued job', [], 'create', validUploadJob({ id: 'generated-id', status: 'cancelled' })],
+  ['process without an existing job', [], 'process', validUploadJob({ status: 'needs_confirmation', progress: 100, result: validClassificationResult() })],
+  ['process returning the wrong status', [validUploadJob()], 'process', validUploadJob()],
+  ['confirm from a queued state', [validUploadJob()], 'confirm', validUploadJob({ status: 'completed', progress: 100, result: validClassificationResult() })],
+  ['cancel from a completed state', [validUploadJob({ status: 'completed', progress: 100, result: validClassificationResult() })], 'cancel', validUploadJob({ status: 'cancelled', progress: 100 })],
+])('atomically rejects an impossible upload success: %s', async (_, initialJobs, action, responseJob) => {
+  // Catches a valid-shaped response inserting a missing entity or performing an illegal state transition.
+  const note = validNote({ id: 'note-job-1', sourceJobId: 'job-1' })
+  const api = createApi({
+    bootstrap: () => Promise.resolve({ ...bootData, notes: [], uploadJobs: initialJobs }),
+    createUploadJob: () => Promise.resolve({ job: responseJob }),
+    processUploadJob: () => Promise.resolve({ job: responseJob }),
+    confirmUploadJob: () => Promise.resolve({ job: responseJob, note }),
+    cancelUploadJob: () => Promise.resolve({ job: responseJob }),
+  })
+  const harness = await renderApp(api)
+  const invoke = {
+    create: () => harness.app.startMaterialUpload({
+      fileName: 'notes.jpg', mimeType: 'image/jpeg', size: 1000, materialType: 'handwritten_draft',
+    }),
+    process: () => harness.app.processMaterialUpload('job-1'),
+    confirm: () => harness.app.confirmMaterialUpload('job-1', {}),
+    cancel: () => harness.app.cancelMaterialUpload('job-1'),
+  }[action]
+
+  await act(async () => {
+    await expect(invoke()).rejects.toMatchObject({ code: 'INVALID_UPLOAD_RESPONSE' })
+  })
+  expect(harness.app.uploadJobs).toEqual(initialJobs)
+  expect(harness.app.notes).toEqual([])
+})
+
+test('rejects a confirm response that would replace an existing deterministic note id', async () => {
+  // Catches a forged confirmation overwriting an existing note instead of preserving atomic create semantics.
+  const classified = validUploadJob({
+    status: 'needs_confirmation', progress: 100, result: validClassificationResult(),
+  })
+  const completed = { ...classified, status: 'completed' }
+  const existing = validNote({ id: 'note-job-1', title: 'Existing protected note', sourceJobId: 'job-1' })
+  const replacement = validNote({ id: 'note-job-1', title: 'Forged replacement', sourceJobId: 'job-1' })
+  const harness = await renderApp(createApi({
+    bootstrap: () => Promise.resolve({ ...bootData, notes: [existing], uploadJobs: [classified] }),
+    confirmUploadJob: () => Promise.resolve({ job: completed, note: replacement }),
+  }))
+
+  await act(async () => {
+    await expect(harness.app.confirmMaterialUpload('job-1', {}))
+      .rejects.toMatchObject({ code: 'INVALID_UPLOAD_RESPONSE' })
+  })
+  expect(harness.app.uploadJobs).toEqual([classified])
+  expect(harness.app.notes).toEqual([existing])
+})
+
+test.each([
+  ['unknown field', (note) => ({ ...note, unknown: true })],
+  ['raw bytes', (note) => ({ ...note, rawBytes: 'AA==' })],
+  ['nested base64', (note) => ({ ...note, content: [{ t: 'image', v: 'x', reference: 'object://x', alt: 'x', base64: 'AA==' }] })],
+  ['Blob', (note) => ({ ...note, content: [new Blob(['unsafe'])] })],
+  ['typed array', (note) => ({ ...note, linkedErrors: new Uint8Array([1]) })],
+  ['custom prototype', (note) => Object.assign(Object.create({ inherited: true }), note)],
+  ['undefined', (note) => ({ ...note, subject: undefined })],
+  ['cycle', (note) => { const cyclic = { ...note }; cyclic.self = cyclic; return cyclic }],
+  ['wrong source job', (note) => ({ ...note, sourceJobId: 'job-forged' })],
+])('rejects a forged confirm note containing %s without committing either entity', async (_, forge) => {
+  // Catches job validation succeeding before an unsafe note is inserted in a separate state write.
+  const classified = validUploadJob({
+    status: 'needs_confirmation', progress: 100, result: validClassificationResult(),
+  })
+  const completed = { ...classified, status: 'completed' }
+  const safeNote = validNote({ id: 'note-job-1', sourceJobId: 'job-1' })
+  const harness = await renderApp(createApi({
+    bootstrap: () => Promise.resolve({ ...bootData, notes: [], uploadJobs: [classified] }),
+    confirmUploadJob: () => Promise.resolve({ job: completed, note: forge(safeNote) }),
+  }))
+
+  await act(async () => {
+    await expect(harness.app.confirmMaterialUpload('job-1', {}))
+      .rejects.toMatchObject({ code: 'INVALID_NOTE' })
+  })
+  expect(harness.app.uploadJobs).toEqual([classified])
+  expect(harness.app.notes).toEqual([])
 })
 
 test('processes and atomically confirms an upload under the exact pending keys', async () => {
@@ -1865,7 +1949,7 @@ test('keeps a cancellation terminal when a stale process response resolves later
 
   await act(async () => {
     resolveProcess({ job: validUploadJob({ status: 'needs_confirmation', progress: 100 }) })
-    await processing
+    await expect(processing).rejects.toMatchObject({ code: 'INVALID_UPLOAD_RESPONSE' })
   })
   expect(harness.app.uploadJobs).toEqual([cancelled])
 })

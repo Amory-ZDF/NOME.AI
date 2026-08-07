@@ -10,6 +10,7 @@ import {
   applyNoteOrganization,
   applyNotePatch,
   normalizeNoteSuggestions,
+  sanitizePersistedNote,
   undoLastNoteVersion,
 } from '../features/materials/noteVersions'
 import {
@@ -21,6 +22,10 @@ import {
 const AppContext = createContext(null)
 
 const dateOnly = (now) => now.toISOString().slice(0, 10)
+const invalidUploadResponse = () => Object.assign(
+  new Error('Material API response is invalid'),
+  { code: 'INVALID_UPLOAD_RESPONSE' },
+)
 const safeUploadJob = (job, expectedId) => {
   try {
     return sanitizeUploadJob(job, { expectedId })
@@ -28,6 +33,16 @@ const safeUploadJob = (job, expectedId) => {
     if (error instanceof MaterialContractError) return null
     throw error
   }
+}
+const strictUploadJob = (job, expectedId, expectedStatus) => {
+  const sanitized = safeUploadJob(job, expectedId)
+  if (!sanitized || sanitized.status !== expectedStatus) throw invalidUploadResponse()
+  return sanitized
+}
+const requireUploadTransition = (items, id, allowedStatuses) => {
+  const current = items.find((job) => job.id === id)
+  if (!current || !allowedStatuses.includes(current.status)) throw invalidUploadResponse()
+  return current
 }
 const upsertById = (items, replacement, { prepend = false } = {}) => {
   const index = items.findIndex((item) => item.id === replacement.id)
@@ -489,8 +504,8 @@ export function AppProvider({ children, services = defaultAppServices }) {
       optimistic: () => {},
       request: () => services.api.createUploadJob(authoredMetadata, actionOptions),
       commit: (result) => {
-        const job = safeUploadJob(result?.job, authoredMetadata.id)
-        if (!job) return
+        if (uploadJobsRef.current.some(({ id }) => id === authoredMetadata.id)) throw invalidUploadResponse()
+        const job = strictUploadJob(result?.job, authoredMetadata.id, 'queued')
         replaceUploadJobs(upsertById(uploadJobsRef.current, job, { prepend: true }))
       },
       rollback: () => {},
@@ -505,16 +520,14 @@ export function AppProvider({ children, services = defaultAppServices }) {
       optimistic: () => {},
       request: () => services.api.processUploadJob(id, actionOptions),
       commit: (result) => {
-        const job = safeUploadJob(result?.job, id)
-        if (!job) return
-        const current = uploadJobsRef.current.find((job) => job.id === id)
-        if (current?.status === 'cancelled' && job.status !== 'cancelled') return
+        requireUploadTransition(uploadJobsRef.current, id, ['queued', 'failed'])
+        const job = strictUploadJob(result?.job, id, 'needs_confirmation')
         replaceUploadJobs(upsertById(uploadJobsRef.current, job))
       },
       rollback: () => {},
       onError: (error) => {
         const current = uploadJobsRef.current.find((job) => job.id === id)
-        if (!current || current.status === 'cancelled') return
+        if (!current || !['queued', 'processing', 'failed'].includes(current.status)) return
         const failedJob = safeUploadJob(error?.job, id)
         if (!failedJob || failedJob.status !== 'failed') return
         replaceUploadJobs(upsertById(uploadJobsRef.current, failedJob))
@@ -531,12 +544,15 @@ export function AppProvider({ children, services = defaultAppServices }) {
       optimistic: () => {},
       request: () => services.api.confirmUploadJob(id, patch, actionOptions),
       commit: (result) => {
-        const job = safeUploadJob(result?.job, id)
-        if (!job || !result?.note) return
-        const current = uploadJobsRef.current.find((job) => job.id === id)
-        if (current?.status === 'cancelled') return
+        requireUploadTransition(uploadJobsRef.current, id, ['needs_confirmation'])
+        const job = strictUploadJob(result?.job, id, 'completed')
+        const note = sanitizePersistedNote(result?.note, {
+          expectedId: `note-${id}`,
+          expectedSourceJobId: id,
+        })
+        if (notesRef.current.some(({ id: noteId }) => noteId === note.id)) throw invalidUploadResponse()
         replaceUploadJobs(upsertById(uploadJobsRef.current, job))
-        replaceNotes(upsertById(notesRef.current, result.note, { prepend: true }))
+        replaceNotes(upsertById(notesRef.current, note, { prepend: true }))
       },
       rollback: () => {},
     }),
@@ -551,8 +567,12 @@ export function AppProvider({ children, services = defaultAppServices }) {
       optimistic: () => {},
       request: () => services.api.cancelUploadJob(id, actionOptions),
       commit: (result) => {
-        const job = safeUploadJob(result?.job, id)
-        if (!job) return
+        requireUploadTransition(
+          uploadJobsRef.current,
+          id,
+          ['queued', 'processing', 'failed', 'needs_confirmation', 'cancelled'],
+        )
+        const job = strictUploadJob(result?.job, id, 'cancelled')
         replaceUploadJobs(upsertById(uploadJobsRef.current, job))
       },
       rollback: () => {},
