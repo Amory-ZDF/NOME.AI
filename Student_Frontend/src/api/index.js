@@ -24,14 +24,51 @@ import {
   recordVariantVerification,
   RedoChronologyError,
 } from '../features/errors/masteryRules'
+import {
+  buildUploadJob,
+  MaterialRulesError,
+} from '../features/materials/materialRules'
+import {
+  confirmMaterialClassification,
+  MaterialProcessorError,
+  processMaterialJob,
+} from '../features/materials/mockMaterialProcessor'
+import {
+  applyNoteOrganization,
+  applyNotePatch,
+  NoteVersionError,
+  undoLastNoteVersion,
+} from '../features/materials/noteVersions'
 
 const repository = createMockRepository({ seedFactory: createSeedState })
+const cancelledUploadIds = new Set()
 
 const isRecord = (value) => value !== null && typeof value === 'object' && !Array.isArray(value)
 const hasId = (value, field = 'id') => typeof value?.[field] === 'string' && value[field].trim().length > 0
 const invalid = (message) => new ApiError(message, { status: 400, code: 'INVALID_INPUT' })
 const notFound = (entity, id) => new ApiError(`${entity} ${id} was not found`, { status: 404, code: 'NOT_FOUND' })
 const duplicate = (entity, id) => new ApiError(`${entity} ${id} already exists`, { status: 409, code: 'DUPLICATE_ID' })
+const domainError = (error, status = 400) => new ApiError(error.message, {
+  status,
+  code: error.code || 'INVALID_INPUT',
+  cause: error,
+})
+const uploadCancelled = () => new ApiError('This upload was cancelled', {
+  status: 409,
+  code: 'UPLOAD_CANCELLED',
+})
+const uploadAlreadyCompleted = () => new ApiError('This upload is already completed', {
+  status: 409,
+  code: 'UPLOAD_ALREADY_COMPLETED',
+})
+const invalidUploadState = (message = 'The upload job is not in a valid state for this action') => new ApiError(message, {
+  status: 409,
+  code: 'INVALID_JOB_STATE',
+})
+const invalidUploadMetadata = (message = 'Upload metadata contains invalid fields') => new ApiError(message, {
+  status: 400,
+  code: 'INVALID_UPLOAD_METADATA',
+})
 const masteryGateNotMet = () => new ApiError('Complete the independent variant before marking this mastered', {
   status: 409,
   code: 'MASTERY_GATE_NOT_MET',
@@ -51,6 +88,165 @@ const isNonemptyStringArray = (value) => Array.isArray(value) && value.every(isN
 const hasUniqueValues = (value) => new Set(value).size === value.length
 const isOneOf = (...values) => (value) => values.includes(value)
 const QUESTION_TYPES = Object.freeze(['choice', 'calculation', 'proof', 'fill_blank', 'reading', 'writing'])
+const UPLOAD_METADATA_FIELDS = new Set([
+  'id',
+  'fileName',
+  'mimeType',
+  'size',
+  'materialType',
+  'examBoard',
+  'subject',
+  'chapter',
+  'createdAt',
+])
+const MATERIAL_FIXTURE_BY_TYPE = Object.freeze({
+  class_note: 'alevel_handwritten_calculus_note',
+  teacher_material: 'alevel_handwritten_calculus_note',
+  homework: 'homework',
+  past_paper: 'alevel_past_paper',
+  mock_paper: 'alevel_past_paper',
+  mark_scheme: 'alevel_mark_scheme',
+  ielts_passage: 'ielts_reading_passage',
+  writing_speaking: 'ielts_reading_passage',
+  handwritten_draft: 'alevel_handwritten_calculus_note',
+  error_photo: 'error_photo',
+})
+const MATERIAL_TYPE_LABELS = Object.freeze({
+  class_note: 'Class Note',
+  teacher_material: 'Teacher Material',
+  homework: 'Homework',
+  past_paper: 'Past Paper',
+  mock_paper: 'Mock Paper',
+  mark_scheme: 'Mark Scheme',
+  ielts_passage: 'IELTS Passage',
+  writing_speaking: 'Writing & Speaking',
+  handwritten_draft: 'Handwritten Draft',
+  error_photo: 'Error Photo',
+})
+
+const isPlainRecord = (value) => {
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) return false
+  const prototype = Object.getPrototypeOf(value)
+  return prototype === Object.prototype || prototype === null
+}
+
+const cloneCommand = (value, onInvalid) => {
+  try {
+    return structuredClone(value)
+  } catch {
+    throw onInvalid()
+  }
+}
+
+const normalizeLegacyNote = (note) => {
+  const cloned = structuredClone(note)
+  const hasVersion = hasOwn(cloned, 'version')
+  const hasVersions = hasOwn(cloned, 'versions')
+  if (!hasVersion && !hasVersions) return { ...cloned, versions: [], version: 1 }
+  return cloned
+}
+
+const normalizeMaterialState = (state) => ({
+  ...state,
+  uploadJobs: Array.isArray(state.uploadJobs) ? state.uploadJobs : [],
+  notes: Array.isArray(state.notes) ? state.notes.map(normalizeLegacyNote) : [],
+})
+
+const persistMaterialMigration = () => repository.update(normalizeMaterialState)
+
+const createGeneratedId = () => globalThis.crypto?.randomUUID?.()
+  || `upload-${Date.now()}-${Math.random().toString(16).slice(2)}`
+
+const snapshotUploadMetadata = (input) => {
+  if (!isPlainRecord(input)) throw invalidUploadMetadata('Upload metadata must be an object')
+  const ownKeys = Reflect.ownKeys(input)
+  if (ownKeys.some((key) => typeof key !== 'string' || !UPLOAD_METADATA_FIELDS.has(key))) {
+    throw invalidUploadMetadata()
+  }
+  for (const key of ownKeys) {
+    const descriptor = Object.getOwnPropertyDescriptor(input, key)
+    if (!descriptor || !hasOwn(descriptor, 'value') || !descriptor.enumerable) {
+      throw invalidUploadMetadata()
+    }
+  }
+
+  const cloned = cloneCommand(input, invalidUploadMetadata)
+  const id = cloned.id === undefined ? createGeneratedId() : cloned.id
+  const createdAt = cloned.createdAt === undefined ? new Date().toISOString() : cloned.createdAt
+  try {
+    return buildUploadJob({
+      file: {
+        name: cloned.fileName,
+        type: cloned.mimeType,
+        size: cloned.size,
+      },
+      materialType: cloned.materialType,
+      examBoard: cloned.examBoard,
+      subject: cloned.subject,
+      chapter: cloned.chapter,
+      id,
+      createdAt,
+    })
+  } catch (error) {
+    if (error instanceof MaterialRulesError) throw domainError(error)
+    throw error
+  }
+}
+
+const fixtureFromFileName = (fileName) => {
+  const normalized = fileName.toLowerCase()
+  if (/(^|[_\s.-])ms([_\s.-]|$)|mark[\s_-]*scheme/.test(normalized)) return 'alevel_mark_scheme'
+  if (/(^|[_\s.-])qp([_\s.-]|$)|past[\s_-]*paper/.test(normalized)) return 'alevel_past_paper'
+  if (/error|mistake|wrong/.test(normalized)) return 'error_photo'
+  if (/ielts|reading|passage|writing|speaking/.test(normalized)) return 'ielts_reading_passage'
+  if (/homework|assignment/.test(normalized)) return 'homework'
+  if (/hand|draft|working|class[\s_-]*note/.test(normalized)) return 'alevel_handwritten_calculus_note'
+  return null
+}
+
+const selectMaterialFixture = (job) => fixtureFromFileName(job.fileName)
+  || MATERIAL_FIXTURE_BY_TYPE[job.materialType]
+
+const adaptProcessedJob = (job, processed) => {
+  const selectedFixtureMatchesType = processed.result.materialType === job.materialType
+  const fileStem = job.fileName.replace(/\.[^.]+$/, '').replace(/[_-]+/g, ' ').trim()
+  return {
+    ...processed,
+    materialType: job.materialType,
+    result: {
+      ...processed.result,
+      suggestedTitle: selectedFixtureMatchesType
+        ? processed.result.suggestedTitle
+        : `${MATERIAL_TYPE_LABELS[job.materialType]} — ${fileStem || 'Study material'}`,
+      materialType: job.materialType,
+    },
+  }
+}
+
+const assertUploadId = (id) => {
+  if (!isNonemptyString(id)) throw invalid('Upload job id is required')
+}
+
+const findUploadJob = (state, id) => state.uploadJobs.find((job) => job.id === id)
+
+const replaceUploadJob = (state, replacement) => ({
+  ...state,
+  uploadJobs: state.uploadJobs.map((job) => (job.id === replacement.id ? replacement : job)),
+})
+
+const throwTerminalUploadState = (job) => {
+  if (cancelledUploadIds.has(job.id) || job.status === 'cancelled') throw uploadCancelled()
+  if (job.status === 'completed') throw uploadAlreadyCompleted()
+}
+
+const mapMaterialDomainError = (error) => {
+  if (error instanceof ApiError) throw error
+  if (error instanceof MaterialRulesError || error instanceof MaterialProcessorError || error instanceof NoteVersionError) {
+    const status = ['NO_NOTE_VERSION', 'INVALID_JOB_STATE'].includes(error.code) ? 409 : 400
+    throw domainError(error, status)
+  }
+  throw error
+}
 const isAdjustmentRequest = (request) => isRecord(request)
   && isNonemptyString(request.id)
   && isNonemptyString(request.taskId)
@@ -90,12 +286,12 @@ const isSessionAttempt = (attempt) => isRecord(attempt)
   && typeof attempt.isCorrect === 'boolean'
 
 const isNoteBlock = (block) => isRecord(block)
-  && isOneOf('p', 'h', 'formula')(block.t)
+  && isOneOf('p', 'h', 'formula', 'image', 'list', 'highlight')(block.t)
   && isString(block.v)
 
 const isAiSuggestion = (suggestion) => isRecord(suggestion)
-  && isOneOf('split_note', 'link_topic', 'related_content')(suggestion.type)
-  && isString(suggestion.message)
+  && isOneOf('split_note', 'link_topic', 'related_content', 'add_tag', 'tag', 'append_content', 'content', 'link_error')(suggestion.type)
+  && (suggestion.message === undefined || isString(suggestion.message))
 
 const assertTask = (task) => {
   assertFields(task, 'Task', {
@@ -125,8 +321,8 @@ const assertTask = (task) => {
 
 const noteFieldValidators = Object.freeze({
   title: isNonemptyString,
-  folderId: isNonemptyString,
-  folderPath: isNonemptyString,
+  folderId: isNullableNonemptyString,
+  folderPath: isNullableNonemptyString,
   tags: isStringArray,
   linkedTopics: isStringArray,
   linkedErrors: isStringArray,
@@ -139,15 +335,6 @@ const noteFieldValidators = Object.freeze({
 
 const assertNote = (note) => {
   assertFields(note, 'Note', { id: isNonemptyString, ...noteFieldValidators })
-}
-
-const assertNotePatch = (patch) => {
-  if (!isRecord(patch)) throw invalid('Note patch must be an object')
-  if (hasOwn(patch, 'id')) throw invalid('Note.id is immutable')
-  Object.entries(patch).forEach(([field, value]) => {
-    const validate = noteFieldValidators[field]
-    if (!validate || !validate(value)) throw invalid(`Note.${field} is invalid`)
-  })
 }
 
 const assertRedoAttempt = (attempt) => {
@@ -443,27 +630,55 @@ const buildVariant = (current, sourceQuestion, verificationForErrorId) => {
   })
 }
 
-const updateStoredNote = async (id, patch) => {
+const invalidNotePatchError = () => domainError(new NoteVersionError(
+  'INVALID_NOTE_PATCH',
+  'Note patch contains invalid fields',
+))
+
+const snapshotNoteCommand = (patch, options = {}) => {
+  if (!isPlainRecord(patch) || !isPlainRecord(options)) throw invalidNotePatchError()
+  const patchClone = cloneCommand(patch, invalidNotePatchError)
+  const optionsClone = cloneCommand(options, invalidNotePatchError)
+  const changedAt = optionsClone.changedAt
+    ?? patchClone.changedAt
+    ?? patchClone.updatedAt
+    ?? new Date().toISOString()
+  const reason = optionsClone.reason ?? patchClone.reason ?? 'edit'
+  Reflect.deleteProperty(patchClone, 'changedAt')
+  Reflect.deleteProperty(patchClone, 'updatedAt')
+  Reflect.deleteProperty(patchClone, 'reason')
+  return { patch: patchClone, metadata: { changedAt, reason } }
+}
+
+const updateVersionedNote = async (id, recipe) => {
   if (!hasId({ id })) throw invalid('Note id is required')
-  assertNotePatch(patch)
-  const state = await repository.update((current) => {
-    if (!current.notes.some((note) => note.id === id)) throw notFound('Note', id)
-    return {
-      ...current,
-      notes: current.notes.map((note) => (note.id === id ? { ...note, ...patch } : note)),
-    }
-  })
-  return state.notes.find((note) => note.id === id)
+  try {
+    const state = await repository.update((current) => {
+      const materialState = normalizeMaterialState(current)
+      const note = materialState.notes.find((item) => item.id === id)
+      if (!note) throw notFound('Note', id)
+      const replacement = recipe(note)
+      return {
+        ...materialState,
+        notes: materialState.notes.map((item) => (item.id === id ? replacement : item)),
+      }
+    })
+    return state.notes.find((note) => note.id === id)
+  } catch (error) {
+    mapMaterialDomainError(error)
+  }
 }
 
 // ---------- Bootstrap (GET /api/student/bootstrap) ----------
 export function bootstrap() {
   if (!isMockMode) return http.get('/api/student/bootstrap')
-  return repository.bootstrap()
+  return persistMaterialMigration()
 }
 
-export function resetMockState() {
-  return repository.reset()
+export async function resetMockState() {
+  cancelledUploadIds.clear()
+  await repository.reset()
+  return persistMaterialMigration()
 }
 
 // ---------- Tasks ----------
@@ -638,18 +853,165 @@ export const verifyErrorVariant = async (id, result) => {
 }
 
 // ---------- Notes ----------
+export const listNotes = async () => {
+  if (!isMockMode) return http.get('/api/notes')
+  const state = await persistMaterialMigration()
+  return { notes: state.notes }
+}
+
 export const createNote = async (note) => {
   if (!isMockMode) return http.post('/api/notes', note)
   assertNote(note)
+  const persistedNote = normalizeLegacyNote(note)
   const state = await repository.update((current) => {
-    if (current.notes.some((item) => item.id === note.id)) throw duplicate('Note', note.id)
-    return { ...current, notes: [note, ...current.notes] }
+    const materialState = normalizeMaterialState(current)
+    if (materialState.notes.some((item) => item.id === persistedNote.id)) throw duplicate('Note', persistedNote.id)
+    return { ...materialState, notes: [persistedNote, ...materialState.notes] }
   })
-  return { note: state.notes.find((item) => item.id === note.id) }
+  return { note: state.notes.find((item) => item.id === persistedNote.id) }
 }
-export const updateNote = async (id, patch) => {
-  if (!isMockMode) return http.patch(`/api/notes/${id}`, patch)
-  return { note: await updateStoredNote(id, patch) }
+export const updateNote = async (id, patch, options = {}) => {
+  if (!isMockMode) return http.patch(`/api/notes/${encodeURIComponent(id)}`, patch)
+  const command = snapshotNoteCommand(patch, options)
+  return {
+    note: await updateVersionedNote(id, (note) => applyNotePatch(note, command.patch, command.metadata)),
+  }
+}
+
+export const organizeNote = async (id, suggestionIds, options = {}) => {
+  if (!isMockMode) return http.post(`/api/notes/${encodeURIComponent(id)}/organize`, { suggestionIds })
+  if (!isPlainRecord(options)) throw invalidNotePatchError()
+  const selectedIds = cloneCommand(suggestionIds, invalidNotePatchError)
+  const changedAt = options.changedAt !== undefined
+    ? options.changedAt
+    : new Date().toISOString()
+  return {
+    note: await updateVersionedNote(id, (note) => applyNoteOrganization(note, selectedIds, changedAt)),
+  }
+}
+
+export const undoNote = async (id, options = {}) => {
+  if (!isMockMode) return http.post(`/api/notes/${encodeURIComponent(id)}/undo`)
+  if (!isPlainRecord(options)) throw invalidNotePatchError()
+  const changedAt = options.changedAt !== undefined
+    ? options.changedAt
+    : new Date().toISOString()
+  return {
+    note: await updateVersionedNote(id, (note) => undoLastNoteVersion(note, changedAt)),
+  }
+}
+
+// ---------- Material uploads ----------
+export const createUploadJob = async (metadata, options = {}) => {
+  if (!isMockMode) return http.post('/api/material-uploads', metadata)
+  if (options?.signal?.aborted) throw new DOMException('The operation was aborted.', 'AbortError')
+  const job = snapshotUploadMetadata(metadata)
+  const state = await repository.update((current) => {
+    const materialState = normalizeMaterialState(current)
+    if (materialState.uploadJobs.some((item) => item.id === job.id)) throw duplicate('Upload job', job.id)
+    return { ...materialState, uploadJobs: [job, ...materialState.uploadJobs] }
+  })
+  if (options?.signal?.aborted) throw new DOMException('The operation was aborted.', 'AbortError')
+  return { job: state.uploadJobs.find((item) => item.id === job.id) }
+}
+
+export const processUploadJob = async (id, options = {}) => {
+  if (!isMockMode) return http.post(`/api/material-uploads/${encodeURIComponent(id)}/process`)
+  assertUploadId(id)
+  if (options?.signal?.aborted) throw new DOMException('The operation was aborted.', 'AbortError')
+  if (cancelledUploadIds.has(id)) throw uploadCancelled()
+
+  let processingJob
+  try {
+    await repository.update((current) => {
+      const materialState = normalizeMaterialState(current)
+      const job = findUploadJob(materialState, id)
+      if (!job) throw notFound('Upload job', id)
+      throwTerminalUploadState(job)
+      if (job.status !== 'queued') throw invalidUploadState('Only queued uploads can be processed')
+      processingJob = { ...job, status: 'processing', progress: Math.max(1, job.progress || 0) }
+      return replaceUploadJob(materialState, processingJob)
+    })
+
+    if (cancelledUploadIds.has(id)) throw uploadCancelled()
+    const fixtureKey = selectMaterialFixture(processingJob)
+    const processed = adaptProcessedJob(
+      processingJob,
+      processMaterialJob(processingJob, { fixtureKey }),
+    )
+    const state = await repository.update((current) => {
+      const materialState = normalizeMaterialState(current)
+      const currentJob = findUploadJob(materialState, id)
+      if (!currentJob) throw notFound('Upload job', id)
+      throwTerminalUploadState(currentJob)
+      if (currentJob.status !== 'processing') throw invalidUploadState('Only processing uploads can finish classification')
+      return replaceUploadJob(materialState, processed)
+    })
+    if (options?.signal?.aborted) throw new DOMException('The operation was aborted.', 'AbortError')
+    return { job: findUploadJob(state, id) }
+  } catch (error) {
+    if (!(error instanceof ApiError)) {
+      await repository.update((current) => {
+        const materialState = normalizeMaterialState(current)
+        const currentJob = findUploadJob(materialState, id)
+        if (!currentJob || currentJob.status !== 'processing' || cancelledUploadIds.has(id)) return materialState
+        return replaceUploadJob(materialState, { ...currentJob, status: 'queued', progress: 0 })
+      })
+    }
+    mapMaterialDomainError(error)
+  }
+}
+
+export const confirmUploadJob = async (id, patch, options = {}) => {
+  if (!isMockMode) return http.post(`/api/material-uploads/${encodeURIComponent(id)}/confirm`, patch)
+  assertUploadId(id)
+  if (options?.signal?.aborted) throw new DOMException('The operation was aborted.', 'AbortError')
+  const confirmationPatch = cloneCommand(patch, () => invalid('Classification patch must be serializable'))
+  try {
+    let confirmed
+    await repository.update((current) => {
+      const materialState = normalizeMaterialState(current)
+      const job = findUploadJob(materialState, id)
+      if (!job) throw notFound('Upload job', id)
+      throwTerminalUploadState(job)
+      if (job.status !== 'needs_confirmation') {
+        throw invalidUploadState('Only uploads awaiting confirmation can be confirmed')
+      }
+      confirmed = confirmMaterialClassification(job, confirmationPatch)
+      if (materialState.notes.some((note) => note.id === confirmed.note.id)) {
+        throw duplicate('Note', confirmed.note.id)
+      }
+      return {
+        ...replaceUploadJob(materialState, confirmed.job),
+        notes: [confirmed.note, ...materialState.notes],
+      }
+    })
+    if (options?.signal?.aborted) throw new DOMException('The operation was aborted.', 'AbortError')
+    return structuredClone(confirmed)
+  } catch (error) {
+    mapMaterialDomainError(error)
+  }
+}
+
+export const cancelUploadJob = async (id, options = {}) => {
+  if (!isMockMode) return http.post(`/api/material-uploads/${encodeURIComponent(id)}/cancel`)
+  assertUploadId(id)
+  if (options?.signal?.aborted) throw new DOMException('The operation was aborted.', 'AbortError')
+  cancelledUploadIds.add(id)
+  try {
+    const state = await repository.update((current) => {
+      const materialState = normalizeMaterialState(current)
+      const job = findUploadJob(materialState, id)
+      if (!job) throw notFound('Upload job', id)
+      if (job.status === 'completed') throw uploadAlreadyCompleted()
+      if (job.status === 'cancelled') return materialState
+      return replaceUploadJob(materialState, { ...job, status: 'cancelled' })
+    })
+    return { job: findUploadJob(state, id) }
+  } catch (error) {
+    cancelledUploadIds.delete(id)
+    mapMaterialDomainError(error)
+  }
 }
 
 // ---------- Exercise session ----------

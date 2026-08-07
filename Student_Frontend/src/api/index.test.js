@@ -2,14 +2,20 @@ import { afterEach, expect, test, vi } from 'vitest'
 import {
   addErrors,
   bootstrap,
+  cancelUploadJob,
   completeTask,
   createNote,
   createTask,
+  createUploadJob,
+  confirmUploadJob,
   generateVariant,
   getBankExerciseSet,
   getExerciseSet,
   getSessionSummary,
+  listNotes,
   markErrorMastered,
+  organizeNote,
+  processUploadJob,
   reportTaskAdjustment,
   resetMockState,
   scheduleErrorVariant,
@@ -18,9 +24,12 @@ import {
   upsertErrors,
   updateNote,
   updateSettings,
+  undoNote,
   verifyErrorVariant,
 } from './index'
 import { isCompleteVariantResult } from '../features/exercise/exerciseContracts'
+import { MATERIAL_TYPES, MAX_FILE_BYTES } from '../features/materials/materialRules'
+import { normalizeNoteSuggestions } from '../features/materials/noteVersions'
 
 const makeTask = (overrides = {}) => ({
   id: 't-new', title: 'New task', type: 'ai_recommended', subject: 'A-Level Math',
@@ -39,6 +48,16 @@ const makeNote = (overrides = {}) => ({
   tags: [], linkedTopics: [], linkedErrors: [], source: 'typed',
   createdAt: '2026-08-06', updatedAt: '2026-08-06',
   content: [{ t: 'p', v: 'New content' }], aiSuggestions: [], ...overrides,
+})
+
+const makeUploadMetadata = (overrides = {}) => ({
+  id: 'job-1',
+  fileName: 'notes.jpg',
+  mimeType: 'image/jpeg',
+  size: 1000,
+  materialType: 'handwritten_draft',
+  createdAt: '2026-08-07T08:00:00.000Z',
+  ...overrides,
 })
 
 const makeError = (overrides = {}) => {
@@ -265,8 +284,9 @@ test('createNote returns and persists the note', async () => {
   await resetMockState()
   const note = makeNote()
 
-  await expect(createNote(note)).resolves.toEqual({ note })
-  await expect(bootstrap()).resolves.toMatchObject({ notes: expect.arrayContaining([note]) })
+  const versionedNote = { ...note, versions: [], version: 1 }
+  await expect(createNote(note)).resolves.toEqual({ note: versionedNote })
+  await expect(bootstrap()).resolves.toMatchObject({ notes: expect.arrayContaining([versionedNote]) })
 })
 
 test('updateNote returns and persists the note patch', async () => {
@@ -279,6 +299,250 @@ test('updateNote returns and persists the note patch', async () => {
   await expect(bootstrap()).resolves.toMatchObject({
     notes: expect.arrayContaining([expect.objectContaining({ id: 'n1', title: 'Edited title' })]),
   })
+})
+
+test('persists queued, confirmation, and completed upload states with metadata only', async () => {
+  // Catches a lifecycle implementation that returns transient jobs or stores caller-owned file bytes.
+  await resetMockState()
+  const rawBytes = new Uint8Array([1, 2, 3])
+  const metadata = makeUploadMetadata({
+    examBoard: 'Cambridge International',
+    subject: 'A-Level Math',
+    chapter: 'Calculus',
+  })
+
+  const queued = await createUploadJob(metadata)
+  expect(queued.job).toEqual({
+    ...metadata,
+    updatedAt: metadata.createdAt,
+    progress: 0,
+    status: 'queued',
+  })
+  expect(queued.job).not.toHaveProperty('file')
+  expect(queued.job).not.toHaveProperty('rawBytes')
+  expect(JSON.stringify(queued.job)).not.toContain(String(rawBytes))
+
+  const processed = await processUploadJob(metadata.id)
+  expect(processed.job).toMatchObject({
+    id: metadata.id,
+    status: 'needs_confirmation',
+    progress: 100,
+    result: { materialType: 'handwritten_draft' },
+  })
+
+  const completed = await confirmUploadJob(metadata.id, {
+    subject: 'A-Level Math',
+    folderId: 'f-math-ch7',
+    folderPath: 'A-Level Math / Ch7 Calculus',
+  })
+  expect(completed).toMatchObject({
+    job: { id: metadata.id, status: 'completed', progress: 100 },
+    note: {
+      id: `note-${metadata.id}`,
+      sourceJobId: metadata.id,
+      source: 'handwritten',
+      version: 1,
+      versions: [],
+    },
+  })
+
+  const reloaded = await bootstrap()
+  expect(reloaded.uploadJobs).toContainEqual(completed.job)
+  expect(reloaded.notes).toContainEqual(completed.note)
+})
+
+test('snapshots upload metadata, enforces exact file boundaries, and rejects byte-bearing payloads atomically', async () => {
+  // Catches validation after repository latency, a decimal-MB limit, or accidental File/base64 persistence.
+  await resetMockState()
+  const mutable = makeUploadMetadata({ id: 'job-snapshot', size: MAX_FILE_BYTES })
+  const operation = createUploadJob(mutable)
+  mutable.fileName = 'mutated.exe'
+  mutable.mimeType = 'application/x-msdownload'
+  mutable.size = MAX_FILE_BYTES + 1
+
+  await expect(operation).resolves.toMatchObject({
+    job: { id: 'job-snapshot', fileName: 'notes.jpg', mimeType: 'image/jpeg', size: MAX_FILE_BYTES },
+  })
+  await expect(createUploadJob(makeUploadMetadata({ id: 'job-too-large', size: MAX_FILE_BYTES + 1 })))
+    .rejects.toMatchObject({ name: 'ApiError', status: 400, code: 'FILE_TOO_LARGE' })
+  await expect(createUploadJob(makeUploadMetadata({ id: 'job-unsupported', mimeType: 'text/plain' })))
+    .rejects.toMatchObject({ name: 'ApiError', status: 400, code: 'UNSUPPORTED_TYPE' })
+
+  for (const [id, unsafe] of [
+    ['job-file', { file: { name: 'hidden.pdf', type: 'application/pdf', size: 1 } }],
+    ['job-bytes', { rawBytes: new Uint8Array([1]) }],
+    ['job-base64', { base64: 'AA==' }],
+  ]) {
+    await expect(createUploadJob(makeUploadMetadata({ id, ...unsafe })))
+      .rejects.toMatchObject({ name: 'ApiError', status: 400, code: 'INVALID_UPLOAD_METADATA' })
+  }
+  expect((await bootstrap()).uploadJobs.map(({ id }) => id)).toEqual(['job-snapshot'])
+})
+
+test.each([
+  ['class_note', 'class-notes.pdf'],
+  ['teacher_material', 'teacher-slides.pdf'],
+  ['homework', 'calculus-homework.pdf'],
+  ['past_paper', '9709_s22_qp_31.pdf'],
+  ['mock_paper', 'mock-exam.pdf'],
+  ['mark_scheme', '9709_s22_ms_31.pdf'],
+  ['ielts_passage', 'urban-bees-reading.pdf'],
+  ['writing_speaking', 'ielts-writing-task-2.pdf'],
+  ['handwritten_draft', 'calculus-working.jpg'],
+  ['error_photo', 'stationary-point-error.webp'],
+])('selects a deterministic processing fallback for %s', async (materialType, fileName) => {
+  // Catches one of the ten documented material types falling through to an unknown fixture.
+  const id = `job-${materialType}`
+  await createUploadJob(makeUploadMetadata({ id, materialType, fileName }))
+  const first = await processUploadJob(id)
+
+  expect(MATERIAL_TYPES).toContain(materialType)
+  expect(first.job).toMatchObject({
+    id,
+    materialType,
+    status: 'needs_confirmation',
+    result: {
+      materialType,
+      suggestedTitle: expect.any(String),
+      content: expect.any(Array),
+      confidence: expect.any(Number),
+    },
+  })
+})
+
+test('makes cancellation terminal before and during processing without resurrecting a job', async () => {
+  // Catches a late processing write overwriting a cancellation or cancelled work being confirmable.
+  await resetMockState()
+  await createUploadJob(makeUploadMetadata({ id: 'job-cancelled' }))
+  await expect(cancelUploadJob('job-cancelled')).resolves.toMatchObject({
+    job: { id: 'job-cancelled', status: 'cancelled' },
+  })
+  await expect(processUploadJob('job-cancelled')).rejects.toMatchObject({ status: 409, code: 'UPLOAD_CANCELLED' })
+  await expect(confirmUploadJob('job-cancelled', {})).rejects.toMatchObject({ status: 409, code: 'UPLOAD_CANCELLED' })
+
+  await createUploadJob(makeUploadMetadata({ id: 'job-race' }))
+  const processing = processUploadJob('job-race')
+  const processingOutcome = processing.then(
+    (value) => ({ value }),
+    (error) => ({ error }),
+  )
+  const cancelling = cancelUploadJob('job-race')
+  await expect(cancelling).resolves.toMatchObject({ job: { status: 'cancelled' } })
+  expect((await processingOutcome).error).toMatchObject({ status: 409, code: 'UPLOAD_CANCELLED' })
+  expect((await bootstrap()).uploadJobs.find(({ id }) => id === 'job-race')).toMatchObject({ status: 'cancelled' })
+})
+
+test('uses stable terminal rules and confirms job plus note atomically', async () => {
+  // Catches repeat confirmation, completed cancellation, or a note collision partially completing the job.
+  await resetMockState()
+  await createUploadJob(makeUploadMetadata({ id: 'job-complete' }))
+  await processUploadJob('job-complete')
+  await confirmUploadJob('job-complete', {})
+  await expect(confirmUploadJob('job-complete', {})).rejects.toMatchObject({
+    status: 409, code: 'UPLOAD_ALREADY_COMPLETED',
+  })
+  await expect(cancelUploadJob('job-complete')).rejects.toMatchObject({
+    status: 409, code: 'UPLOAD_ALREADY_COMPLETED',
+  })
+
+  await createNote(makeNote({ id: 'note-job-collision', title: 'Existing collision' }))
+  await createUploadJob(makeUploadMetadata({ id: 'job-collision' }))
+  await processUploadJob('job-collision')
+  const before = await bootstrap()
+  await expect(confirmUploadJob('job-collision', {})).rejects.toMatchObject({
+    status: 409, code: 'DUPLICATE_ID',
+  })
+  const after = await bootstrap()
+  expect(after.uploadJobs.find(({ id }) => id === 'job-collision')).toMatchObject({ status: 'needs_confirmation' })
+  expect(after.notes).toEqual(before.notes)
+})
+
+test('bootstraps versioned notes and preserves source snapshots through update, organize, undo, and reload', async () => {
+  // Catches legacy notes staying half-migrated or a reload dropping version/source provenance.
+  await resetMockState()
+  const listed = await listNotes()
+  expect(listed.notes.length).toBeGreaterThan(0)
+  expect(listed.notes.every(({ version, versions }) => version === 1 && Array.isArray(versions))).toBe(true)
+
+  const edited = await updateNote('n1', {
+    title: 'Edited title',
+    changedAt: '2026-08-07T09:00:00.000Z',
+    reason: 'title_edit',
+  })
+  expect(edited.note).toMatchObject({ title: 'Edited title', version: 2 })
+  expect(edited.note.versions[0]).toMatchObject({ version: 1, source: 'typed', reason: 'title_edit' })
+
+  const legacySuggestionId = normalizeNoteSuggestions(edited.note)[0].id
+  const organized = await organizeNote('n1', [legacySuggestionId], {
+    changedAt: '2026-08-07T09:01:00.000Z',
+  })
+  expect(organized.note).toMatchObject({ version: 3, source: 'ai_organized' })
+  const undone = await undoNote('n1', { changedAt: '2026-08-07T09:02:00.000Z' })
+  expect(undone.note).toMatchObject({ version: 4, source: 'typed', title: 'Edited title' })
+  expect(undone.note.versions.map(({ source }) => source)).toEqual(['typed', 'typed', 'ai_organized'])
+
+  const reloaded = (await listNotes()).notes.find(({ id }) => id === 'n1')
+  expect(reloaded).toEqual(undone.note)
+})
+
+test('serializes concurrent note edits and rejects unknown or invalid note commands without mutation', async () => {
+  // Catches lost updates and domain errors escaping as untyped failures after an async transaction.
+  await resetMockState()
+  await Promise.all([
+    updateNote('n1', { title: 'Concurrent title', changedAt: '2026-08-07T10:00:00.000Z' }),
+    updateNote('n1', { tags: ['concurrent-tag'], changedAt: '2026-08-07T10:01:00.000Z' }),
+  ])
+  const concurrent = (await listNotes()).notes.find(({ id }) => id === 'n1')
+  expect(concurrent).toMatchObject({ title: 'Concurrent title', tags: ['concurrent-tag'], version: 3 })
+
+  const before = await listNotes()
+  await expect(updateNote('missing', { title: 'No target' })).rejects.toMatchObject({ status: 404, code: 'NOT_FOUND' })
+  await expect(organizeNote('missing', [])).rejects.toMatchObject({ status: 404, code: 'NOT_FOUND' })
+  await expect(undoNote('missing')).rejects.toMatchObject({ status: 404, code: 'NOT_FOUND' })
+  await expect(updateNote('n1', { source: 'photo' })).rejects.toMatchObject({ status: 400, code: 'INVALID_NOTE_PATCH' })
+  expect(await listNotes()).toEqual(before)
+})
+
+test('uses the documented real material and note routes with exact bodies', async () => {
+  // Catches real-mode paths or request bodies drifting while the repository-backed adapter stays green.
+  const get = vi.fn((path) => Promise.resolve({ path }))
+  const post = vi.fn((path, body) => Promise.resolve({ path, body }))
+  const patch = vi.fn((path, body) => Promise.resolve({ path, body }))
+  vi.resetModules()
+  vi.doMock('./client', () => ({
+    ApiError: class ApiError extends Error {},
+    http: { get, post, patch },
+    isMockMode: false,
+  }))
+
+  try {
+    const realApi = await import('./index')
+    const metadata = makeUploadMetadata({ id: 'job/1' })
+    const confirmation = { subject: 'A-Level Math' }
+    const notePatch = { title: 'Edited' }
+    const suggestionIds = ['suggestion-1']
+
+    await realApi.listNotes()
+    await realApi.createUploadJob(metadata)
+    await realApi.processUploadJob('job/1')
+    await realApi.confirmUploadJob('job/1', confirmation)
+    await realApi.cancelUploadJob('job/1')
+    await realApi.updateNote('note/1', notePatch)
+    await realApi.organizeNote('note/1', suggestionIds)
+    await realApi.undoNote('note/1')
+
+    expect(get).toHaveBeenCalledWith('/api/notes')
+    expect(post).toHaveBeenNthCalledWith(1, '/api/material-uploads', metadata)
+    expect(post).toHaveBeenNthCalledWith(2, '/api/material-uploads/job%2F1/process')
+    expect(post).toHaveBeenNthCalledWith(3, '/api/material-uploads/job%2F1/confirm', confirmation)
+    expect(post).toHaveBeenNthCalledWith(4, '/api/material-uploads/job%2F1/cancel')
+    expect(patch).toHaveBeenCalledWith('/api/notes/note%2F1', notePatch)
+    expect(post).toHaveBeenNthCalledWith(5, '/api/notes/note%2F1/organize', { suggestionIds })
+    expect(post).toHaveBeenNthCalledWith(6, '/api/notes/note%2F1/undo')
+  } finally {
+    vi.doUnmock('./client')
+    vi.resetModules()
+  }
 })
 
 test('submitSession returns an ID and persists the session by session ID', async () => {
@@ -571,10 +835,10 @@ test('updateNote rejects ID replacement and mistyped fields without changing the
   const before = (await bootstrap()).notes
 
   await expect(updateNote('n1', { id: 'n2', title: 'Duplicate identity' })).rejects.toMatchObject({
-    name: 'ApiError', code: 'INVALID_INPUT',
+    name: 'ApiError', code: 'INVALID_NOTE_PATCH',
   })
   await expect(updateNote('n1', { tags: 'organized' })).rejects.toMatchObject({
-    name: 'ApiError', code: 'INVALID_INPUT',
+    name: 'ApiError', code: 'INVALID_NOTE_PATCH',
   })
   expect((await bootstrap()).notes).toEqual(before)
 })

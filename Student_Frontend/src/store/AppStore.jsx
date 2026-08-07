@@ -6,10 +6,31 @@ import { isTaskAdjustmentEligible } from '../features/tasks/taskRules'
 import { isCompleteVariantResult, isRenderableExerciseSet } from '../features/exercise/exerciseContracts'
 import { mergeErrorCards } from '../features/errors/errorCards'
 import { applyRedoAttempt, canMarkMastered, recordVariantVerification } from '../features/errors/masteryRules'
+import {
+  applyNoteOrganization,
+  applyNotePatch,
+  normalizeNoteSuggestions,
+  undoLastNoteVersion,
+} from '../features/materials/noteVersions'
 
 const AppContext = createContext(null)
 
 const dateOnly = (now) => now.toISOString().slice(0, 10)
+const UPLOAD_JOB_FIELDS = Object.freeze([
+  'id', 'fileName', 'mimeType', 'size', 'materialType',
+  'examBoard', 'subject', 'chapter', 'folderId', 'folderPath',
+  'createdAt', 'updatedAt', 'progress', 'status', 'result',
+])
+const uploadJobMetadata = (job) => Object.fromEntries(
+  UPLOAD_JOB_FIELDS
+    .filter((field) => Object.prototype.hasOwnProperty.call(job, field) && job[field] !== undefined)
+    .map((field) => [field, structuredClone(job[field])]),
+)
+const upsertById = (items, replacement, { prepend = false } = {}) => {
+  const index = items.findIndex((item) => item.id === replacement.id)
+  if (index < 0) return prepend ? [replacement, ...items] : [...items, replacement]
+  return items.map((item, itemIndex) => (itemIndex === index ? replacement : item))
+}
 
 export function AppProvider({ children, services = defaultAppServices }) {
   const [bootStatus, setBootStatus] = useState('loading')
@@ -21,6 +42,7 @@ export function AppProvider({ children, services = defaultAppServices }) {
   const [learningSummary, setLearningSummary] = useState(null)
   const [errors, setErrors] = useState([])
   const [notes, setNotes] = useState([])
+  const [uploadJobs, setUploadJobs] = useState([])
   const [noteFolders, setNoteFolders] = useState([])
   const [settings, setSettings] = useState(null)
   const [exerciseCache, setExerciseCache] = useState({})
@@ -43,6 +65,7 @@ export function AppProvider({ children, services = defaultAppServices }) {
   const taskAdjustmentsRef = useRef([])
   const errorsRef = useRef([])
   const notesRef = useRef([])
+  const uploadJobsRef = useRef([])
   const settingsRef = useRef(null)
   const exerciseCacheRef = useRef({})
   const sessionsRef = useRef({})
@@ -64,6 +87,11 @@ export function AppProvider({ children, services = defaultAppServices }) {
   const replaceNotes = useCallback((next) => {
     notesRef.current = next
     setNotes(next)
+  }, [])
+  const replaceUploadJobs = useCallback((next) => {
+    const metadataOnly = next.map(uploadJobMetadata)
+    uploadJobsRef.current = metadataOnly
+    setUploadJobs(metadataOnly)
   }, [])
   const replaceSettings = useCallback((next) => {
     settingsRef.current = next
@@ -109,6 +137,7 @@ export function AppProvider({ children, services = defaultAppServices }) {
       setLearningSummary(data.learningSummary || null)
       replaceErrors(data.errors)
       replaceNotes(data.notes)
+      replaceUploadJobs(data.uploadJobs || [])
       setNoteFolders(data.noteFolders)
       replaceSettings(data.settings)
       replaceExerciseCache({})
@@ -127,7 +156,7 @@ export function AppProvider({ children, services = defaultAppServices }) {
       }
       return undefined
     }
-  }, [replaceErrors, replaceExerciseCache, replaceNotes, replaceSessionSummaries, replaceSessions, replaceSettings, replaceTaskAdjustments, replaceTasks, services])
+  }, [replaceErrors, replaceExerciseCache, replaceNotes, replaceSessionSummaries, replaceSessions, replaceSettings, replaceTaskAdjustments, replaceTasks, replaceUploadJobs, services])
 
   useEffect(() => {
     mounted.current = true
@@ -144,6 +173,7 @@ export function AppProvider({ children, services = defaultAppServices }) {
   const runAction = useCallback((key, collection, createOptions, actionOptions = {}) => {
     const operationKey = actionOptions.operationKey || key
     const pendingKey = actionOptions.pendingKey || key
+    const signal = actionOptions.signal
     if (actionCounts.current.has(operationKey)) {
       const error = new Error('This task action is already in progress.')
       showToast(error.message, 'error')
@@ -163,7 +193,9 @@ export function AppProvider({ children, services = defaultAppServices }) {
       const options = createOptions()
       return runRecoverableAction({
         ...options,
-        isActive: () => mounted.current && generation === actionGeneration.current,
+        isActive: () => mounted.current
+          && generation === actionGeneration.current
+          && !signal?.aborted,
         onError: (error) => {
           options.onError?.(error)
           showToast(error.message || 'Unable to save your changes. Please try again.', 'error')
@@ -442,6 +474,78 @@ export function AppProvider({ children, services = defaultAppServices }) {
     }))
   }, [replaceNotes, runAction, services])
 
+  const startMaterialUpload = useCallback((metadata, actionOptions = {}) => {
+    const actionNow = services.now()
+    const authoredMetadata = {
+      ...metadata,
+      id: metadata.id || services.createId(),
+      createdAt: metadata.createdAt || actionNow.toISOString(),
+    }
+    return runAction('upload:create', 'uploads:create', () => ({
+      snapshot: uploadJobsRef.current,
+      optimistic: () => {},
+      request: () => services.api.createUploadJob(authoredMetadata, actionOptions),
+      commit: (result) => {
+        if (!result?.job || result.job.id !== authoredMetadata.id) return
+        replaceUploadJobs(upsertById(uploadJobsRef.current, result.job, { prepend: true }))
+      },
+      rollback: () => {},
+    }), { signal: actionOptions.signal })
+  }, [replaceUploadJobs, runAction, services])
+
+  const processMaterialUpload = useCallback((id, actionOptions = {}) => runAction(
+    `upload:process:${id}`,
+    `uploads:process:${id}`,
+    () => ({
+      snapshot: uploadJobsRef.current,
+      optimistic: () => {},
+      request: () => services.api.processUploadJob(id, actionOptions),
+      commit: (result) => {
+        if (!result?.job || result.job.id !== id) return
+        const current = uploadJobsRef.current.find((job) => job.id === id)
+        if (current?.status === 'cancelled' && result.job.status !== 'cancelled') return
+        replaceUploadJobs(upsertById(uploadJobsRef.current, result.job))
+      },
+      rollback: () => {},
+    }),
+    { signal: actionOptions.signal },
+  ), [replaceUploadJobs, runAction, services])
+
+  const confirmMaterialUpload = useCallback((id, patch, actionOptions = {}) => runAction(
+    `upload:confirm:${id}`,
+    [`uploads:confirm:${id}`, 'notes'],
+    () => ({
+      snapshot: { uploadJobs: uploadJobsRef.current, notes: notesRef.current },
+      optimistic: () => {},
+      request: () => services.api.confirmUploadJob(id, patch, actionOptions),
+      commit: (result) => {
+        if (!result?.job || result.job.id !== id || !result?.note) return
+        const current = uploadJobsRef.current.find((job) => job.id === id)
+        if (current?.status === 'cancelled') return
+        replaceUploadJobs(upsertById(uploadJobsRef.current, result.job))
+        replaceNotes(upsertById(notesRef.current, result.note, { prepend: true }))
+      },
+      rollback: () => {},
+    }),
+    { signal: actionOptions.signal },
+  ), [replaceNotes, replaceUploadJobs, runAction, services])
+
+  const cancelMaterialUpload = useCallback((id, actionOptions = {}) => runAction(
+    `upload:cancel:${id}`,
+    `uploads:cancel:${id}`,
+    () => ({
+      snapshot: uploadJobsRef.current,
+      optimistic: () => {},
+      request: () => services.api.cancelUploadJob(id, actionOptions),
+      commit: (result) => {
+        if (!result?.job || result.job.id !== id) return
+        replaceUploadJobs(upsertById(uploadJobsRef.current, result.job))
+      },
+      rollback: () => {},
+    }),
+    { signal: actionOptions.signal },
+  ), [replaceUploadJobs, runAction, services])
+
   const loadExerciseSet = useCallback(({ taskId, bankSetId } = {}) => {
     const id = taskId || bankSetId
     if (typeof id !== 'string' || id.trim().length === 0 || (taskId && bankSetId)) {
@@ -483,12 +587,77 @@ export function AppProvider({ children, services = defaultAppServices }) {
 
   const updateNote = useCallback((id, patch) => {
     const actionNow = services.now()
-    const updatedPatch = { ...patch, updatedAt: dateOnly(actionNow) }
-    return runAction(`updateNote:${id}`, 'notes', () => ({
+    const changedAt = actionNow.toISOString()
+    const metadata = { changedAt, reason: 'edit' }
+    const legacyOrganization = patch !== null
+      && typeof patch === 'object'
+      && !Array.isArray(patch)
+      && patch.source === 'ai_organized'
+      && Object.keys(patch).every((field) => ['source', 'tags'].includes(field))
+    if (legacyOrganization) {
+      const sourceNote = notesRef.current.find((note) => note.id === id)
+      const suggestionIds = sourceNote
+        ? normalizeNoteSuggestions(sourceNote).map(({ id: suggestionId }) => suggestionId)
+        : []
+      return runAction(`note:update:${id}`, 'notes', () => ({
+        snapshot: notesRef.current,
+        optimistic: () => replaceNotes(notesRef.current.map((note) => (
+          note.id === id ? applyNoteOrganization(note, suggestionIds, changedAt) : note
+        ))),
+        request: () => services.api.organizeNote(id, suggestionIds, { changedAt }),
+        commit: (result) => {
+          if (!result?.note || result.note.id !== id) return
+          replaceNotes(notesRef.current.map((note) => (
+            note.id === id ? { ...note, ...result.note } : note
+          )))
+        },
+        rollback: replaceNotes,
+      }))
+    }
+    return runAction(`note:update:${id}`, 'notes', () => ({
       snapshot: notesRef.current,
-      optimistic: () => replaceNotes(notesRef.current.map((note) => (note.id === id ? { ...note, ...updatedPatch } : note))),
-      request: () => services.api.updateNote(id, updatedPatch),
-      commit: () => {},
+      optimistic: () => replaceNotes(notesRef.current.map((note) => (
+        note.id === id ? applyNotePatch(note, patch, metadata) : note
+      ))),
+      request: () => services.api.updateNote(id, { ...patch, ...metadata }),
+      commit: (result) => {
+        if (!result?.note || result.note.id !== id) return
+        replaceNotes(notesRef.current.map((note) => (
+          note.id === id ? { ...note, ...result.note } : note
+        )))
+      },
+      rollback: replaceNotes,
+    }))
+  }, [replaceNotes, runAction, services])
+
+  const organizeNote = useCallback((id, suggestionIds) => {
+    const changedAt = services.now().toISOString()
+    return runAction(`note:organize:${id}`, 'notes', () => ({
+      snapshot: notesRef.current,
+      optimistic: () => replaceNotes(notesRef.current.map((note) => (
+        note.id === id ? applyNoteOrganization(note, suggestionIds, changedAt) : note
+      ))),
+      request: () => services.api.organizeNote(id, suggestionIds, { changedAt }),
+      commit: (result) => {
+        if (!result?.note || result.note.id !== id) return
+        replaceNotes(upsertById(notesRef.current, result.note))
+      },
+      rollback: replaceNotes,
+    }))
+  }, [replaceNotes, runAction, services])
+
+  const undoNote = useCallback((id) => {
+    const changedAt = services.now().toISOString()
+    return runAction(`note:undo:${id}`, 'notes', () => ({
+      snapshot: notesRef.current,
+      optimistic: () => replaceNotes(notesRef.current.map((note) => (
+        note.id === id ? undoLastNoteVersion(note, changedAt) : note
+      ))),
+      request: () => services.api.undoNote(id, { changedAt }),
+      commit: (result) => {
+        if (!result?.note || result.note.id !== id) return
+        replaceNotes(upsertById(notesRef.current, result.note))
+      },
       rollback: replaceNotes,
     }))
   }, [replaceNotes, runAction, services])
@@ -600,15 +769,22 @@ export function AppProvider({ children, services = defaultAppServices }) {
     rollback: replaceSettings,
   })), [replaceSettings, runAction, services])
 
-  const isActionPending = useCallback((key) => pendingActions.has(key), [pendingActions])
+  const isActionPending = useCallback((key) => {
+    if (pendingActions.has(key)) return true
+    if (key.startsWith('updateNote:')) {
+      return pendingActions.has(`note:update:${key.slice('updateNote:'.length)}`)
+    }
+    return false
+  }, [pendingActions])
 
   return (
     <AppContext.Provider value={{
       booted: bootStatus === 'ready', bootStatus, bootError, pendingActions, retryBootstrap, isActionPending,
-      tasks, taskAdjustments, greeting, moduleStats, learningSummary, errors, notes, noteFolders, settings, exerciseCache, sessions, sessionSummaries, lastSession, toast,
+      tasks, taskAdjustments, greeting, moduleStats, learningSummary, errors, notes, uploadJobs, noteFolders, settings, exerciseCache, sessions, sessionSummaries, lastSession, toast,
       showToast, completeTask, requestTaskAdjustment, addTask,
       addErrors, addSessionErrors, markErrorMastered, recordRedo, scheduleErrorVariant, verifyErrorVariant, loadSessionSummary,
-      addNote, updateNote, loadExerciseSet, saveSession, generateVariant, updateSettings,
+      addNote, startMaterialUpload, processMaterialUpload, confirmMaterialUpload, cancelMaterialUpload,
+      updateNote, organizeNote, undoNote, loadExerciseSet, saveSession, generateVariant, updateSettings,
     }}>
       {children}
     </AppContext.Provider>

@@ -2,6 +2,7 @@ import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { expect, test, vi } from 'vitest'
 import { AppProvider, useApp } from './AppStore'
 import { createAppServices } from './services'
+import { applyNoteOrganization, undoLastNoteVersion } from '../features/materials/noteVersions'
 
 const bootData = {
   tasks: [{ id: 't1', type: 'teacher_assigned', status: 'pending' }],
@@ -9,6 +10,7 @@ const bootData = {
   sessions: {},
   errors: [],
   notes: [],
+  uploadJobs: [],
   noteFolders: [],
   settings: { tone: 50 },
 }
@@ -91,6 +93,37 @@ const validError = (overrides = {}) => ({
   ...overrides,
 })
 
+const validNote = (overrides = {}) => ({
+  id: 'n1',
+  title: 'Original note',
+  folderId: 'f-math',
+  folderPath: 'A-Level Math',
+  tags: ['calculus'],
+  content: [{ t: 'p', v: 'Original content' }],
+  linkedTopics: ['topic-existing'],
+  linkedErrors: [],
+  aiSuggestions: [{ id: 's-tag', type: 'add_tag', tag: 'exam-ready' }],
+  source: 'typed',
+  createdAt: '2026-08-01T00:00:00.000Z',
+  updatedAt: '2026-08-01T00:00:00.000Z',
+  versions: [],
+  version: 1,
+  ...overrides,
+})
+
+const validUploadJob = (overrides = {}) => ({
+  id: 'job-1',
+  fileName: 'notes.jpg',
+  mimeType: 'image/jpeg',
+  size: 1000,
+  materialType: 'handwritten_draft',
+  createdAt: '2026-08-06T00:00:00.000Z',
+  updatedAt: '2026-08-06T00:00:00.000Z',
+  progress: 0,
+  status: 'queued',
+  ...overrides,
+})
+
 const scheduledErrorVariant = (error = validError({
   status: 'verification_due',
   redoHistory: [{ attemptedAt: '2026-08-06T00:00:00.000Z', answer: '2x', isCorrect: true, timeSpent: 20 }],
@@ -159,6 +192,17 @@ function createApi(overrides = {}) {
     }),
     createNote: (note) => Promise.resolve({ note }),
     updateNote: () => Promise.resolve({ note: { id: 'n1' } }),
+    createUploadJob: (metadata) => Promise.resolve({
+      job: { ...metadata, updatedAt: metadata.createdAt, progress: 0, status: 'queued' },
+    }),
+    processUploadJob: (id) => Promise.resolve({ job: { id, status: 'needs_confirmation', progress: 100 } }),
+    confirmUploadJob: (id) => Promise.resolve({
+      job: { id, status: 'completed', progress: 100 },
+      note: { id: `note-${id}`, title: 'Confirmed note', tags: [], content: [], linkedTopics: [], linkedErrors: [], source: 'typed', versions: [], version: 1 },
+    }),
+    cancelUploadJob: (id) => Promise.resolve({ job: { id, status: 'cancelled', progress: 0 } }),
+    organizeNote: () => Promise.resolve({ note: { id: 'n1' } }),
+    undoNote: () => Promise.resolve({ note: { id: 'n1' } }),
     getExerciseSet: (taskId) => Promise.resolve(validExerciseSet({ taskId })),
     getBankExerciseSet: (setId) => Promise.resolve(validExerciseSet({ id: setId, taskId: null, title: 'Bank set' })),
     submitSession: () => Promise.resolve({ sessionId: 's1' }),
@@ -1686,4 +1730,222 @@ test('rolls back a valid optimistic mastery transition when the API rejects it',
   })
   expect(harness.app.errors).toEqual([verified])
   expect(harness.app.isActionPending('error:master:e1')).toBe(false)
+})
+
+test('bootstraps upload jobs alongside versioned notes', async () => {
+  // Catches provider bootstrap omitting the new durable collections.
+  const note = validNote()
+  const job = validUploadJob()
+  const harness = await renderApp(createApi({
+    bootstrap: () => Promise.resolve({ ...bootData, notes: [note], uploadJobs: [job] }),
+  }))
+
+  expect(harness.app.notes).toEqual([note])
+  expect(harness.app.uploadJobs).toEqual([job])
+})
+
+test('authors upload identity once, exposes upload:create, and stores only the returned metadata job', async () => {
+  // Catches the store retaining a File/raw byte payload or inventing a non-contract pending key.
+  let resolveCreate
+  const createUploadJob = vi.fn(() => new Promise((resolve) => { resolveCreate = resolve }))
+  const harness = await renderApp(createApi({ createUploadJob }))
+  let operation
+
+  act(() => {
+    operation = harness.app.startMaterialUpload({
+      fileName: 'notes.jpg',
+      mimeType: 'image/jpeg',
+      size: 3,
+      materialType: 'handwritten_draft',
+    })
+  })
+  await waitFor(() => expect(harness.app.isActionPending('upload:create')).toBe(true))
+  expect(createUploadJob).toHaveBeenCalledWith({
+    fileName: 'notes.jpg',
+    mimeType: 'image/jpeg',
+    size: 3,
+    materialType: 'handwritten_draft',
+    id: 'generated-id',
+    createdAt: '2026-08-06T00:00:00.000Z',
+  }, {})
+  expect(harness.app.uploadJobs).toEqual([])
+
+  const queuedWithBytes = validUploadJob({ id: 'generated-id', size: 3, rawBytes: new Uint8Array([1, 2, 3]) })
+  const queued = validUploadJob({ id: 'generated-id', size: 3 })
+  await act(async () => {
+    resolveCreate({ job: queuedWithBytes })
+    await operation
+  })
+  expect(harness.app.uploadJobs).toEqual([queued])
+  expect(harness.app.uploadJobs[0]).not.toHaveProperty('rawBytes')
+  expect(harness.app.isActionPending('upload:create')).toBe(false)
+})
+
+test('processes and atomically confirms an upload under the exact pending keys', async () => {
+  // Catches confirmation committing only the job or only the note, and pending-key drift.
+  let resolveProcess
+  let resolveConfirm
+  const processUploadJob = vi.fn(() => new Promise((resolve) => { resolveProcess = resolve }))
+  const confirmUploadJob = vi.fn(() => new Promise((resolve) => { resolveConfirm = resolve }))
+  const queued = validUploadJob()
+  const harness = await renderApp(createApi({
+    bootstrap: () => Promise.resolve({ ...bootData, uploadJobs: [queued] }),
+    processUploadJob,
+    confirmUploadJob,
+  }))
+  let processing
+
+  act(() => { processing = harness.app.processMaterialUpload('job-1') })
+  await waitFor(() => expect(harness.app.isActionPending('upload:process:job-1')).toBe(true))
+  const classified = validUploadJob({ status: 'needs_confirmation', progress: 100, result: { subject: 'A-Level Math' } })
+  await act(async () => { resolveProcess({ job: classified }); await processing })
+  expect(harness.app.uploadJobs).toEqual([classified])
+  expect(harness.app.isActionPending('upload:process:job-1')).toBe(false)
+
+  let confirming
+  const patch = { subject: 'A-Level Math' }
+  act(() => { confirming = harness.app.confirmMaterialUpload('job-1', patch) })
+  await waitFor(() => expect(harness.app.isActionPending('upload:confirm:job-1')).toBe(true))
+  const completed = { ...classified, status: 'completed' }
+  const note = validNote({ id: 'note-job-1', sourceJobId: 'job-1' })
+  await act(async () => { resolveConfirm({ job: completed, note }); await confirming })
+
+  expect(confirmUploadJob).toHaveBeenCalledWith('job-1', patch, {})
+  expect(harness.app.uploadJobs).toEqual([completed])
+  expect(harness.app.notes).toEqual([note])
+  expect(harness.app.isActionPending('upload:confirm:job-1')).toBe(false)
+})
+
+test('keeps a cancellation terminal when a stale process response resolves later', async () => {
+  // Catches late asynchronous processing resurrecting a job that the student cancelled.
+  let resolveProcess
+  const processUploadJob = () => new Promise((resolve) => { resolveProcess = resolve })
+  const cancelled = validUploadJob({ status: 'cancelled' })
+  const cancelUploadJob = vi.fn(() => Promise.resolve({ job: cancelled }))
+  const harness = await renderApp(createApi({
+    bootstrap: () => Promise.resolve({ ...bootData, uploadJobs: [validUploadJob()] }),
+    processUploadJob,
+    cancelUploadJob,
+  }))
+  let processing
+
+  act(() => { processing = harness.app.processMaterialUpload('job-1') })
+  await waitFor(() => expect(harness.app.isActionPending('upload:process:job-1')).toBe(true))
+  await act(async () => { await harness.app.cancelMaterialUpload('job-1') })
+  expect(harness.app.uploadJobs).toEqual([cancelled])
+  expect(harness.app.isActionPending('upload:cancel:job-1')).toBe(false)
+
+  await act(async () => {
+    resolveProcess({ job: validUploadJob({ status: 'needs_confirmation', progress: 100 }) })
+    await processing
+  })
+  expect(harness.app.uploadJobs).toEqual([cancelled])
+})
+
+test('keeps a cancellation terminal when an older process request fails later', async () => {
+  // Catches a pessimistic upload action rolling an old snapshot over a successful cancellation.
+  let rejectProcess
+  const processUploadJob = () => new Promise((_, reject) => { rejectProcess = reject })
+  const cancelled = validUploadJob({ status: 'cancelled' })
+  const harness = await renderApp(createApi({
+    bootstrap: () => Promise.resolve({ ...bootData, uploadJobs: [validUploadJob()] }),
+    processUploadJob,
+    cancelUploadJob: () => Promise.resolve({ job: cancelled }),
+  }))
+  const processSettlement = harness.app.processMaterialUpload('job-1').catch((error) => error)
+
+  await waitFor(() => expect(harness.app.isActionPending('upload:process:job-1')).toBe(true))
+  await act(async () => { await harness.app.cancelMaterialUpload('job-1') })
+  expect(harness.app.uploadJobs).toEqual([cancelled])
+
+  await act(async () => { rejectProcess(new Error('processing failed')); await processSettlement })
+  expect(harness.app.uploadJobs).toEqual([cancelled])
+})
+
+test('rolls back note edits with an error toast and commits organize and undo canonically', async () => {
+  // Catches optimistic version history surviving a failure or canonical source/version data being ignored.
+  const original = validNote()
+  let rejectUpdate
+  const updateNote = vi.fn(() => new Promise((_, reject) => { rejectUpdate = reject }))
+  const organized = applyNoteOrganization(original, ['s-tag'], '2026-08-06T00:00:00.000Z')
+  const undone = undoLastNoteVersion(organized, '2026-08-06T00:01:00.000Z')
+  const organizeNote = vi.fn(() => Promise.resolve({ note: organized }))
+  const undoNote = vi.fn(() => Promise.resolve({ note: undone }))
+  const harness = await renderApp(createApi({
+    bootstrap: () => Promise.resolve({ ...bootData, notes: [original] }),
+    updateNote,
+    organizeNote,
+    undoNote,
+  }))
+  let update
+
+  act(() => { update = harness.app.updateNote('n1', { title: 'Optimistic title' }) })
+  await waitFor(() => expect(harness.app.isActionPending('note:update:n1')).toBe(true))
+  expect(harness.app.notes[0]).toMatchObject({ title: 'Optimistic title', version: 2 })
+  await act(async () => { rejectUpdate(new Error('note offline')); await update.catch(() => undefined) })
+  expect(harness.app.notes).toEqual([original])
+  expect(harness.app.toast).toMatchObject({ message: 'note offline', type: 'error' })
+
+  await act(async () => { await harness.app.organizeNote('n1', ['s-tag']) })
+  expect(organizeNote).toHaveBeenCalledWith('n1', ['s-tag'], { changedAt: '2026-08-06T00:00:00.000Z' })
+  expect(harness.app.notes).toEqual([organized])
+  expect(harness.app.isActionPending('note:organize:n1')).toBe(false)
+
+  await act(async () => { await harness.app.undoNote('n1') })
+  expect(undoNote).toHaveBeenCalledWith('n1', { changedAt: '2026-08-06T00:00:00.000Z' })
+  expect(harness.app.notes).toEqual([undone])
+  expect(harness.app.isActionPending('note:undo:n1')).toBe(false)
+})
+
+test('routes the existing one-click organize update consumer through the versioned organize endpoint', async () => {
+  // Catches the legacy Notes page mutating immutable source through PATCH or breaking before Task 5 rewires the UI.
+  const original = validNote()
+  const organized = applyNoteOrganization(original, ['s-tag'], '2026-08-06T00:00:00.000Z')
+  const updateNote = vi.fn()
+  const organizeNote = vi.fn(() => Promise.resolve({ note: organized }))
+  const harness = await renderApp(createApi({
+    bootstrap: () => Promise.resolve({ ...bootData, notes: [original] }),
+    updateNote,
+    organizeNote,
+  }))
+
+  await act(async () => {
+    await harness.app.updateNote('n1', {
+      tags: ['calculus', 'organized'],
+      source: 'ai_organized',
+    })
+  })
+
+  expect(updateNote).not.toHaveBeenCalled()
+  expect(organizeNote).toHaveBeenCalledWith('n1', ['s-tag'], {
+    changedAt: '2026-08-06T00:00:00.000Z',
+  })
+  expect(harness.app.notes).toEqual([organized])
+})
+
+test('does not consume an upload response after its AbortSignal is cancelled', async () => {
+  // Catches an unmounted modal's request mutating shared store state after cancellation.
+  let resolveCreate
+  let jobReads = 0
+  const createUploadJob = () => new Promise((resolve) => { resolveCreate = resolve })
+  const harness = await renderApp(createApi({ createUploadJob }))
+  const controller = new AbortController()
+  const operation = harness.app.startMaterialUpload({
+    id: 'job-aborted',
+    createdAt: '2026-08-06T00:00:00.000Z',
+    fileName: 'notes.jpg',
+    mimeType: 'image/jpeg',
+    size: 100,
+    materialType: 'handwritten_draft',
+  }, { signal: controller.signal })
+
+  controller.abort()
+  await act(async () => {
+    resolveCreate({ get job() { jobReads += 1; return validUploadJob({ id: 'job-aborted' }) } })
+    await operation
+  })
+
+  expect(jobReads).toBe(0)
+  expect(harness.app.uploadJobs).toEqual([])
+  expect(harness.app.isActionPending('upload:create')).toBe(false)
 })

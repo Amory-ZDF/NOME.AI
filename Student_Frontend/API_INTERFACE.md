@@ -30,7 +30,10 @@
 - Mock persistence: without `VITE_API_BASE_URL`, the local adapter persists the state that backs
   these endpoint functions in `localStorage` key `nome-ai.student-state.v1`, using the versioned
   `{ version: 1, data }` envelope. State survives refreshes; missing, malformed, or incompatible
-  stored data falls back to the seed state during bootstrap.
+  stored data falls back to the seed state during bootstrap. Material bootstrap adds an empty
+  `uploadJobs` collection when absent and migrates legacy Module 0–3 notes that have neither
+  version field to `version: 1, versions: []`; the migrated shape is written back to the same
+  version-1 envelope.
 - Test helper: `resetMockState()` is exported from `src/api/index.js`. It clears that local key and
   returns a fresh bootstrapped seed state asynchronously. It does not introduce or alter an HTTP
   endpoint.
@@ -56,6 +59,7 @@ One-shot load of everything the student shell needs. Frontend calls it once on m
 | `sessions` | Record\<string, Session\> | Persisted sessions keyed by `sessionId` (not an array) |
 | `errors` | ErrorItem[] | Error-book entries |
 | `notes` | Note[] | Notes |
+| `uploadJobs` | MaterialUploadJob[] | Durable metadata-only material processing jobs |
 | `noteFolders` | NoteFolder[] | Folder tree (auto-created by AI) |
 | `settings` | Settings | Student preferences |
 | `greeting` | Greeting | Home greeting copy |
@@ -211,15 +215,88 @@ One-shot load of everything the student shell needs. Frontend calls it once on m
 |---|---|---|
 | `id` | string | |
 | `title` | string | |
-| `folderId` | string | |
-| `folderPath` | string | Display path, e.g. `"A-Level Math / Ch7 Calculus"` |
+| `materialType` | MaterialType? | Present on notes created from a material upload |
+| `examBoard` / `subject` / `chapter` | string? | Confirmed material classification |
+| `folderId` | string \| null | `null` means the unclassified root |
+| `folderPath` | string \| null | Display path, e.g. `"A-Level Math / Ch7 Calculus"` |
 | `tags` | string[] | |
 | `linkedTopics` | string[] | Topic ids |
 | `linkedErrors` | string[] | ErrorItem ids |
 | `source` | enum | `typed` \| `handwritten` \| `photo` \| `ai_organized` |
 | `createdAt` / `updatedAt` | string (ISO date) | |
-| `content` | NoteBlock[] | `{ t: 'p'|'h'|'formula', v: string }` |
+| `content` | NoteBlock[] | `{ t: 'p'\|'h'\|'formula'\|'image'\|'list'\|'highlight', v: string }` |
 | `aiSuggestions` | AiSuggestion[] | `{ type, message }`, type ∈ `split_note` \| `link_topic` \| `related_content` |
+
+| `questionBlocks` | `{ id, label, text }[]?` | Extracted questions; ids are unique |
+| `answerBlocks` | `{ id, questionId, text }[]?` | Each `questionId` points to an extracted question |
+| `sourceJobId` | string? | Exact upload job that created this note |
+| `version` | positive integer | Current note version; legacy notes bootstrap at `1` |
+| `versions` | NoteVersionSnapshot[] | Immutable prior states; length is `version - 1` |
+
+### NoteVersionSnapshot
+
+Every meaningful edit or organize operation appends the prior state. Undo restores the latest
+snapshot but is itself traceable: it appends the pre-undo state and increments `version`.
+
+| Field | Type | Notes |
+|---|---|---|
+| `version` | positive integer | Version represented by this snapshot |
+| `title` | string | |
+| `folderId` / `folderPath` | string \| null | |
+| `tags` | string[] | |
+| `content` | NoteBlock[] | Deep snapshot |
+| `linkedTopics` / `linkedErrors` | string[] | Deep snapshots |
+| `source` | Note.source \| null | Explicit so organize/undo restores provenance together with content |
+| `changedAt` | string | ISO timestamp supplied by the client/store clock |
+| `reason` | string | e.g. `edit`, `title_edit`, `ai_organize`, `undo` |
+
+### MaterialType
+
+`class_note` \| `teacher_material` \| `homework` \| `past_paper` \| `mock_paper` \|
+`mark_scheme` \| `ielts_passage` \| `writing_speaking` \| `handwritten_draft` \| `error_photo`
+
+### MaterialUploadJob
+
+Only metadata and derived JSON are persisted. Accepted MIME types are `application/pdf`,
+`image/jpeg`, `image/png`, `image/webp`, and `image/heic`. `size` is bounded inclusively at
+`20 * 1024 * 1024` bytes (20 MiB); one byte above that limit is rejected.
+
+| Field | Type | Notes |
+|---|---|---|
+| `id` | string | Client supplied or generated before creation |
+| `fileName` / `mimeType` | string | Serializable file metadata |
+| `size` | non-negative number | At most 20 MiB |
+| `materialType` | MaterialType | All ten types have a deterministic mock fallback |
+| `examBoard` / `subject` / `chapter` | string? | Optional pre-classification hints |
+| `createdAt` / `updatedAt` | string | Stable ISO timestamps |
+| `progress` | number | 0–100 |
+| `status` | enum | `queued` \| `processing` \| `needs_confirmation` \| `completed` \| `cancelled` |
+| `result` | MaterialClassificationResult? | Present after processing |
+
+The mock transition is `queued → processing → needs_confirmation → completed`.
+Cancellation is terminal before confirmation: later process/confirm calls reject with
+`UPLOAD_CANCELLED`. A completed job rejects repeat confirmation and cancellation with
+`UPLOAD_ALREADY_COMPLETED`. Confirmation writes the completed job and its created Note in one
+repository transaction, so neither half can be observed alone.
+
+### MaterialClassificationResult
+
+| Field | Type | Notes |
+|---|---|---|
+| `suggestedTitle` | string | Deterministic mock title; editable at confirmation |
+| `materialType` | MaterialType | |
+| `examBoard` / `subject` / `chapter` | string | |
+| `folderId` / `folderPath` | string | Suggested destination |
+| `questionBlocks` | `{ id, label, text }[]` | Unique ids |
+| `answerBlocks` | `{ id, questionId, text }[]` | References only known question ids |
+| `content` | NoteBlock[] | Non-empty extracted content |
+| `linkedTopics` / `linkedErrors` | string[] | Suggested links |
+| `confidence` | number | Inclusive 0–1 |
+
+> **Raw-byte boundary:** this bootstrap implementation never accepts, serializes, or stores a
+> `File`, `Blob`, base64 payload, `ArrayBuffer`, or byte array. A future upload transport places raw
+> bytes in object storage and passes only its durable object reference plus the metadata above to
+> the material API. `localStorage`, `AppStore`, jobs, notes, and API JSON remain metadata-only.
 
 ### NoteFolder
 | Field | Type |
@@ -309,7 +386,28 @@ already accepted timestamp reject with code `INVALID_INPUT`; these failures do n
 | Endpoint | Body | Notes |
 |---|---|---|
 | `POST /api/notes` | Note | Includes OCR-created notes |
-| `PATCH /api/notes/{id}` | Partial\<Note\> | Title/tag/content updates, AI one-click organise |
+| `PATCH /api/notes/{id}` | Editable note patch | Title/folder/tag/content/link updates; records a prior-state snapshot |
+| `POST /api/notes/{id}/organize` | `{ "suggestionIds": string[] }` | Apply only selected known suggestions, deduplicate additions, set `source: "ai_organized"`, and version the change |
+| `POST /api/notes/{id}/undo` | none | Restore the latest snapshot while appending a traceable undo snapshot |
+
+`PATCH` accepts only `title`, `folderId`, `folderPath`, `tags`, `content`, `linkedTopics`, and
+`linkedErrors` as editable fields. The bootstrap adapter also accepts client transport metadata
+`changedAt`/`updatedAt` and `reason`, removes those keys from the patch, and writes them into the
+snapshot. Identity, source, version counters, upload provenance, and classification fields cannot
+be overwritten through this endpoint.
+
+### Material uploads
+
+| Endpoint | Body | Response | Notes |
+|---|---|---|---|
+| `POST /api/material-uploads` | `{ id?, fileName, mimeType, size, materialType, examBoard?, subject?, chapter?, createdAt? }` | `{ job }` | Validate and persist one queued metadata-only job |
+| `POST /api/material-uploads/{id}/process` | none | `{ job }` | Persist processing, choose a deterministic fixture from material type plus filename, then persist `needs_confirmation` |
+| `POST /api/material-uploads/{id}/confirm` | Partial\<MaterialClassificationResult\> | `{ job, note }` | Atomically complete the job and create the linked version-1 Note |
+| `POST /api/material-uploads/{id}/cancel` | none | `{ job }` | Terminal cancellation before completion; retrying cancel is idempotent |
+
+Creation accepts serialized metadata only. Unknown keys and raw-byte/base64 fields reject with
+`INVALID_UPLOAD_METADATA`; invalid MIME/size/material-type values retain their stable domain codes
+(`UNSUPPORTED_TYPE`, `FILE_TOO_LARGE`, `INVALID_MATERIAL_TYPE`). Unknown ids use `NOT_FOUND`.
 
 ### Exercise session
 | Endpoint | Body | Notes |
@@ -353,6 +451,7 @@ Exercise pages use the two concrete set routes below. Other rows remain bootstra
 
 | Endpoint | Response `data` |
 |---|---|
+| `GET /api/notes` | `{ notes: Note[] }` |
 | `GET /api/bank/questions?subject=&difficulty=&type=&status=` | `BankQuestion[]` |
 | `GET /api/bank/recommendations` | `{ questionId, reason }[]` |
 | `GET /api/bank/exercise/{setId}` | ExerciseSet |
@@ -394,7 +493,17 @@ Task adjustments are submitted through `requestTaskAdjustment(task, draft)`; the
 | Record independent verification | `POST /api/errors/{id}/verification` | `Exercise.jsx` → `verifyErrorVariant` after the linked one-question set is persisted |
 | Mark error mastered | `PATCH /api/errors/{id}` | `Errors.jsx` after the mastery gate |
 | Submit redo | `POST /api/errors/{id}/redo` | `ErrorRedo.jsx` → `recordRedo` |
-| Create / edit note | `POST`/`PATCH /api/notes...` | `Notes.jsx` |
+| List notes | `GET /api/notes` | `AppStore` / future dedicated Notes refresh |
+| Create / edit note | `POST`/`PATCH /api/notes...` | `Notes.jsx` → `addNote` / `updateNote` |
+| Organize / undo note | `POST /api/notes/{id}/organize` / `undo` | `Notes.jsx` → `organizeNote` / `undoNote` |
+| Upload and classify material | `POST /api/material-uploads...` | Upload modal → `startMaterialUpload` / `processMaterialUpload` / `confirmMaterialUpload` / `cancelMaterialUpload` |
 | Submit exercise set | `POST /api/sessions` | `Exercise.jsx` → `saveSession` |
 | Create L6 transfer task | `POST /api/questions/{questionId}/variant` | `Exercise.jsx` → `generateVariant(sourceQuestion)` |
 | Save settings | `PATCH /api/student/settings` | `Profile.jsx` SettingsModal |
+
+Material/note actions expose pending keys `upload:create`, `upload:process:{id}`,
+`upload:confirm:{id}`, `upload:cancel:{id}`, `note:update:{id}`, `note:organize:{id}`, and
+`note:undo:{id}`. Upload actions accept an optional `{ signal: AbortSignal }`; an aborted modal
+request may settle for its caller but cannot consume the late response into AppStore state. A
+cancelled job also wins over a late process/confirm response, so asynchronous completion cannot
+resurrect it.
