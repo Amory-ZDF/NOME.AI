@@ -288,7 +288,8 @@ Cancellation is terminal before confirmation: later process/confirm calls reject
 `UPLOAD_ALREADY_COMPLETED`. Confirmation writes the completed job and its created Note in one
 repository transaction, so neither half can be observed alone.
 Cancellation, `AbortError`, and `UPLOAD_CANCELLED` control flow never create a `failed` job, and no failed
-processing attempt creates a Note.
+processing attempt creates a Note. Cancelling a `failed` job removes the `failure` field entirely before
+persisting `cancelled`; the field is never retained as `undefined` on non-failed JSON shapes.
 
 ### MaterialClassificationResult
 

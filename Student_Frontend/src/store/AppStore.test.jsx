@@ -1909,6 +1909,30 @@ test('shows a persisted processing failure immediately, clears pending, and retr
   expect(harness.app.isActionPending('upload:process:job-1')).toBe(false)
 })
 
+test('clears failed-only diagnostics when Store commits cancellation', async () => {
+  // Catches a stale or malformed cancellation response leaving failure on a non-failed Store job.
+  const failure = {
+    code: 'UPLOAD_PROCESSING_FAILED',
+    message: 'Unable to process the material upload',
+  }
+  const failed = validUploadJob({ status: 'failed', progress: 1, failure })
+  const cancelledWithStaleFailure = validUploadJob({ status: 'cancelled', progress: 1, failure })
+  const cancelled = validUploadJob({ status: 'cancelled', progress: 1 })
+  const harness = await renderApp(createApi({
+    bootstrap: () => Promise.resolve({ ...bootData, notes: [], uploadJobs: [failed] }),
+    cancelUploadJob: () => Promise.resolve({ job: cancelledWithStaleFailure }),
+  }))
+
+  await act(async () => {
+    await harness.app.cancelMaterialUpload('job-1')
+  })
+
+  expect(harness.app.uploadJobs).toEqual([cancelled])
+  expect(harness.app.uploadJobs[0]).not.toHaveProperty('failure')
+  expect(harness.app.notes).toEqual([])
+  expect(harness.app.isActionPending('upload:cancel:job-1')).toBe(false)
+})
+
 test('rolls back note edits with an error toast and commits organize and undo canonically', async () => {
   // Catches optimistic version history surviving a failure or canonical source/version data being ignored.
   const original = validNote()

@@ -23,7 +23,9 @@ const UPLOAD_JOB_FIELDS = Object.freeze([
 ])
 const uploadJobMetadata = (job) => Object.fromEntries(
   UPLOAD_JOB_FIELDS
-    .filter((field) => Object.prototype.hasOwnProperty.call(job, field) && job[field] !== undefined)
+    .filter((field) => Object.prototype.hasOwnProperty.call(job, field)
+      && job[field] !== undefined
+      && (field !== 'failure' || job.status === 'failed'))
     .map((field) => [field, structuredClone(job[field])]),
 )
 const upsertById = (items, replacement, { prepend = false } = {}) => {

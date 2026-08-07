@@ -1048,7 +1048,8 @@ export const cancelUploadJob = async (id, options = {}) => {
       if (!job) throw notFound('Upload job', id)
       if (job.status === 'completed') throw uploadAlreadyCompleted()
       if (job.status === 'cancelled') return materialState
-      return replaceUploadJob(materialState, { ...job, status: 'cancelled' })
+      const { failure: _failedOnlyDiagnostic, ...cancellableJob } = job
+      return replaceUploadJob(materialState, { ...cancellableJob, status: 'cancelled' })
     })
     return { job: findUploadJob(state, id) }
   } catch (error) {

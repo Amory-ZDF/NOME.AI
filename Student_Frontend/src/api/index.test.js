@@ -501,6 +501,40 @@ test('never marks cancellation or AbortError processing exits as failed', async 
   expect(aborted).not.toHaveProperty('failure')
 })
 
+test('clears a failed job failure when cancellation becomes terminal', async () => {
+  // Catches failed-only diagnostic state leaking into the cancelled API response or persisted JSON.
+  await resetMockState()
+  await createUploadJob(makeUploadMetadata({ id: 'job-cancel-failed' }))
+  mutateStoredState((state) => {
+    state.uploadJobs = state.uploadJobs.map((job) => (
+      job.id === 'job-cancel-failed'
+        ? {
+            ...job,
+            status: 'failed',
+            progress: 1,
+            failure: { code: 'UPLOAD_PROCESSING_FAILED', message: 'Unable to process the material upload' },
+          }
+        : job
+    ))
+  })
+
+  const cancelled = await cancelUploadJob('job-cancel-failed')
+  expect(cancelled.job).toMatchObject({ id: 'job-cancel-failed', status: 'cancelled', progress: 1 })
+  expect(cancelled.job).not.toHaveProperty('failure')
+  expect(JSON.stringify(cancelled.job)).not.toContain('failure')
+
+  const reloaded = (await bootstrap()).uploadJobs.find(({ id }) => id === 'job-cancel-failed')
+  expect(reloaded).toEqual(cancelled.job)
+  expect(reloaded).not.toHaveProperty('failure')
+  expect((await listNotes()).notes.some(({ sourceJobId }) => sourceJobId === 'job-cancel-failed')).toBe(false)
+  await expect(processUploadJob('job-cancel-failed')).rejects.toMatchObject({
+    status: 409, code: 'UPLOAD_CANCELLED',
+  })
+  await expect(confirmUploadJob('job-cancel-failed', {})).rejects.toMatchObject({
+    status: 409, code: 'UPLOAD_CANCELLED',
+  })
+})
+
 test('uses stable terminal rules and confirms job plus note atomically', async () => {
   // Catches repeat confirmation, completed cancellation, or a note collision partially completing the job.
   await resetMockState()
