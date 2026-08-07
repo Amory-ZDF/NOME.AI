@@ -178,7 +178,10 @@ export function processMaterialJob(job, options) {
   }
 
   const fixtureKey = isRecord(options) ? options.fixtureKey : undefined
-  const fixture = isNonemptyString(fixtureKey) ? MATERIAL_FIXTURES[fixtureKey] : undefined
+  const fixture = isNonemptyString(fixtureKey)
+    && Object.prototype.hasOwnProperty.call(MATERIAL_FIXTURES, fixtureKey)
+    ? MATERIAL_FIXTURES[fixtureKey]
+    : undefined
   if (!fixture) {
     fail('UNKNOWN_MATERIAL_FIXTURE', 'Select a known material fixture')
   }

@@ -262,6 +262,17 @@ describe('mock material processing', () => {
       )
     }
   })
+
+  test.each(['__proto__', 'constructor', 'toString', 'unknown_fixture'])(
+    'rejects inherited or unknown fixture key %s at the lookup boundary',
+    (fixtureKey) => {
+      expectProcessorError(
+        () => processMaterialJob(processingJob(), { fixtureKey }),
+        'UNKNOWN_MATERIAL_FIXTURE',
+        'Select a known material fixture',
+      )
+    },
+  )
 })
 
 describe('material classification confirmation', () => {
