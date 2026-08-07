@@ -166,6 +166,10 @@ const cloneResult = (result) => cloneData(result, () => {
   fail('INVALID_CONFIRMATION_JOB', 'Only classified jobs awaiting confirmation can be confirmed')
 })
 
+const cloneConfirmationJob = (job) => cloneData(job, () => {
+  fail('INVALID_CONFIRMATION_JOB', 'Only classified jobs awaiting confirmation can be confirmed')
+})
+
 const validateJobMetadata = (job) => (
   hasOwn(job, 'id')
   && isNonemptyString(job.id)
@@ -267,7 +271,7 @@ export function confirmMaterialClassification(job, patch) {
 
   const completedResult = cloneResult(confirmedResult)
   const completedJob = {
-    ...cloneJob(job),
+    ...cloneConfirmationJob(job),
     materialType: confirmedResult.materialType,
     examBoard: confirmedResult.examBoard,
     subject: confirmedResult.subject,

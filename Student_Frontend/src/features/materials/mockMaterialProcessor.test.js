@@ -593,6 +593,32 @@ describe('material classification confirmation', () => {
   })
 
   test.each([
+    ['undefined values', () => undefined],
+    ['sparse arrays', sparseArray],
+    ['enumerable array properties', () => arrayWithEnumerableProperty(['valid'])],
+    ['cyclic data', () => {
+      const value = {}
+      value.self = value
+      return value
+    }],
+  ])(
+    'maps %s in confirmation jobs to the confirmation error contract',
+    (_case, buildPayload) => {
+      const processedJob = processMaterialJob(
+        processingJob(),
+        { fixtureKey: 'alevel_mark_scheme' },
+      )
+      processedJob.clientMeta = buildPayload()
+
+      expectProcessorError(
+        () => confirmMaterialClassification(processedJob, {}),
+        'INVALID_CONFIRMATION_JOB',
+        'Only classified jobs awaiting confirmation can be confirmed',
+      )
+    },
+  )
+
+  test.each([
     ['sparse content', () => ({ content: sparseArray() })],
     ['sparse linked topics', () => ({ linkedTopics: sparseArray() })],
     ['sparse linked errors', () => ({ linkedErrors: sparseArray() })],
