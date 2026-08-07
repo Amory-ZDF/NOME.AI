@@ -432,6 +432,75 @@ test('makes cancellation terminal before and during processing without resurrect
   expect((await bootstrap()).uploadJobs.find(({ id }) => id === 'job-race')).toMatchObject({ status: 'cancelled' })
 })
 
+test('persists a safe failed processing state and retries it after the cause is repaired', async () => {
+  // Catches processor failures being reset to queued or exposing stack/cause/raw input in durable state.
+  await resetMockState()
+  await createUploadJob(makeUploadMetadata({ id: 'job-retry' }))
+  mutateStoredState((state) => {
+    state.uploadJobs = state.uploadJobs.map((job) => (
+      job.id === 'job-retry' ? { ...job, materialType: 'corrupted-type' } : job
+    ))
+  })
+
+  const error = await processUploadJob('job-retry').catch((caught) => caught)
+  expect(error).toMatchObject({
+    name: 'ApiError',
+    status: 400,
+    code: 'INVALID_MATERIAL_JOB',
+    job: {
+      id: 'job-retry',
+      status: 'failed',
+      progress: 1,
+      failure: {
+        code: 'INVALID_MATERIAL_JOB',
+        message: 'Material job is missing valid upload metadata',
+      },
+    },
+  })
+  expect(Object.keys(error.job.failure).sort()).toEqual(['code', 'message'])
+  expect(error.job.failure).not.toHaveProperty('stack')
+  expect(error.job.failure).not.toHaveProperty('cause')
+  expect(error.job.failure).not.toHaveProperty('rawBytes')
+
+  const reloadedFailure = (await bootstrap()).uploadJobs.find(({ id }) => id === 'job-retry')
+  expect(reloadedFailure).toEqual(error.job)
+  expect((await listNotes()).notes.some(({ sourceJobId }) => sourceJobId === 'job-retry')).toBe(false)
+
+  mutateStoredState((state) => {
+    state.uploadJobs = state.uploadJobs.map((job) => (
+      job.id === 'job-retry' ? { ...job, materialType: 'handwritten_draft' } : job
+    ))
+  })
+  const retried = await processUploadJob('job-retry')
+  expect(retried.job).toMatchObject({
+    id: 'job-retry',
+    status: 'needs_confirmation',
+    progress: 100,
+  })
+  expect(retried.job).not.toHaveProperty('failure')
+  expect((await bootstrap()).uploadJobs.find(({ id }) => id === 'job-retry')).toEqual(retried.job)
+})
+
+test('never marks cancellation or AbortError processing exits as failed', async () => {
+  // Catches cancellation control flow being mistaken for a processor failure.
+  await resetMockState()
+  await createUploadJob(makeUploadMetadata({ id: 'job-cancel-not-failed' }))
+  await cancelUploadJob('job-cancel-not-failed')
+  await expect(processUploadJob('job-cancel-not-failed')).rejects.toMatchObject({ code: 'UPLOAD_CANCELLED' })
+  const cancelled = (await bootstrap()).uploadJobs.find(({ id }) => id === 'job-cancel-not-failed')
+  expect(cancelled).toMatchObject({ status: 'cancelled' })
+  expect(cancelled).not.toHaveProperty('failure')
+
+  await createUploadJob(makeUploadMetadata({ id: 'job-abort-not-failed' }))
+  const controller = new AbortController()
+  const processing = processUploadJob('job-abort-not-failed', { signal: controller.signal })
+  controller.abort()
+  await expect(processing).rejects.toMatchObject({ name: 'AbortError' })
+  const aborted = (await bootstrap()).uploadJobs.find(({ id }) => id === 'job-abort-not-failed')
+  expect(aborted.status).not.toBe('failed')
+  expect(aborted).not.toHaveProperty('failure')
+})
+
 test('uses stable terminal rules and confirms job plus note atomically', async () => {
   // Catches repeat confirmation, completed cancellation, or a note collision partially completing the job.
   await resetMockState()

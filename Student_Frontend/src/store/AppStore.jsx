@@ -19,7 +19,7 @@ const dateOnly = (now) => now.toISOString().slice(0, 10)
 const UPLOAD_JOB_FIELDS = Object.freeze([
   'id', 'fileName', 'mimeType', 'size', 'materialType',
   'examBoard', 'subject', 'chapter', 'folderId', 'folderPath',
-  'createdAt', 'updatedAt', 'progress', 'status', 'result',
+  'createdAt', 'updatedAt', 'progress', 'status', 'result', 'failure',
 ])
 const uploadJobMetadata = (job) => Object.fromEntries(
   UPLOAD_JOB_FIELDS
@@ -507,6 +507,12 @@ export function AppProvider({ children, services = defaultAppServices }) {
         replaceUploadJobs(upsertById(uploadJobsRef.current, result.job))
       },
       rollback: () => {},
+      onError: (error) => {
+        if (!error?.job || error.job.id !== id || error.job.status !== 'failed') return
+        const current = uploadJobsRef.current.find((job) => job.id === id)
+        if (current?.status === 'cancelled') return
+        replaceUploadJobs(upsertById(uploadJobsRef.current, error.job))
+      },
     }),
     { signal: actionOptions.signal },
   ), [replaceUploadJobs, runAction, services])

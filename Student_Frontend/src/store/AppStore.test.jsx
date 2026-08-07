@@ -1735,7 +1735,11 @@ test('rolls back a valid optimistic mastery transition when the API rejects it',
 test('bootstraps upload jobs alongside versioned notes', async () => {
   // Catches provider bootstrap omitting the new durable collections.
   const note = validNote()
-  const job = validUploadJob()
+  const job = validUploadJob({
+    status: 'failed',
+    progress: 1,
+    failure: { code: 'UPLOAD_PROCESSING_FAILED', message: 'Unable to process the material upload' },
+  })
   const harness = await renderApp(createApi({
     bootstrap: () => Promise.resolve({ ...bootData, notes: [note], uploadJobs: [job] }),
   }))
@@ -1860,6 +1864,49 @@ test('keeps a cancellation terminal when an older process request fails later', 
 
   await act(async () => { rejectProcess(new Error('processing failed')); await processSettlement })
   expect(harness.app.uploadJobs).toEqual([cancelled])
+})
+
+test('shows a persisted processing failure immediately, clears pending, and retries successfully', async () => {
+  // Catches process errors only producing a toast while the durable failed job remains invisible to the UI.
+  const failed = validUploadJob({
+    status: 'failed',
+    progress: 1,
+    failure: {
+      code: 'INVALID_MATERIAL_JOB',
+      message: 'Material job is missing valid upload metadata',
+    },
+  })
+  const recovered = validUploadJob({ status: 'needs_confirmation', progress: 100 })
+  const processingError = Object.assign(
+    new Error('Material job is missing valid upload metadata'),
+    { code: 'INVALID_MATERIAL_JOB', job: { ...failed, rawBytes: new Uint8Array([1]), stack: 'unsafe' } },
+  )
+  const processUploadJob = vi.fn()
+    .mockRejectedValueOnce(processingError)
+    .mockResolvedValueOnce({ job: recovered })
+  const harness = await renderApp(createApi({
+    bootstrap: () => Promise.resolve({ ...bootData, uploadJobs: [validUploadJob()] }),
+    processUploadJob,
+  }))
+
+  await act(async () => {
+    await expect(harness.app.processMaterialUpload('job-1')).rejects.toBe(processingError)
+  })
+  expect(harness.app.uploadJobs).toEqual([failed])
+  expect(harness.app.uploadJobs[0]).not.toHaveProperty('rawBytes')
+  expect(harness.app.uploadJobs[0]).not.toHaveProperty('stack')
+  expect(harness.app.isActionPending('upload:process:job-1')).toBe(false)
+  expect(harness.app.toast).toMatchObject({
+    type: 'error',
+    message: 'Material job is missing valid upload metadata',
+  })
+
+  await act(async () => {
+    await expect(harness.app.processMaterialUpload('job-1')).resolves.toEqual({ job: recovered })
+  })
+  expect(harness.app.uploadJobs).toEqual([recovered])
+  expect(harness.app.uploadJobs[0]).not.toHaveProperty('failure')
+  expect(harness.app.isActionPending('upload:process:job-1')).toBe(false)
 })
 
 test('rolls back note edits with an error toast and commits organize and undo canonically', async () => {

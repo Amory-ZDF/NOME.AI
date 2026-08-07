@@ -239,13 +239,27 @@ const throwTerminalUploadState = (job) => {
   if (job.status === 'completed') throw uploadAlreadyCompleted()
 }
 
-const mapMaterialDomainError = (error) => {
-  if (error instanceof ApiError) throw error
+const toMaterialApiError = (error) => {
+  if (error instanceof ApiError) return error
   if (error instanceof MaterialRulesError || error instanceof MaterialProcessorError || error instanceof NoteVersionError) {
     const status = ['NO_NOTE_VERSION', 'INVALID_JOB_STATE'].includes(error.code) ? 409 : 400
-    throw domainError(error, status)
+    return domainError(error, status)
   }
-  throw error
+  return error
+}
+
+const toUploadProcessingApiError = (error) => {
+  const mapped = toMaterialApiError(error)
+  if (mapped instanceof ApiError) return mapped
+  return new ApiError('Unable to process the material upload', {
+    status: 500,
+    code: 'UPLOAD_PROCESSING_FAILED',
+    cause: error,
+  })
+}
+
+const mapMaterialDomainError = (error) => {
+  throw toMaterialApiError(error)
 }
 const isAdjustmentRequest = (request) => isRecord(request)
   && isNonemptyString(request.id)
@@ -928,8 +942,15 @@ export const processUploadJob = async (id, options = {}) => {
       const job = findUploadJob(materialState, id)
       if (!job) throw notFound('Upload job', id)
       throwTerminalUploadState(job)
-      if (job.status !== 'queued') throw invalidUploadState('Only queued uploads can be processed')
-      processingJob = { ...job, status: 'processing', progress: Math.max(1, job.progress || 0) }
+      if (!['queued', 'failed'].includes(job.status)) {
+        throw invalidUploadState('Only queued or failed uploads can be processed')
+      }
+      const { failure: _previousFailure, ...retryableJob } = job
+      processingJob = {
+        ...retryableJob,
+        status: 'processing',
+        progress: Math.max(1, job.progress || 0),
+      }
       return replaceUploadJob(materialState, processingJob)
     })
 
@@ -950,15 +971,37 @@ export const processUploadJob = async (id, options = {}) => {
     if (options?.signal?.aborted) throw new DOMException('The operation was aborted.', 'AbortError')
     return { job: findUploadJob(state, id) }
   } catch (error) {
-    if (!(error instanceof ApiError)) {
+    if (!processingJob) mapMaterialDomainError(error)
+    if (error?.name === 'AbortError') {
       await repository.update((current) => {
         const materialState = normalizeMaterialState(current)
         const currentJob = findUploadJob(materialState, id)
         if (!currentJob || currentJob.status !== 'processing' || cancelledUploadIds.has(id)) return materialState
         return replaceUploadJob(materialState, { ...currentJob, status: 'queued', progress: 0 })
       })
+      throw error
     }
-    mapMaterialDomainError(error)
+    if (error instanceof ApiError && error.code === 'UPLOAD_CANCELLED') throw error
+
+    const apiError = toUploadProcessingApiError(error)
+    let failedJob
+    await repository.update((current) => {
+      const materialState = normalizeMaterialState(current)
+      const currentJob = findUploadJob(materialState, id)
+      if (!currentJob || currentJob.status !== 'processing' || cancelledUploadIds.has(id)) return materialState
+      failedJob = {
+        ...currentJob,
+        status: 'failed',
+        progress: Math.max(1, currentJob.progress || 0),
+        failure: {
+          code: apiError.code,
+          message: apiError.message,
+        },
+      }
+      return replaceUploadJob(materialState, failedJob)
+    })
+    if (failedJob) apiError.job = structuredClone(failedJob)
+    throw apiError
   }
 }
 

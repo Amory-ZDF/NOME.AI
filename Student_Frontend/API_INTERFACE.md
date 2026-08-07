@@ -270,14 +270,25 @@ Only metadata and derived JSON are persisted. Accepted MIME types are `applicati
 | `examBoard` / `subject` / `chapter` | string? | Optional pre-classification hints |
 | `createdAt` / `updatedAt` | string | Stable ISO timestamps |
 | `progress` | number | 0–100 |
-| `status` | enum | `queued` \| `processing` \| `needs_confirmation` \| `completed` \| `cancelled` |
+| `status` | enum | `queued` \| `processing` \| `failed` \| `needs_confirmation` \| `completed` \| `cancelled` |
 | `result` | MaterialClassificationResult? | Present after processing |
+| `failure` | `{ code: string, message: string }`? | Serializable processing failure; present only while `status` is `failed` |
 
-The mock transition is `queued → processing → needs_confirmation → completed`.
+The successful mock transition is `queued → processing → needs_confirmation → completed`. A non-cancellation
+processor error atomically persists `processing → failed` with the current non-zero progress and a flat
+`failure: { code, message }`; stack traces, causes, upload bytes, and caller-owned input are never persisted.
+The process endpoint still rejects with the stable `ApiError` and may attach a safe cloned `job` so AppStore can
+render the durable failure immediately. Retrying `process` from `failed` transitions back to `processing`, removes
+the old `failure`, and either reaches `needs_confirmation` or records a new safe failure.
+Known material-domain failures retain their documented domain code and HTTP status. An unexpected processor error
+rejects as HTTP 500 `UPLOAD_PROCESSING_FAILED` with a generic message; its private cause is never copied into the
+persisted `failure` or attached job.
 Cancellation is terminal before confirmation: later process/confirm calls reject with
 `UPLOAD_CANCELLED`. A completed job rejects repeat confirmation and cancellation with
 `UPLOAD_ALREADY_COMPLETED`. Confirmation writes the completed job and its created Note in one
 repository transaction, so neither half can be observed alone.
+Cancellation, `AbortError`, and `UPLOAD_CANCELLED` control flow never create a `failed` job, and no failed
+processing attempt creates a Note.
 
 ### MaterialClassificationResult
 
@@ -401,7 +412,7 @@ be overwritten through this endpoint.
 | Endpoint | Body | Response | Notes |
 |---|---|---|---|
 | `POST /api/material-uploads` | `{ id?, fileName, mimeType, size, materialType, examBoard?, subject?, chapter?, createdAt? }` | `{ job }` | Validate and persist one queued metadata-only job |
-| `POST /api/material-uploads/{id}/process` | none | `{ job }` | Persist processing, choose a deterministic fixture from material type plus filename, then persist `needs_confirmation` |
+| `POST /api/material-uploads/{id}/process` | none | `{ job }` | Process a `queued` or `failed` job; retry clears old failure, success persists `needs_confirmation`, and non-cancellation failure rejects while persisting/attaching the safe failed job |
 | `POST /api/material-uploads/{id}/confirm` | Partial\<MaterialClassificationResult\> | `{ job, note }` | Atomically complete the job and create the linked version-1 Note |
 | `POST /api/material-uploads/{id}/cancel` | none | `{ job }` | Terminal cancellation before completion; retrying cancel is idempotent |
 
@@ -507,3 +518,6 @@ Material/note actions expose pending keys `upload:create`, `upload:process:{id}`
 request may settle for its caller but cannot consume the late response into AppStore state. A
 cancelled job also wins over a late process/confirm response, so asynchronous completion cannot
 resurrect it.
+When processing rejects with `error.job.status === "failed"`, AppStore projects that metadata-only job into
+`uploadJobs` before surfacing the toast. The process pending key is still cleared in `finally`; aborted requests
+do not consume a late failed payload.
