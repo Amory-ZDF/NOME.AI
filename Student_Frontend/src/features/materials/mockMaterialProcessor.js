@@ -17,7 +17,6 @@ const RESULT_FIELDS = [
   'confidence',
 ]
 
-const RESULT_FIELD_SET = new Set(RESULT_FIELDS)
 const MATERIAL_TYPE_SET = new Set(MATERIAL_TYPES)
 const UNSAFE_OBJECT_KEYS = new Set(['__proto__', 'constructor', 'prototype'])
 
@@ -28,7 +27,31 @@ const isRecord = (value) => {
 }
 
 const isNonemptyString = (value) => typeof value === 'string' && value.trim().length > 0
-const isStringArray = (value) => Array.isArray(value) && value.every(isNonemptyString)
+const hasOwn = (value, key) => Object.prototype.hasOwnProperty.call(value, key)
+const isEnumerable = (value, key) => (
+  Object.prototype.propertyIsEnumerable.call(value, key)
+)
+
+const isDenseJsonArray = (value) => {
+  if (!Array.isArray(value)) return false
+
+  for (let index = 0; index < value.length; index += 1) {
+    if (!hasOwn(value, index)) return false
+  }
+
+  return Reflect.ownKeys(value).every((key) => {
+    if (!isEnumerable(value, key)) return true
+    if (typeof key !== 'string') return false
+
+    const index = Number(key)
+    return Number.isInteger(index)
+      && index >= 0
+      && index < value.length
+      && String(index) === key
+  })
+}
+
+const isStringArray = (value) => isDenseJsonArray(value) && value.every(isNonemptyString)
 const hasExactKeys = (value, keys) => (
   isRecord(value)
   && Object.keys(value).length === keys.length
@@ -72,9 +95,9 @@ const isClassificationResult = (result) => {
     result.folderId,
     result.folderPath,
   ].every(isNonemptyString)) return false
-  if (!Array.isArray(result.questionBlocks) || !result.questionBlocks.every(isQuestionBlock)) return false
-  if (!Array.isArray(result.answerBlocks) || !result.answerBlocks.every(isAnswerBlock)) return false
-  if (!Array.isArray(result.content) || result.content.length === 0 || !result.content.every(isContentBlock)) return false
+  if (!isDenseJsonArray(result.questionBlocks) || !result.questionBlocks.every(isQuestionBlock)) return false
+  if (!isDenseJsonArray(result.answerBlocks) || !result.answerBlocks.every(isAnswerBlock)) return false
+  if (!isDenseJsonArray(result.content) || result.content.length === 0 || !result.content.every(isContentBlock)) return false
   if (!isStringArray(result.linkedTopics) || !isStringArray(result.linkedErrors)) return false
   if (!Number.isFinite(result.confidence) || result.confidence < 0 || result.confidence > 1) return false
   if (!hasUniqueBlockIds(result.questionBlocks) || !hasUniqueBlockIds(result.answerBlocks)) return false
@@ -96,7 +119,8 @@ const fail = (code, message) => {
 }
 
 const cloneData = (value, invalid, ancestors = new WeakSet()) => {
-  if (value === null || value === undefined) return value
+  if (value === null) return value
+  if (value === undefined) invalid()
   if (typeof value === 'string' || typeof value === 'boolean') return value
   if (typeof value === 'number' && Number.isFinite(value)) return value
   if (typeof value !== 'object') invalid()
@@ -106,12 +130,21 @@ const cloneData = (value, invalid, ancestors = new WeakSet()) => {
 
   let cloned
   if (Array.isArray(value)) {
-    cloned = value.map((item) => cloneData(item, invalid, ancestors))
+    if (!isDenseJsonArray(value)) invalid()
+    cloned = []
+    for (let index = 0; index < value.length; index += 1) {
+      cloned.push(cloneData(value[index], invalid, ancestors))
+    }
   } else if (isRecord(value)) {
     cloned = {}
     for (const key of Object.keys(value)) {
       if (UNSAFE_OBJECT_KEYS.has(key)) invalid()
-      cloned[key] = cloneData(value[key], invalid, ancestors)
+      Object.defineProperty(cloned, key, {
+        configurable: true,
+        enumerable: true,
+        value: cloneData(value[key], invalid, ancestors),
+        writable: true,
+      })
     }
   } else {
     invalid()
@@ -134,8 +167,11 @@ const cloneResult = (result) => cloneData(result, () => {
 })
 
 const validateJobMetadata = (job) => (
-  isNonemptyString(job.id)
+  hasOwn(job, 'id')
+  && isNonemptyString(job.id)
+  && hasOwn(job, 'fileName')
   && isNonemptyString(job.fileName)
+  && hasOwn(job, 'materialType')
   && MATERIAL_TYPE_SET.has(job.materialType)
 )
 
@@ -147,9 +183,9 @@ const PATCH_VALIDATORS = {
   chapter: isNonemptyString,
   folderId: isNonemptyString,
   folderPath: isNonemptyString,
-  questionBlocks: (value) => Array.isArray(value) && value.every(isQuestionBlock),
-  answerBlocks: (value) => Array.isArray(value) && value.every(isAnswerBlock),
-  content: (value) => Array.isArray(value) && value.length > 0 && value.every(isContentBlock),
+  questionBlocks: (value) => isDenseJsonArray(value) && value.every(isQuestionBlock),
+  answerBlocks: (value) => isDenseJsonArray(value) && value.every(isAnswerBlock),
+  content: (value) => isDenseJsonArray(value) && value.length > 0 && value.every(isContentBlock),
   linkedTopics: isStringArray,
   linkedErrors: isStringArray,
   confidence: (value) => Number.isFinite(value) && value >= 0 && value <= 1,
@@ -173,11 +209,13 @@ export function processMaterialJob(job, options) {
   if (!validateJobMetadata(job)) {
     fail('INVALID_MATERIAL_JOB', 'Material job is missing valid upload metadata')
   }
-  if (job.status !== 'processing') {
+  if (!hasOwn(job, 'status') || job.status !== 'processing') {
     fail('INVALID_JOB_STATE', 'Only processing material jobs can be processed')
   }
 
-  const fixtureKey = isRecord(options) ? options.fixtureKey : undefined
+  const fixtureKey = isRecord(options) && hasOwn(options, 'fixtureKey')
+    ? options.fixtureKey
+    : undefined
   const fixture = isNonemptyString(fixtureKey)
     && Object.prototype.hasOwnProperty.call(MATERIAL_FIXTURES, fixtureKey)
     ? MATERIAL_FIXTURES[fixtureKey]
@@ -200,8 +238,11 @@ export function processMaterialJob(job, options) {
 export function confirmMaterialClassification(job, patch) {
   if (
     !isRecord(job)
+    || !hasOwn(job, 'status')
     || job.status !== 'needs_confirmation'
+    || !hasOwn(job, 'id')
     || !isNonemptyString(job.id)
+    || !hasOwn(job, 'result')
     || !isClassificationResult(job.result)
   ) {
     fail(
@@ -224,9 +265,9 @@ export function confirmMaterialClassification(job, patch) {
     fail('INVALID_CLASSIFICATION_PATCH', 'Classification patch contains invalid fields')
   }
 
-  const completedJob = cloneJob(job)
   const completedResult = cloneResult(confirmedResult)
-  Object.assign(completedJob, {
+  const completedJob = {
+    ...cloneJob(job),
     materialType: confirmedResult.materialType,
     examBoard: confirmedResult.examBoard,
     subject: confirmedResult.subject,
@@ -236,7 +277,7 @@ export function confirmMaterialClassification(job, patch) {
     status: 'completed',
     progress: 100,
     result: completedResult,
-  })
+  }
 
   const note = {
     id: `note-${job.id}`,
@@ -260,10 +301,12 @@ export function confirmMaterialClassification(job, patch) {
     version: 1,
   }
 
-  if (isNonemptyString(job.createdAt)) note.createdAt = job.createdAt
-  if (isNonemptyString(job.updatedAt)) {
+  if (hasOwn(job, 'createdAt') && isNonemptyString(job.createdAt)) {
+    note.createdAt = job.createdAt
+  }
+  if (hasOwn(job, 'updatedAt') && isNonemptyString(job.updatedAt)) {
     note.updatedAt = job.updatedAt
-  } else if (note.createdAt) {
+  } else if (hasOwn(note, 'createdAt')) {
     note.updatedAt = note.createdAt
   }
 
