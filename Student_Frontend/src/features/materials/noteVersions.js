@@ -185,8 +185,20 @@ const assertNoteShape = (note) => {
 }
 
 const cloneAndValidateNote = (note) => {
-  assertVersionState(note)
-  const clone = cloneJson(note, invalidNote)
+  if (!isRecord(note)) invalidNote()
+
+  const hasVersion = hasOwn(note, 'version')
+  const hasVersions = hasOwn(note, 'versions')
+  if (hasVersion !== hasVersions) invalidVersionState()
+
+  if (hasVersion) assertVersionState(note)
+
+  const rawClone = cloneJson(note, invalidNote)
+  const clone = hasVersion
+    ? rawClone
+    : { ...rawClone, versions: [], version: 1 }
+
+  assertVersionState(clone)
   assertNoteShape(clone)
   return clone
 }
@@ -308,6 +320,61 @@ const invalidSuggestion = () => fail(
   'Selected note suggestion is invalid',
 )
 
+const canonicalJson = (value) => {
+  if (value === null || typeof value !== 'object') return JSON.stringify(value)
+  if (Array.isArray(value)) return `[${value.map(canonicalJson).join(',')}]`
+
+  const entries = Object.keys(value)
+    .sort()
+    .map((key) => `${JSON.stringify(key)}:${canonicalJson(value[key])}`)
+  return `{${entries.join(',')}}`
+}
+
+const stableHash = (value) => {
+  let hash = 2166136261
+  for (let index = 0; index < value.length; index += 1) {
+    hash ^= value.charCodeAt(index)
+    hash = Math.imul(hash, 16777619)
+  }
+  return (hash >>> 0).toString(16).padStart(8, '0')
+}
+
+const normalizeSuggestions = (suggestions) => {
+  if (!isDenseArray(suggestions)) invalidSuggestion()
+
+  const explicitIds = new Set()
+  suggestions.forEach((suggestion) => {
+    if (!isRecord(suggestion)) invalidSuggestion()
+    if (hasOwn(suggestion, 'id')) {
+      if (!isNonemptyString(suggestion.id) || explicitIds.has(suggestion.id)) invalidSuggestion()
+      explicitIds.add(suggestion.id)
+    }
+  })
+
+  const usedIds = new Set(explicitIds)
+  return suggestions.map((suggestion, index) => {
+    if (hasOwn(suggestion, 'id')) return cloneJson(suggestion, invalidSuggestion)
+
+    const fingerprint = stableHash(canonicalJson(suggestion))
+    const baseId = `legacy-note-suggestion-${index}-${fingerprint}`
+    let id = baseId
+    let suffix = 2
+    while (usedIds.has(id)) {
+      id = `${baseId}-${suffix}`
+      suffix += 1
+    }
+    usedIds.add(id)
+
+    return { ...cloneJson(suggestion, invalidSuggestion), id }
+  })
+}
+
+export function normalizeNoteSuggestions(note) {
+  const noteClone = cloneAndValidateNote(note)
+  const suggestions = hasOwn(noteClone, 'aiSuggestions') ? noteClone.aiSuggestions : []
+  return normalizeSuggestions(suggestions)
+}
+
 const applySuggestion = (draft, suggestion) => {
   if (!isRecord(suggestion) || !isNonemptyString(suggestion.id) || !isNonemptyString(suggestion.type)) {
     invalidSuggestion()
@@ -329,6 +396,11 @@ const applySuggestion = (draft, suggestion) => {
       return
     }
     case 'link_topic': {
+      const hasPayload = hasOwn(suggestion, 'topicId') || hasOwn(suggestion, 'value')
+      if (!hasPayload) {
+        if (!isNonemptyString(suggestion.message)) invalidSuggestion()
+        return
+      }
       const topicId = hasOwn(suggestion, 'topicId') ? suggestion.topicId : suggestion.value
       if (!isNonemptyString(topicId)) invalidSuggestion()
       draft.linkedTopics.push(topicId)
@@ -340,6 +412,10 @@ const applySuggestion = (draft, suggestion) => {
       draft.linkedErrors.push(errorId)
       return
     }
+    case 'split_note':
+    case 'related_content':
+      if (!isNonemptyString(suggestion.message)) invalidSuggestion()
+      return
     default:
       invalidSuggestion()
   }
@@ -356,7 +432,9 @@ export function applyNoteOrganization(note, suggestionIds, changedAt) {
   const noteClone = cloneAndValidateNote(note)
   const selectedIds = cloneSuggestionIds(suggestionIds)
   const stableChangedAt = cloneChangedAt(changedAt)
-  const suggestions = hasOwn(noteClone, 'aiSuggestions') ? noteClone.aiSuggestions : []
+  const suggestions = normalizeSuggestions(
+    hasOwn(noteClone, 'aiSuggestions') ? noteClone.aiSuggestions : [],
+  )
 
   const suggestionsById = new Map()
   for (const suggestion of suggestions) {

@@ -3,8 +3,10 @@ import {
   applyNoteOrganization,
   applyNotePatch,
   NoteVersionError,
+  normalizeNoteSuggestions,
   undoLastNoteVersion,
 } from './noteVersions'
+import { initialNotes } from '../../data/mockData'
 
 const SNAPSHOT_FIELDS = [
   'version',
@@ -41,6 +43,8 @@ const editOptions = {
   changedAt: '2026-08-06T10:00:00Z',
   reason: 'title_edit',
 }
+
+const cloneSeedNote = (index = 0) => JSON.parse(JSON.stringify(initialNotes[index]))
 
 const expectVersionError = (action, code) => {
   try {
@@ -219,6 +223,77 @@ describe('applyNotePatch', () => {
       'INVALID_NOTE_VERSION_STATE',
     )
   })
+
+  test('bootstraps a real legacy seed only when both version fields are absent', () => {
+    const seed = cloneSeedNote()
+    const original = cloneSeedNote()
+
+    const edited = applyNotePatch(seed, { title: 'Edited legacy note' }, editOptions)
+
+    expect(seed).toEqual(original)
+    expect(seed).not.toHaveProperty('version')
+    expect(seed).not.toHaveProperty('versions')
+    expect(edited).toMatchObject({ title: 'Edited legacy note', version: 2 })
+    expect(edited.versions).toHaveLength(1)
+    expect(edited.versions[0]).toMatchObject({
+      version: 1,
+      title: original.title,
+      reason: 'title_edit',
+    })
+  })
+
+  test.each([
+    ['version without versions', () => ({ ...cloneSeedNote(), version: 1 })],
+    ['versions without version', () => ({ ...cloneSeedNote(), versions: [] })],
+  ])('rejects a partially migrated legacy seed: %s', (_case, buildNote) => {
+    expectVersionError(
+      () => applyNotePatch(buildNote(), { title: 'New' }, editOptions),
+      'INVALID_NOTE_VERSION_STATE',
+    )
+  })
+})
+
+describe('normalizeNoteSuggestions', () => {
+  test('gives real legacy suggestions stable unique ids across a JSON reload', () => {
+    const seed = cloneSeedNote()
+    const original = cloneSeedNote()
+
+    const first = normalizeNoteSuggestions(seed)
+    const reloaded = normalizeNoteSuggestions(JSON.parse(JSON.stringify(seed)))
+
+    expect(seed).toEqual(original)
+    expect(first.map(({ type }) => type)).toEqual(['split_note', 'related_content'])
+    expect(first.map(({ id }) => id)).toEqual(reloaded.map(({ id }) => id))
+    expect(first.every(({ id }) => typeof id === 'string' && id.length > 0)).toBe(true)
+    expect(new Set(first.map(({ id }) => id)).size).toBe(first.length)
+    expect(first.map(({ message }) => message)).toEqual(seed.aiSuggestions.map(({ message }) => message))
+  })
+
+  test('uses stable content and position while preserving explicit ids', () => {
+    const legacy = initialNotes[0].aiSuggestions[0]
+    const note = {
+      ...cloneSeedNote(),
+      aiSuggestions: [
+        legacy,
+        JSON.parse(JSON.stringify(legacy)),
+        { id: 'rich-tag', type: 'add_tag', tag: 'exam-ready' },
+      ],
+    }
+    const normalized = normalizeNoteSuggestions(note)
+    const changedContent = normalizeNoteSuggestions({
+      ...note,
+      aiSuggestions: [
+        { ...legacy, message: `${legacy.message} Updated.` },
+        JSON.parse(JSON.stringify(legacy)),
+        note.aiSuggestions[2],
+      ],
+    })
+
+    expect(normalized[0].id).not.toBe(normalized[1].id)
+    expect(changedContent[0].id).not.toBe(normalized[0].id)
+    expect(changedContent[1].id).toBe(normalized[1].id)
+    expect(normalized[2].id).toBe('rich-tag')
+  })
 })
 
 describe('applyNoteOrganization', () => {
@@ -288,9 +363,21 @@ describe('applyNoteOrganization', () => {
     const malformed = makeNote({
       aiSuggestions: [{ id: 's-tag', type: 'add_tag', tag: '' }],
     })
+    const malformedRichTopic = makeNote({
+      aiSuggestions: [{
+        id: 's-topic',
+        type: 'link_topic',
+        topicId: '',
+        message: 'This rich suggestion has an invalid explicit payload.',
+      }],
+    })
 
     expectVersionError(
       () => applyNoteOrganization(malformed, ['s-tag'], '2026-08-06T11:00:00Z'),
+      'INVALID_NOTE_SUGGESTION',
+    )
+    expectVersionError(
+      () => applyNoteOrganization(malformedRichTopic, ['s-topic'], '2026-08-06T11:00:00Z'),
       'INVALID_NOTE_SUGGESTION',
     )
     expectVersionError(
@@ -301,6 +388,52 @@ describe('applyNoteOrganization', () => {
       () => applyNoteOrganization(makeNote(), ['s1'], ''),
       'INVALID_CHANGE_METADATA',
     )
+  })
+
+  test('organizes selected legacy and rich suggestions without applying unselected actions', () => {
+    const note = {
+      ...cloneSeedNote(),
+      aiSuggestions: [
+        ...cloneSeedNote().aiSuggestions,
+        { id: 'rich-tag', type: 'add_tag', tag: 'exam-ready' },
+        { id: 'rich-topic', type: 'link_topic', topicId: 'topic-new' },
+        { id: 'rich-error', type: 'link_error', errorId: 'error-unselected' },
+      ],
+    }
+    const normalized = normalizeNoteSuggestions(note)
+    const legacySplitId = normalized.find(({ type }) => type === 'split_note').id
+
+    const organized = applyNoteOrganization(
+      note,
+      [legacySplitId, 'rich-tag', 'rich-topic'],
+      '2026-08-06T11:30:00Z',
+    )
+
+    expect(organized).toMatchObject({
+      version: 2,
+      source: 'ai_organized',
+      updatedAt: '2026-08-06T11:30:00Z',
+    })
+    expect(organized.tags).toEqual([...note.tags, 'exam-ready', 'organized'])
+    expect(organized.linkedTopics).toEqual([...note.linkedTopics, 'topic-new'])
+    expect(organized.linkedErrors).not.toContain('error-unselected')
+    expect(organized.versions[0].reason).toBe('ai_organize')
+  })
+
+  test.each([
+    ['split_note', 0],
+    ['related_content', 0],
+    ['link_topic', 1],
+  ])('treats a selected payloadless legacy %s suggestion as an advisory organization', (type, noteIndex) => {
+    const seed = cloneSeedNote(noteIndex)
+    const normalized = normalizeNoteSuggestions(seed)
+    const selected = normalized.find((suggestion) => suggestion.type === type)
+
+    const organized = applyNoteOrganization(seed, [selected.id], '2026-08-06T11:45:00Z')
+
+    expect(organized).toMatchObject({ version: 2, source: 'ai_organized' })
+    expect(organized.tags).toContain('organized')
+    expect(organized.versions[0]).toMatchObject({ version: 1, reason: 'ai_organize' })
   })
 })
 
@@ -384,5 +517,19 @@ describe('undoLastNoteVersion', () => {
     restored.versions[0].content[0].v = 'history mutation'
     expect(note.content[0].v).toBe('Original paragraph')
     expect(edited.versions[0].content[0].v).toBe('Original paragraph')
+  })
+
+  test('edits and undoes a real legacy seed through a complete bootstrapped history', () => {
+    const seed = cloneSeedNote(2)
+    const edited = applyNotePatch(seed, { tags: [...seed.tags, 'review'] }, editOptions)
+    const restored = undoLastNoteVersion(edited, '2026-08-06T10:01:00Z')
+
+    expect(edited.version).toBe(2)
+    expect(restored).toMatchObject({ version: 3, title: seed.title })
+    expect(restored.tags).toEqual(seed.tags)
+    expect(restored.versions.map(({ version }) => version)).toEqual([1, 2])
+    expect(restored.versions.map(({ reason }) => reason)).toEqual(['title_edit', 'undo'])
+    expect(seed).not.toHaveProperty('version')
+    expect(seed).not.toHaveProperty('versions')
   })
 })
