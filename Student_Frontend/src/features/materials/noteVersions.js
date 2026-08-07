@@ -25,6 +25,20 @@ const EDITABLE_FIELDS = Object.freeze([
 const EDITABLE_FIELD_SET = new Set(EDITABLE_FIELDS)
 const CONTENT_TYPES = new Set(['p', 'h', 'formula', 'image', 'list', 'highlight'])
 const NOTE_SOURCES = new Set(['typed', 'handwritten', 'photo', 'ai_organized'])
+const MATERIAL_TYPES = new Set([
+  'class_note', 'teacher_material', 'homework', 'past_paper', 'mock_paper',
+  'mark_scheme', 'ielts_passage', 'writing_speaking', 'handwritten_draft', 'error_photo',
+])
+const NOTE_FIELDS = new Set([
+  'id', 'title', 'materialType', 'examBoard', 'subject', 'chapter',
+  'folderId', 'folderPath', 'tags', 'questionBlocks', 'answerBlocks',
+  'content', 'linkedTopics', 'linkedErrors', 'aiSuggestions', 'sourceJobId',
+  'source', 'createdAt', 'updatedAt', 'versions', 'version',
+])
+const CONTENT_FIELDS = new Set(['t', 'v', 'reference', 'alt'])
+const SUGGESTION_FIELDS = new Set([
+  'id', 'type', 'message', 'tag', 'value', 'content', 'blocks', 'topicId', 'errorId',
+])
 const UNSAFE_KEYS = new Set(['__proto__', 'constructor', 'prototype'])
 
 const hasOwn = (value, key) => Object.prototype.hasOwnProperty.call(value, key)
@@ -116,17 +130,49 @@ const isStringArray = (value) => (
   isDenseArray(value) && value.every(isNonemptyString)
 )
 
-const isContentBlock = (block) => (
-  isRecord(block)
-  && hasOwn(block, 't')
-  && CONTENT_TYPES.has(block.t)
-  && hasOwn(block, 'v')
-  && typeof block.v === 'string'
-)
+const isContentBlock = (block) => {
+  if (!isRecord(block)
+    || Reflect.ownKeys(block).some((key) => typeof key !== 'string' || !CONTENT_FIELDS.has(key))
+    || !hasOwn(block, 't')
+    || !CONTENT_TYPES.has(block.t)
+    || !hasOwn(block, 'v')
+    || typeof block.v !== 'string') return false
+  if (hasOwn(block, 'reference') && !isNonemptyString(block.reference)) return false
+  if (hasOwn(block, 'alt') && !isNonemptyString(block.alt)) return false
+  return block.t !== 'image' || (isNonemptyString(block.reference) && isNonemptyString(block.alt))
+}
 
 const isContent = (value) => (
   isDenseArray(value) && value.every(isContentBlock)
 )
+
+const isQuestionBlock = (block) => (
+  isRecord(block)
+  && Reflect.ownKeys(block).length === 3
+  && ['id', 'label', 'text'].every((field) => hasOwn(block, field) && isNonemptyString(block[field]))
+)
+
+const isAnswerBlock = (block) => (
+  isRecord(block)
+  && Reflect.ownKeys(block).length === 3
+  && ['id', 'questionId', 'text'].every((field) => hasOwn(block, field) && isNonemptyString(block[field]))
+)
+
+const isSuggestion = (suggestion) => {
+  if (!isRecord(suggestion)
+    || Reflect.ownKeys(suggestion).some((key) => typeof key !== 'string' || !SUGGESTION_FIELDS.has(key))
+    || !isNonemptyString(suggestion.type)) return false
+  for (const field of ['id', 'message', 'tag', 'value', 'topicId', 'errorId']) {
+    if (hasOwn(suggestion, field) && typeof suggestion[field] !== 'string') return false
+  }
+  for (const field of ['content', 'blocks']) {
+    if (hasOwn(suggestion, field) && !isContent(suggestion[field])) return false
+  }
+  return [
+    'split_note', 'link_topic', 'related_content', 'add_tag', 'tag',
+    'append_content', 'content', 'link_error',
+  ].includes(suggestion.type)
+}
 
 const hasExactSnapshotFields = (snapshot) => {
   if (!isRecord(snapshot)) return false
@@ -176,6 +222,7 @@ const assertVersionState = (note) => {
 }
 
 const assertNoteShape = (note) => {
+  if (Reflect.ownKeys(note).some((key) => typeof key !== 'string' || !NOTE_FIELDS.has(key))) invalidNote()
   if (!hasOwn(note, 'id') || !isNonemptyString(note.id)) invalidNote()
   if (!hasOwn(note, 'title') || !isNonemptyString(note.title)) invalidNote()
   if (hasOwn(note, 'folderId') && note.folderId !== null && !isNonemptyString(note.folderId)) invalidNote()
@@ -185,7 +232,22 @@ const assertNoteShape = (note) => {
   if (!hasOwn(note, 'linkedTopics') || !isStringArray(note.linkedTopics)) invalidNote()
   if (!hasOwn(note, 'linkedErrors') || !isStringArray(note.linkedErrors)) invalidNote()
   if (hasOwn(note, 'source') && !NOTE_SOURCES.has(note.source)) invalidNote()
-  if (hasOwn(note, 'aiSuggestions') && !isDenseArray(note.aiSuggestions)) invalidNote()
+  if (hasOwn(note, 'materialType') && !MATERIAL_TYPES.has(note.materialType)) invalidNote()
+  for (const field of ['examBoard', 'subject', 'chapter', 'sourceJobId', 'createdAt', 'updatedAt']) {
+    if (hasOwn(note, field) && !isNonemptyString(note[field])) invalidNote()
+  }
+  if (hasOwn(note, 'questionBlocks')) {
+    if (!isDenseArray(note.questionBlocks) || !note.questionBlocks.every(isQuestionBlock)) invalidNote()
+    if (new Set(note.questionBlocks.map(({ id }) => id)).size !== note.questionBlocks.length) invalidNote()
+  }
+  if (hasOwn(note, 'answerBlocks')) {
+    if (!isDenseArray(note.answerBlocks) || !note.answerBlocks.every(isAnswerBlock)) invalidNote()
+    if (new Set(note.answerBlocks.map(({ id }) => id)).size !== note.answerBlocks.length) invalidNote()
+    const questionIds = new Set((note.questionBlocks || []).map(({ id }) => id))
+    if (!note.answerBlocks.every(({ questionId }) => questionIds.has(questionId))) invalidNote()
+  }
+  if (hasOwn(note, 'aiSuggestions')
+    && (!isDenseArray(note.aiSuggestions) || !note.aiSuggestions.every(isSuggestion))) invalidNote()
 }
 
 const cloneAndValidateNote = (note) => {
@@ -206,6 +268,8 @@ const cloneAndValidateNote = (note) => {
   assertNoteShape(clone)
   return clone
 }
+
+export const sanitizeNote = (note) => cloneAndValidateNote(note)
 
 const cloneAndValidatePatch = (patch) => {
   const clone = cloneJson(patch, invalidPatch)

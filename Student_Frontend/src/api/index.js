@@ -37,8 +37,13 @@ import {
   applyNoteOrganization,
   applyNotePatch,
   NoteVersionError,
+  sanitizeNote,
   undoLastNoteVersion,
 } from '../features/materials/noteVersions'
+import {
+  MaterialContractError,
+  sanitizeUploadJob,
+} from '../features/materials/materialContracts'
 
 const repository = createMockRepository({ seedFactory: createSeedState })
 const cancelledUploadIds = new Set()
@@ -139,20 +144,36 @@ const cloneCommand = (value, onInvalid) => {
 }
 
 const normalizeLegacyNote = (note) => {
-  const cloned = structuredClone(note)
-  const hasVersion = hasOwn(cloned, 'version')
-  const hasVersions = hasOwn(cloned, 'versions')
-  if (!hasVersion && !hasVersions) return { ...cloned, versions: [], version: 1 }
-  return cloned
+  const hasVersion = hasOwn(note, 'version')
+  const hasVersions = hasOwn(note, 'versions')
+  if (!hasVersion && !hasVersions) return { ...note, versions: [], version: 1 }
+  return note
 }
 
-const normalizeMaterialState = (state) => ({
-  ...state,
-  uploadJobs: Array.isArray(state.uploadJobs) ? state.uploadJobs : [],
-  notes: Array.isArray(state.notes) ? state.notes.map(normalizeLegacyNote) : [],
-})
+const needsMaterialMigration = (state) => (
+  !Array.isArray(state.uploadJobs)
+  || !Array.isArray(state.notes)
+  || state.notes.some((note) => !hasOwn(note, 'version') && !hasOwn(note, 'versions'))
+)
 
-const persistMaterialMigration = () => repository.update(normalizeMaterialState)
+const normalizeMaterialState = (state) => {
+  if (!needsMaterialMigration(state)) return state
+  return {
+    ...state,
+    uploadJobs: Array.isArray(state.uploadJobs) ? state.uploadJobs : [],
+    notes: Array.isArray(state.notes) ? state.notes.map(normalizeLegacyNote) : [],
+  }
+}
+
+const persistMaterialMigration = async () => {
+  const current = await repository.read((state) => state)
+  if (!needsMaterialMigration(current)) return current
+  return repository.update(normalizeMaterialState)
+}
+
+const throwIfAborted = (signal) => {
+  if (signal?.aborted) throw new DOMException('The operation was aborted.', 'AbortError')
+}
 
 const createGeneratedId = () => globalThis.crypto?.randomUUID?.()
   || `upload-${Date.now()}-${Math.random().toString(16).slice(2)}`
@@ -874,9 +895,13 @@ export const listNotes = async () => {
 }
 
 export const createNote = async (note) => {
-  if (!isMockMode) return http.post('/api/notes', note)
-  assertNote(note)
-  const persistedNote = normalizeLegacyNote(note)
+  let persistedNote
+  try {
+    persistedNote = sanitizeNote(note)
+  } catch (error) {
+    mapMaterialDomainError(error)
+  }
+  if (!isMockMode) return http.post('/api/notes', persistedNote)
   const state = await repository.update((current) => {
     const materialState = normalizeMaterialState(current)
     if (materialState.notes.some((item) => item.id === persistedNote.id)) throw duplicate('Note', persistedNote.id)
@@ -885,31 +910,37 @@ export const createNote = async (note) => {
   return { note: state.notes.find((item) => item.id === persistedNote.id) }
 }
 export const updateNote = async (id, patch, options = {}) => {
-  if (!isMockMode) return http.patch(`/api/notes/${encodeURIComponent(id)}`, patch)
   const command = snapshotNoteCommand(patch, options)
+  if (!isMockMode) return http.patch(`/api/notes/${encodeURIComponent(id)}`, {
+    ...command.patch,
+    ...command.metadata,
+  })
   return {
     note: await updateVersionedNote(id, (note) => applyNotePatch(note, command.patch, command.metadata)),
   }
 }
 
 export const organizeNote = async (id, suggestionIds, options = {}) => {
-  if (!isMockMode) return http.post(`/api/notes/${encodeURIComponent(id)}/organize`, { suggestionIds })
   if (!isPlainRecord(options)) throw invalidNotePatchError()
   const selectedIds = cloneCommand(suggestionIds, invalidNotePatchError)
   const changedAt = options.changedAt !== undefined
     ? options.changedAt
     : new Date().toISOString()
+  if (!isMockMode) return http.post(`/api/notes/${encodeURIComponent(id)}/organize`, {
+    suggestionIds: selectedIds,
+    changedAt,
+  })
   return {
     note: await updateVersionedNote(id, (note) => applyNoteOrganization(note, selectedIds, changedAt)),
   }
 }
 
 export const undoNote = async (id, options = {}) => {
-  if (!isMockMode) return http.post(`/api/notes/${encodeURIComponent(id)}/undo`)
   if (!isPlainRecord(options)) throw invalidNotePatchError()
   const changedAt = options.changedAt !== undefined
     ? options.changedAt
     : new Date().toISOString()
+  if (!isMockMode) return http.post(`/api/notes/${encodeURIComponent(id)}/undo`, { changedAt })
   return {
     note: await updateVersionedNote(id, (note) => undoLastNoteVersion(note, changedAt)),
   }
@@ -917,27 +948,46 @@ export const undoNote = async (id, options = {}) => {
 
 // ---------- Material uploads ----------
 export const createUploadJob = async (metadata, options = {}) => {
-  if (!isMockMode) return http.post('/api/material-uploads', metadata)
-  if (options?.signal?.aborted) throw new DOMException('The operation was aborted.', 'AbortError')
+  if (!isMockMode) return http.post('/api/material-uploads', metadata, { signal: options?.signal })
+  throwIfAborted(options?.signal)
   const job = snapshotUploadMetadata(metadata)
   const state = await repository.update((current) => {
+    throwIfAborted(options?.signal)
     const materialState = normalizeMaterialState(current)
     if (materialState.uploadJobs.some((item) => item.id === job.id)) throw duplicate('Upload job', job.id)
     return { ...materialState, uploadJobs: [job, ...materialState.uploadJobs] }
   })
-  if (options?.signal?.aborted) throw new DOMException('The operation was aborted.', 'AbortError')
   return { job: state.uploadJobs.find((item) => item.id === job.id) }
 }
 
 export const processUploadJob = async (id, options = {}) => {
-  if (!isMockMode) return http.post(`/api/material-uploads/${encodeURIComponent(id)}/process`)
+  if (!isMockMode) {
+    try {
+      return await http.post(
+        `/api/material-uploads/${encodeURIComponent(id)}/process`,
+        undefined,
+        { signal: options?.signal },
+      )
+    } catch (error) {
+      if (error instanceof ApiError) {
+        try {
+          const failedJob = sanitizeUploadJob(error.data?.job, { expectedId: id })
+          if (failedJob.status === 'failed') error.job = failedJob
+        } catch (contractError) {
+          if (!(contractError instanceof MaterialContractError)) throw contractError
+        }
+      }
+      throw error
+    }
+  }
   assertUploadId(id)
-  if (options?.signal?.aborted) throw new DOMException('The operation was aborted.', 'AbortError')
+  throwIfAborted(options?.signal)
   if (cancelledUploadIds.has(id)) throw uploadCancelled()
 
   let processingJob
   try {
     await repository.update((current) => {
+      throwIfAborted(options?.signal)
       const materialState = normalizeMaterialState(current)
       const job = findUploadJob(materialState, id)
       if (!job) throw notFound('Upload job', id)
@@ -954,6 +1004,7 @@ export const processUploadJob = async (id, options = {}) => {
       return replaceUploadJob(materialState, processingJob)
     })
 
+    throwIfAborted(options?.signal)
     if (cancelledUploadIds.has(id)) throw uploadCancelled()
     const fixtureKey = selectMaterialFixture(processingJob)
     const processed = adaptProcessedJob(
@@ -961,6 +1012,7 @@ export const processUploadJob = async (id, options = {}) => {
       processMaterialJob(processingJob, { fixtureKey }),
     )
     const state = await repository.update((current) => {
+      throwIfAborted(options?.signal)
       const materialState = normalizeMaterialState(current)
       const currentJob = findUploadJob(materialState, id)
       if (!currentJob) throw notFound('Upload job', id)
@@ -968,7 +1020,6 @@ export const processUploadJob = async (id, options = {}) => {
       if (currentJob.status !== 'processing') throw invalidUploadState('Only processing uploads can finish classification')
       return replaceUploadJob(materialState, processed)
     })
-    if (options?.signal?.aborted) throw new DOMException('The operation was aborted.', 'AbortError')
     return { job: findUploadJob(state, id) }
   } catch (error) {
     if (!processingJob) mapMaterialDomainError(error)
@@ -1006,13 +1057,18 @@ export const processUploadJob = async (id, options = {}) => {
 }
 
 export const confirmUploadJob = async (id, patch, options = {}) => {
-  if (!isMockMode) return http.post(`/api/material-uploads/${encodeURIComponent(id)}/confirm`, patch)
+  if (!isMockMode) return http.post(
+    `/api/material-uploads/${encodeURIComponent(id)}/confirm`,
+    patch,
+    { signal: options?.signal },
+  )
   assertUploadId(id)
-  if (options?.signal?.aborted) throw new DOMException('The operation was aborted.', 'AbortError')
+  throwIfAborted(options?.signal)
   const confirmationPatch = cloneCommand(patch, () => invalid('Classification patch must be serializable'))
   try {
     let confirmed
     await repository.update((current) => {
+      throwIfAborted(options?.signal)
       const materialState = normalizeMaterialState(current)
       const job = findUploadJob(materialState, id)
       if (!job) throw notFound('Upload job', id)
@@ -1029,7 +1085,6 @@ export const confirmUploadJob = async (id, patch, options = {}) => {
         notes: [confirmed.note, ...materialState.notes],
       }
     })
-    if (options?.signal?.aborted) throw new DOMException('The operation was aborted.', 'AbortError')
     return structuredClone(confirmed)
   } catch (error) {
     mapMaterialDomainError(error)
@@ -1037,12 +1092,17 @@ export const confirmUploadJob = async (id, patch, options = {}) => {
 }
 
 export const cancelUploadJob = async (id, options = {}) => {
-  if (!isMockMode) return http.post(`/api/material-uploads/${encodeURIComponent(id)}/cancel`)
+  if (!isMockMode) return http.post(
+    `/api/material-uploads/${encodeURIComponent(id)}/cancel`,
+    undefined,
+    { signal: options?.signal },
+  )
   assertUploadId(id)
-  if (options?.signal?.aborted) throw new DOMException('The operation was aborted.', 'AbortError')
+  throwIfAborted(options?.signal)
   cancelledUploadIds.add(id)
   try {
     const state = await repository.update((current) => {
+      throwIfAborted(options?.signal)
       const materialState = normalizeMaterialState(current)
       const job = findUploadJob(materialState, id)
       if (!job) throw notFound('Upload job', id)
@@ -1053,8 +1113,9 @@ export const cancelUploadJob = async (id, options = {}) => {
     })
     return { job: findUploadJob(state, id) }
   } catch (error) {
-    cancelledUploadIds.delete(id)
     mapMaterialDomainError(error)
+  } finally {
+    cancelledUploadIds.delete(id)
   }
 }
 

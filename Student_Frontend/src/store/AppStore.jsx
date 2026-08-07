@@ -12,22 +12,23 @@ import {
   normalizeNoteSuggestions,
   undoLastNoteVersion,
 } from '../features/materials/noteVersions'
+import {
+  MaterialContractError,
+  sanitizeUploadJob,
+  sanitizeUploadJobs,
+} from '../features/materials/materialContracts'
 
 const AppContext = createContext(null)
 
 const dateOnly = (now) => now.toISOString().slice(0, 10)
-const UPLOAD_JOB_FIELDS = Object.freeze([
-  'id', 'fileName', 'mimeType', 'size', 'materialType',
-  'examBoard', 'subject', 'chapter', 'folderId', 'folderPath',
-  'createdAt', 'updatedAt', 'progress', 'status', 'result', 'failure',
-])
-const uploadJobMetadata = (job) => Object.fromEntries(
-  UPLOAD_JOB_FIELDS
-    .filter((field) => Object.prototype.hasOwnProperty.call(job, field)
-      && job[field] !== undefined
-      && (field !== 'failure' || job.status === 'failed'))
-    .map((field) => [field, structuredClone(job[field])]),
-)
+const safeUploadJob = (job, expectedId) => {
+  try {
+    return sanitizeUploadJob(job, { expectedId })
+  } catch (error) {
+    if (error instanceof MaterialContractError) return null
+    throw error
+  }
+}
 const upsertById = (items, replacement, { prepend = false } = {}) => {
   const index = items.findIndex((item) => item.id === replacement.id)
   if (index < 0) return prepend ? [replacement, ...items] : [...items, replacement]
@@ -91,7 +92,7 @@ export function AppProvider({ children, services = defaultAppServices }) {
     setNotes(next)
   }, [])
   const replaceUploadJobs = useCallback((next) => {
-    const metadataOnly = next.map(uploadJobMetadata)
+    const metadataOnly = sanitizeUploadJobs(next)
     uploadJobsRef.current = metadataOnly
     setUploadJobs(metadataOnly)
   }, [])
@@ -488,8 +489,9 @@ export function AppProvider({ children, services = defaultAppServices }) {
       optimistic: () => {},
       request: () => services.api.createUploadJob(authoredMetadata, actionOptions),
       commit: (result) => {
-        if (!result?.job || result.job.id !== authoredMetadata.id) return
-        replaceUploadJobs(upsertById(uploadJobsRef.current, result.job, { prepend: true }))
+        const job = safeUploadJob(result?.job, authoredMetadata.id)
+        if (!job) return
+        replaceUploadJobs(upsertById(uploadJobsRef.current, job, { prepend: true }))
       },
       rollback: () => {},
     }), { signal: actionOptions.signal })
@@ -503,17 +505,19 @@ export function AppProvider({ children, services = defaultAppServices }) {
       optimistic: () => {},
       request: () => services.api.processUploadJob(id, actionOptions),
       commit: (result) => {
-        if (!result?.job || result.job.id !== id) return
+        const job = safeUploadJob(result?.job, id)
+        if (!job) return
         const current = uploadJobsRef.current.find((job) => job.id === id)
-        if (current?.status === 'cancelled' && result.job.status !== 'cancelled') return
-        replaceUploadJobs(upsertById(uploadJobsRef.current, result.job))
+        if (current?.status === 'cancelled' && job.status !== 'cancelled') return
+        replaceUploadJobs(upsertById(uploadJobsRef.current, job))
       },
       rollback: () => {},
       onError: (error) => {
-        if (!error?.job || error.job.id !== id || error.job.status !== 'failed') return
         const current = uploadJobsRef.current.find((job) => job.id === id)
-        if (current?.status === 'cancelled') return
-        replaceUploadJobs(upsertById(uploadJobsRef.current, error.job))
+        if (!current || current.status === 'cancelled') return
+        const failedJob = safeUploadJob(error?.job, id)
+        if (!failedJob || failedJob.status !== 'failed') return
+        replaceUploadJobs(upsertById(uploadJobsRef.current, failedJob))
       },
     }),
     { signal: actionOptions.signal },
@@ -527,10 +531,11 @@ export function AppProvider({ children, services = defaultAppServices }) {
       optimistic: () => {},
       request: () => services.api.confirmUploadJob(id, patch, actionOptions),
       commit: (result) => {
-        if (!result?.job || result.job.id !== id || !result?.note) return
+        const job = safeUploadJob(result?.job, id)
+        if (!job || !result?.note) return
         const current = uploadJobsRef.current.find((job) => job.id === id)
         if (current?.status === 'cancelled') return
-        replaceUploadJobs(upsertById(uploadJobsRef.current, result.job))
+        replaceUploadJobs(upsertById(uploadJobsRef.current, job))
         replaceNotes(upsertById(notesRef.current, result.note, { prepend: true }))
       },
       rollback: () => {},
@@ -546,8 +551,9 @@ export function AppProvider({ children, services = defaultAppServices }) {
       optimistic: () => {},
       request: () => services.api.cancelUploadJob(id, actionOptions),
       commit: (result) => {
-        if (!result?.job || result.job.id !== id) return
-        replaceUploadJobs(upsertById(uploadJobsRef.current, result.job))
+        const job = safeUploadJob(result?.job, id)
+        if (!job) return
+        replaceUploadJobs(upsertById(uploadJobsRef.current, job))
       },
       rollback: () => {},
     }),

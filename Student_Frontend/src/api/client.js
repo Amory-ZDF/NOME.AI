@@ -17,11 +17,12 @@ const BASE_URL = import.meta.env.VITE_API_BASE_URL || ''
 export const isMockMode = !BASE_URL
 
 export class ApiError extends Error {
-  constructor(message, { status = 0, code = 'NETWORK_ERROR', cause } = {}) {
+  constructor(message, { status = 0, code = 'NETWORK_ERROR', cause, data } = {}) {
     super(message, { cause })
     this.name = 'ApiError'
     this.status = status
     this.code = code
+    if (data !== undefined) this.data = data
   }
 }
 
@@ -53,20 +54,36 @@ async function request(path, options = {}) {
     if (!res.ok || (hasOwn(payload, 'code') && payload.code !== 0)) {
       throw new ApiError(
         payload?.message || `API ${options.method || 'GET'} ${path} failed: ${status}`,
-        { status, code: payload?.code ?? `HTTP_${status}`, cause: payload },
+        { status, code: payload?.code ?? `HTTP_${status}`, cause: payload, data: payload?.data },
       )
     }
 
     return hasOwn(payload, 'data') ? payload.data : payload
   } catch (error) {
     if (error instanceof ApiError) throw error
+    if (error?.name === 'AbortError') throw error
     throw new ApiError(error instanceof Error ? error.message : 'Network request failed', { cause: error })
   }
 }
 
+const requestInit = (init, method, body) => {
+  const {
+    method: _ignoredMethod,
+    body: _ignoredBody,
+    headers = {},
+    ...safeInit
+  } = init || {}
+  return {
+    ...safeInit,
+    method,
+    headers: { ...headers, 'Content-Type': 'application/json' },
+    ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+  }
+}
+
 export const http = {
-  get: (path) => request(path),
-  post: (path, body) => request(path, { method: 'POST', body: JSON.stringify(body) }),
-  patch: (path, body) => request(path, { method: 'PATCH', body: JSON.stringify(body) }),
-  del: (path) => request(path, { method: 'DELETE' }),
+  get: (path, init) => request(path, requestInit(init, 'GET')),
+  post: (path, body, init) => request(path, requestInit(init, 'POST', body)),
+  patch: (path, body, init) => request(path, requestInit(init, 'PATCH', body)),
+  del: (path, init) => request(path, requestInit(init, 'DELETE')),
 }

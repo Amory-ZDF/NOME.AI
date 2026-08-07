@@ -3,6 +3,7 @@ import { expect, test, vi } from 'vitest'
 import { AppProvider, useApp } from './AppStore'
 import { createAppServices } from './services'
 import { applyNoteOrganization, undoLastNoteVersion } from '../features/materials/noteVersions'
+import { MATERIAL_FIXTURES } from '../data/materialFixtures'
 
 const bootData = {
   tasks: [{ id: 't1', type: 'teacher_assigned', status: 'pending' }],
@@ -121,6 +122,11 @@ const validUploadJob = (overrides = {}) => ({
   updatedAt: '2026-08-06T00:00:00.000Z',
   progress: 0,
   status: 'queued',
+  ...overrides,
+})
+
+const validClassificationResult = (overrides = {}) => ({
+  ...MATERIAL_FIXTURES.alevel_handwritten_calculus_note,
   ...overrides,
 })
 
@@ -1748,7 +1754,7 @@ test('bootstraps upload jobs alongside versioned notes', async () => {
   expect(harness.app.uploadJobs).toEqual([job])
 })
 
-test('authors upload identity once, exposes upload:create, and stores only the returned metadata job', async () => {
+test('authors upload identity once, exposes upload:create, and rejects an unsafe returned job', async () => {
   // Catches the store retaining a File/raw byte payload or inventing a non-contract pending key.
   let resolveCreate
   const createUploadJob = vi.fn(() => new Promise((resolve) => { resolveCreate = resolve }))
@@ -1775,14 +1781,28 @@ test('authors upload identity once, exposes upload:create, and stores only the r
   expect(harness.app.uploadJobs).toEqual([])
 
   const queuedWithBytes = validUploadJob({ id: 'generated-id', size: 3, rawBytes: new Uint8Array([1, 2, 3]) })
-  const queued = validUploadJob({ id: 'generated-id', size: 3 })
   await act(async () => {
     resolveCreate({ job: queuedWithBytes })
     await operation
   })
-  expect(harness.app.uploadJobs).toEqual([queued])
-  expect(harness.app.uploadJobs[0]).not.toHaveProperty('rawBytes')
+  expect(harness.app.uploadJobs).toEqual([])
   expect(harness.app.isActionPending('upload:create')).toBe(false)
+})
+
+test('filters recursively unsafe upload jobs during bootstrap', async () => {
+  // Catches shallow projection retaining invalid nested results, exotic objects, or non-JSON values.
+  const safe = validUploadJob({ id: 'safe-job' })
+  const nestedRaw = validUploadJob({ id: 'nested-raw', result: { rawBytes: 'AA==' } })
+  const typed = validUploadJob({ id: 'typed', failure: new Uint8Array([1]), status: 'failed' })
+  const custom = Object.assign(Object.create({ inherited: true }), validUploadJob({ id: 'custom' }))
+  const harness = await renderApp(createApi({
+    bootstrap: () => Promise.resolve({
+      ...bootData,
+      uploadJobs: [nestedRaw, typed, custom, safe],
+    }),
+  }))
+
+  expect(harness.app.uploadJobs).toEqual([safe])
 })
 
 test('processes and atomically confirms an upload under the exact pending keys', async () => {
@@ -1801,7 +1821,11 @@ test('processes and atomically confirms an upload under the exact pending keys',
 
   act(() => { processing = harness.app.processMaterialUpload('job-1') })
   await waitFor(() => expect(harness.app.isActionPending('upload:process:job-1')).toBe(true))
-  const classified = validUploadJob({ status: 'needs_confirmation', progress: 100, result: { subject: 'A-Level Math' } })
+  const classified = validUploadJob({
+    status: 'needs_confirmation',
+    progress: 100,
+    result: validClassificationResult(),
+  })
   await act(async () => { resolveProcess({ job: classified }); await processing })
   expect(harness.app.uploadJobs).toEqual([classified])
   expect(harness.app.isActionPending('upload:process:job-1')).toBe(false)
@@ -1876,10 +1900,14 @@ test('shows a persisted processing failure immediately, clears pending, and retr
       message: 'Material job is missing valid upload metadata',
     },
   })
-  const recovered = validUploadJob({ status: 'needs_confirmation', progress: 100 })
+  const recovered = validUploadJob({
+    status: 'needs_confirmation',
+    progress: 100,
+    result: validClassificationResult(),
+  })
   const processingError = Object.assign(
     new Error('Material job is missing valid upload metadata'),
-    { code: 'INVALID_MATERIAL_JOB', job: { ...failed, rawBytes: new Uint8Array([1]), stack: 'unsafe' } },
+    { code: 'INVALID_MATERIAL_JOB', job: failed },
   )
   const processUploadJob = vi.fn()
     .mockRejectedValueOnce(processingError)
@@ -1893,8 +1921,6 @@ test('shows a persisted processing failure immediately, clears pending, and retr
     await expect(harness.app.processMaterialUpload('job-1')).rejects.toBe(processingError)
   })
   expect(harness.app.uploadJobs).toEqual([failed])
-  expect(harness.app.uploadJobs[0]).not.toHaveProperty('rawBytes')
-  expect(harness.app.uploadJobs[0]).not.toHaveProperty('stack')
   expect(harness.app.isActionPending('upload:process:job-1')).toBe(false)
   expect(harness.app.toast).toMatchObject({
     type: 'error',
@@ -1909,6 +1935,78 @@ test('shows a persisted processing failure immediately, clears pending, and retr
   expect(harness.app.isActionPending('upload:process:job-1')).toBe(false)
 })
 
+test('projects a real fetch processing error envelope into the existing Store job', async () => {
+  // Catches the real HTTP client losing error.data.job or the adapter failing to sanitize and attach it.
+  const failed = validUploadJob({
+    status: 'failed',
+    progress: 1,
+    failure: { code: 'PROCESSING_FAILED', message: 'Processing failed' },
+  })
+  const fetchMock = vi.fn(async (url) => {
+    if (String(url).endsWith('/api/student/bootstrap')) {
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({ code: 0, data: { ...bootData, uploadJobs: [validUploadJob()] } }),
+      }
+    }
+    return {
+      ok: false,
+      status: 422,
+      json: async () => ({
+        code: 'PROCESSING_FAILED',
+        message: 'Processing failed',
+        data: { job: failed },
+      }),
+    }
+  })
+  vi.stubEnv('VITE_API_BASE_URL', 'https://api.example.test')
+  vi.stubGlobal('fetch', fetchMock)
+  vi.resetModules()
+
+  try {
+    const realApi = await import('../api/index')
+    const harness = await renderApp(realApi)
+
+    await act(async () => {
+      await harness.app.processMaterialUpload('job-1').catch(() => undefined)
+    })
+
+    expect(harness.app.uploadJobs).toEqual([failed])
+    expect(harness.app.isActionPending('upload:process:job-1')).toBe(false)
+    expect(harness.app.toast).toMatchObject({ type: 'error', message: 'Processing failed' })
+    expect(fetchMock).toHaveBeenCalledWith(
+      'https://api.example.test/api/material-uploads/job-1/process',
+      expect.objectContaining({ method: 'POST' }),
+    )
+  } finally {
+    vi.unstubAllGlobals()
+    vi.unstubAllEnvs()
+    vi.resetModules()
+  }
+})
+
+test.each([
+  ['a fake id', { ...validUploadJob({ id: 'fake-job', status: 'failed', progress: 1 }), failure: { code: 'FAILED', message: 'Nope' } }],
+  ['nested raw bytes', { ...validUploadJob({ status: 'failed', progress: 1 }), failure: { code: 'FAILED', message: 'Nope' }, result: { rawBytes: 'AA==' } }],
+  ['an invalid failure prototype', { ...validUploadJob({ status: 'failed', progress: 1 }), failure: Object.assign(Object.create({ stack: 'unsafe' }), { code: 'FAILED', message: 'Nope' }) }],
+])('ignores process error jobs containing %s and never inserts a forged job', async (_, unsafeJob) => {
+  // Catches process onError trusting an id/status-only object from an error envelope.
+  const processingError = Object.assign(new Error('Processing failed'), { job: unsafeJob })
+  const harness = await renderApp(createApi({
+    bootstrap: () => Promise.resolve({ ...bootData, uploadJobs: [validUploadJob()] }),
+    processUploadJob: () => Promise.reject(processingError),
+  }))
+
+  await act(async () => {
+    await harness.app.processMaterialUpload('job-1').catch(() => undefined)
+  })
+
+  expect(harness.app.uploadJobs).toEqual([validUploadJob()])
+  expect(harness.app.uploadJobs.some(({ id }) => id === 'fake-job')).toBe(false)
+  expect(harness.app.isActionPending('upload:process:job-1')).toBe(false)
+})
+
 test('clears failed-only diagnostics when Store commits cancellation', async () => {
   // Catches a stale or malformed cancellation response leaving failure on a non-failed Store job.
   const failure = {
@@ -1916,11 +2014,10 @@ test('clears failed-only diagnostics when Store commits cancellation', async () 
     message: 'Unable to process the material upload',
   }
   const failed = validUploadJob({ status: 'failed', progress: 1, failure })
-  const cancelledWithStaleFailure = validUploadJob({ status: 'cancelled', progress: 1, failure })
   const cancelled = validUploadJob({ status: 'cancelled', progress: 1 })
   const harness = await renderApp(createApi({
     bootstrap: () => Promise.resolve({ ...bootData, notes: [], uploadJobs: [failed] }),
-    cancelUploadJob: () => Promise.resolve({ job: cancelledWithStaleFailure }),
+    cancelUploadJob: () => Promise.resolve({ job: cancelled }),
   }))
 
   await act(async () => {

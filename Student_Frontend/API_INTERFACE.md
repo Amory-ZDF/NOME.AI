@@ -224,7 +224,7 @@ One-shot load of everything the student shell needs. Frontend calls it once on m
 | `linkedErrors` | string[] | ErrorItem ids |
 | `source` | enum | `typed` \| `handwritten` \| `photo` \| `ai_organized` |
 | `createdAt` / `updatedAt` | string (ISO date) | |
-| `content` | NoteBlock[] | `{ t: 'p'\|'h'\|'formula'\|'image'\|'list'\|'highlight', v: string }` |
+| `content` | NoteBlock[] | Text/formula blocks use `{ t, v }`; image blocks use `{ t: 'image', v, reference, alt }`; list/highlight blocks may also carry string `reference`/`alt` metadata |
 | `aiSuggestions` | AiSuggestion[] | `{ type, message }`, type ∈ `split_note` \| `link_topic` \| `related_content` |
 
 | `questionBlocks` | `{ id, label, text }[]?` | Extracted questions; ids are unique |
@@ -397,16 +397,21 @@ already accepted timestamp reject with code `INVALID_INPUT`; these failures do n
 ### Notes
 | Endpoint | Body | Notes |
 |---|---|---|
-| `POST /api/notes` | Note | Includes OCR-created notes |
-| `PATCH /api/notes/{id}` | Editable note patch | Title/folder/tag/content/link updates; records a prior-state snapshot |
-| `POST /api/notes/{id}/organize` | `{ "suggestionIds": string[] }` | Apply only selected known suggestions, deduplicate additions, set `source: "ai_organized"`, and version the change |
-| `POST /api/notes/{id}/undo` | none | Restore the latest snapshot while appending a traceable undo snapshot |
+| `POST /api/notes` | Note | Includes OCR-created notes; strict recursive JSON allowlist validation runs before mock persistence or real fetch |
+| `PATCH /api/notes/{id}` | Editable note patch plus `{ changedAt, reason }` | Title/folder/tag/content/link updates; records a prior-state snapshot with the same command metadata in mock and real modes |
+| `POST /api/notes/{id}/organize` | `{ "suggestionIds": string[], "changedAt": string }` | Apply only selected known suggestions, deduplicate additions, set `source: "ai_organized"`, and version the change |
+| `POST /api/notes/{id}/undo` | `{ "changedAt": string }` | Restore the latest snapshot while appending a traceable undo snapshot |
 
 `PATCH` accepts only `title`, `folderId`, `folderPath`, `tags`, `content`, `linkedTopics`, and
 `linkedErrors` as editable fields. The bootstrap adapter also accepts client transport metadata
 `changedAt`/`updatedAt` and `reason`, removes those keys from the patch, and writes them into the
 snapshot. Identity, source, version counters, upload provenance, and classification fields cannot
 be overwritten through this endpoint.
+
+`POST /api/notes` accepts legacy seeds and the Task 2/Task 5 note fields documented above, but
+rejects unknown keys and non-plain/non-dense JSON anywhere in the object. `undefined`, symbols,
+accessors, custom prototypes, cycles, `Blob`, typed arrays, and raw/base64 carrier fields fail with
+`INVALID_NOTE` before storage mutation or a real transport call.
 
 ### Material uploads
 
@@ -420,6 +425,22 @@ be overwritten through this endpoint.
 Creation accepts serialized metadata only. Unknown keys and raw-byte/base64 fields reject with
 `INVALID_UPLOAD_METADATA`; invalid MIME/size/material-type values retain their stable domain codes
 (`UNSUPPORTED_TYPE`, `FILE_TOO_LARGE`, `INVALID_MATERIAL_TYPE`). Unknown ids use `NOT_FOUND`.
+
+All four material lifecycle calls accept an optional `AbortSignal`, and the real adapter forwards it
+to `fetch`. Mock transactions recheck the signal inside the serialized repository recipe, before any
+durable mutation. Cancellation barriers exist only while cancellation is in flight and are removed in
+`finally` after the transaction settles, so a later independently recreated job may safely reuse an id.
+
+Every upload job crossing bootstrap, success, or error boundaries is validated as a plain, dense JSON
+object with the exact documented top-level fields. `result` must match the complete
+`MaterialClassificationResult` schema recursively. `failure` must be exactly the flat
+`{ code, message }` object and is legal only for a `failed` job. Invalid jobs are filtered during
+bootstrap/replacement and cannot be inserted by a forged success or error response.
+
+A processing failure response uses the envelope
+`{ "code": string, "message": string, "data": { "job": MaterialUploadJob } }`. The client exposes
+`data` on `ApiError`; the material adapter attaches `error.job` only when it is a strict, same-id,
+`failed` job. AppStore additionally requires that the same job already exists before replacing it.
 
 ### Exercise session
 | Endpoint | Body | Notes |

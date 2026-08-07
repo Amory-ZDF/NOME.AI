@@ -289,6 +289,70 @@ test('createNote returns and persists the note', async () => {
   await expect(bootstrap()).resolves.toMatchObject({ notes: expect.arrayContaining([versionedNote]) })
 })
 
+test('round-trips a strict Task 2 note and future image/list/highlight content without dropping fields', async () => {
+  // Catches createNote allowlisting away material provenance or Task 5 content references.
+  await resetMockState()
+  const note = makeNote({
+    id: 'n-material-roundtrip',
+    materialType: 'handwritten_draft',
+    examBoard: 'Cambridge International',
+    subject: 'A-Level Math',
+    chapter: 'Calculus',
+    questionBlocks: [{ id: 'q1', label: 'Question 1', text: 'Differentiate x².' }],
+    answerBlocks: [{ id: 'a1', questionId: 'q1', text: '2x' }],
+    sourceJobId: 'job-1',
+    content: [
+      { t: 'image', v: 'Handwritten graph', reference: 'object://notes/graph-1', alt: 'A labelled graph' },
+      { t: 'list', v: 'Differentiate\nSolve\nClassify' },
+      { t: 'highlight', v: 'Check the second derivative.' },
+    ],
+  })
+
+  const created = await createNote(note)
+  expect(created.note).toEqual({ ...note, versions: [], version: 1 })
+  expect((await listNotes()).notes.find(({ id }) => id === note.id)).toEqual(created.note)
+})
+
+test.each([
+  ['unknown field', () => makeNote({ unknown: true })],
+  ['top-level raw bytes', () => makeNote({ rawBytes: 'AA==' })],
+  ['nested base64', () => makeNote({ content: [{ t: 'image', v: 'x', reference: 'object://x', alt: 'x', base64: 'AA==' }] })],
+  ['undefined', () => makeNote({ subject: undefined })],
+  ['typed array', () => makeNote({ linkedErrors: new Uint8Array([1]) })],
+  ['Blob', () => makeNote({ content: [new Blob(['unsafe'])] })],
+  ['custom prototype', () => Object.assign(Object.create({ inherited: true }), makeNote())],
+  ['accessor', () => Object.defineProperty(makeNote(), 'subject', { enumerable: true, get: () => 'Math' })],
+])('rejects a createNote payload containing %s atomically', async (_, makeInvalidNote) => {
+  // Catches validation after persistence or structuredClone accepting non-contract payloads.
+  await resetMockState()
+  const before = await listNotes()
+
+  await expect(createNote(makeInvalidNote())).rejects.toMatchObject({ code: 'INVALID_NOTE' })
+  expect(await listNotes()).toEqual(before)
+})
+
+test('validates createNote before a real transport call', async () => {
+  // Catches real mode bypassing the same strict note boundary used by the mock repository.
+  const post = vi.fn()
+  vi.resetModules()
+  vi.doMock('./client', () => ({
+    ApiError: class ApiError extends Error {
+      constructor(message, options = {}) { super(message); Object.assign(this, options) }
+    },
+    http: { post },
+    isMockMode: false,
+  }))
+
+  try {
+    const realApi = await import('./index')
+    await expect(realApi.createNote(makeNote({ rawBytes: 'AA==' }))).rejects.toMatchObject({ code: 'INVALID_NOTE' })
+    expect(post).not.toHaveBeenCalled()
+  } finally {
+    vi.doUnmock('./client')
+    vi.resetModules()
+  }
+})
+
 test('updateNote returns and persists the note patch', async () => {
   // Catches a mock adapter mutation that drops note edits after returning success.
   await resetMockState()
@@ -377,6 +441,28 @@ test('snapshots upload metadata, enforces exact file boundaries, and rejects byt
       .rejects.toMatchObject({ name: 'ApiError', status: 400, code: 'INVALID_UPLOAD_METADATA' })
   }
   expect((await bootstrap()).uploadJobs.map(({ id }) => id)).toEqual(['job-snapshot'])
+})
+
+test.each([
+  ['create', async () => {}, (signal) => createUploadJob(makeUploadMetadata({ id: 'job-abort-create' }), { signal }), 'job-abort-create', undefined],
+  ['process', () => createUploadJob(makeUploadMetadata({ id: 'job-abort-process' })), (signal) => processUploadJob('job-abort-process', { signal }), 'job-abort-process', 'queued'],
+  ['confirm', async () => {
+    await createUploadJob(makeUploadMetadata({ id: 'job-abort-confirm' }))
+    await processUploadJob('job-abort-confirm')
+  }, (signal) => confirmUploadJob('job-abort-confirm', {}, { signal }), 'job-abort-confirm', 'needs_confirmation'],
+  ['cancel', () => createUploadJob(makeUploadMetadata({ id: 'job-abort-cancel' })), (signal) => cancelUploadJob('job-abort-cancel', { signal }), 'job-abort-cancel', 'queued'],
+])('rechecks AbortSignal inside the mock %s transaction before persistence', async (_, prepare, start, id, expectedStatus) => {
+  // Catches an abort during repository latency committing a mutation and then reporting a false failure.
+  await resetMockState()
+  await prepare()
+  const controller = new AbortController()
+  const operation = start(controller.signal)
+  controller.abort()
+
+  await expect(operation).rejects.toMatchObject({ name: 'AbortError' })
+  const job = (await bootstrap()).uploadJobs.find((item) => item.id === id)
+  if (expectedStatus === undefined) expect(job).toBeUndefined()
+  else expect(job).toMatchObject({ status: expectedStatus })
 })
 
 test.each([
@@ -588,6 +674,41 @@ test('bootstraps versioned notes and preserves source snapshots through update, 
   expect(reloaded).toEqual(undone.note)
 })
 
+test('writes material migration only when legacy state actually needs it', async () => {
+  // Catches listNotes rewriting the entire persisted state on every read.
+  await resetMockState()
+  const setItem = vi.spyOn(Storage.prototype, 'setItem')
+
+  await listNotes()
+  await listNotes()
+  expect(setItem).not.toHaveBeenCalled()
+
+  mutateStoredState((state) => {
+    Reflect.deleteProperty(state, 'uploadJobs')
+    state.notes = state.notes.map(({ version: _version, versions: _versions, ...note }) => note)
+  })
+  setItem.mockClear()
+
+  await Promise.all([listNotes(), listNotes()])
+  expect(setItem).toHaveBeenCalledTimes(1)
+  await listNotes()
+  expect(setItem).toHaveBeenCalledTimes(1)
+})
+
+test('releases the in-flight cancellation barrier after durable cancellation', async () => {
+  // Catches an old in-memory tombstone cancelling a new job after storage is independently cleared.
+  await resetMockState()
+  await createUploadJob(makeUploadMetadata({ id: 'job-reused' }))
+  await cancelUploadJob('job-reused')
+  localStorage.clear()
+  await bootstrap()
+
+  await createUploadJob(makeUploadMetadata({ id: 'job-reused' }))
+  await expect(processUploadJob('job-reused')).resolves.toMatchObject({
+    job: { id: 'job-reused', status: 'needs_confirmation' },
+  })
+})
+
 test('serializes concurrent note edits and rejects unknown or invalid note commands without mutation', async () => {
   // Catches lost updates and domain errors escaping as untyped failures after an async transaction.
   await resetMockState()
@@ -624,24 +745,30 @@ test('uses the documented real material and note routes with exact bodies', asyn
     const confirmation = { subject: 'A-Level Math' }
     const notePatch = { title: 'Edited' }
     const suggestionIds = ['suggestion-1']
+    const signal = new AbortController().signal
+    const changedAt = '2026-08-07T11:00:00.000Z'
 
     await realApi.listNotes()
-    await realApi.createUploadJob(metadata)
-    await realApi.processUploadJob('job/1')
-    await realApi.confirmUploadJob('job/1', confirmation)
-    await realApi.cancelUploadJob('job/1')
-    await realApi.updateNote('note/1', notePatch)
-    await realApi.organizeNote('note/1', suggestionIds)
-    await realApi.undoNote('note/1')
+    await realApi.createUploadJob(metadata, { signal })
+    await realApi.processUploadJob('job/1', { signal })
+    await realApi.confirmUploadJob('job/1', confirmation, { signal })
+    await realApi.cancelUploadJob('job/1', { signal })
+    await realApi.updateNote('note/1', notePatch, { changedAt, reason: 'title_edit' })
+    await realApi.organizeNote('note/1', suggestionIds, { changedAt })
+    await realApi.undoNote('note/1', { changedAt })
 
     expect(get).toHaveBeenCalledWith('/api/notes')
-    expect(post).toHaveBeenNthCalledWith(1, '/api/material-uploads', metadata)
-    expect(post).toHaveBeenNthCalledWith(2, '/api/material-uploads/job%2F1/process')
-    expect(post).toHaveBeenNthCalledWith(3, '/api/material-uploads/job%2F1/confirm', confirmation)
-    expect(post).toHaveBeenNthCalledWith(4, '/api/material-uploads/job%2F1/cancel')
-    expect(patch).toHaveBeenCalledWith('/api/notes/note%2F1', notePatch)
-    expect(post).toHaveBeenNthCalledWith(5, '/api/notes/note%2F1/organize', { suggestionIds })
-    expect(post).toHaveBeenNthCalledWith(6, '/api/notes/note%2F1/undo')
+    expect(post).toHaveBeenNthCalledWith(1, '/api/material-uploads', metadata, { signal })
+    expect(post).toHaveBeenNthCalledWith(2, '/api/material-uploads/job%2F1/process', undefined, { signal })
+    expect(post).toHaveBeenNthCalledWith(3, '/api/material-uploads/job%2F1/confirm', confirmation, { signal })
+    expect(post).toHaveBeenNthCalledWith(4, '/api/material-uploads/job%2F1/cancel', undefined, { signal })
+    expect(patch).toHaveBeenCalledWith('/api/notes/note%2F1', {
+      ...notePatch,
+      changedAt,
+      reason: 'title_edit',
+    })
+    expect(post).toHaveBeenNthCalledWith(5, '/api/notes/note%2F1/organize', { suggestionIds, changedAt })
+    expect(post).toHaveBeenNthCalledWith(6, '/api/notes/note%2F1/undo', { changedAt })
   } finally {
     vi.doUnmock('./client')
     vi.resetModules()
@@ -858,7 +985,7 @@ test('createTask rejects invalid and duplicate entities without changing stored 
 test('createNote and submitSession reject duplicate or invalid entities', async () => {
   // Catches non-task creator families accepting duplicate IDs or malformed payloads.
   await resetMockState()
-  await expect(createNote({ title: 'Missing id' })).rejects.toMatchObject({ name: 'ApiError', code: 'INVALID_INPUT' })
+  await expect(createNote({ title: 'Missing id' })).rejects.toMatchObject({ name: 'ApiError', code: 'INVALID_NOTE' })
   await expect(createNote(makeNote({ id: 'n1', title: 'Duplicate' }))).rejects.toMatchObject({ name: 'ApiError', code: 'DUPLICATE_ID' })
   await expect(submitSession({ score: 10 })).rejects.toMatchObject({ name: 'ApiError', code: 'INVALID_INPUT' })
 
@@ -924,8 +1051,8 @@ test('createTask and createNote reject incomplete or mistyped documented entitie
 
   await expect(createTask({ id: 'task-id-only' })).rejects.toMatchObject({ name: 'ApiError', code: 'INVALID_INPUT' })
   await expect(createTask(makeTask({ id: 'task-bad-type', estimatedMinutes: '15' }))).rejects.toMatchObject({ name: 'ApiError', code: 'INVALID_INPUT' })
-  await expect(createNote({ id: 'note-id-only' })).rejects.toMatchObject({ name: 'ApiError', code: 'INVALID_INPUT' })
-  await expect(createNote(makeNote({ id: 'note-bad-type', content: 'plain text' }))).rejects.toMatchObject({ name: 'ApiError', code: 'INVALID_INPUT' })
+  await expect(createNote({ id: 'note-id-only' })).rejects.toMatchObject({ name: 'ApiError', code: 'INVALID_NOTE' })
+  await expect(createNote(makeNote({ id: 'note-bad-type', content: 'plain text' }))).rejects.toMatchObject({ name: 'ApiError', code: 'INVALID_NOTE' })
 
   const after = await bootstrap()
   expect(after.tasks).toEqual(before.tasks)
