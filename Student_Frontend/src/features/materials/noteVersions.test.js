@@ -17,6 +17,7 @@ const SNAPSHOT_FIELDS = [
   'content',
   'linkedTopics',
   'linkedErrors',
+  'source',
   'changedAt',
   'reason',
 ]
@@ -78,6 +79,7 @@ describe('applyNotePatch', () => {
       content: [{ t: 'p', v: 'Original paragraph' }],
       linkedTopics: ['topic-existing'],
       linkedErrors: ['error-existing'],
+      source: 'typed',
       changedAt: editOptions.changedAt,
       reason: editOptions.reason,
     })
@@ -144,6 +146,34 @@ describe('applyNotePatch', () => {
     )
   })
 
+  test('moves a note to an unclassified root with null folders and undo restores its folder', () => {
+    const moved = applyNotePatch(makeNote(), {
+      folderId: null,
+      folderPath: null,
+    }, {
+      changedAt: '2026-08-06T10:05:00Z',
+      reason: 'move_to_unclassified',
+    })
+
+    expect(moved).toMatchObject({ folderId: null, folderPath: null, version: 2 })
+    const restored = undoLastNoteVersion(moved, '2026-08-06T10:06:00Z')
+    expect(restored).toMatchObject({
+      folderId: 'f-math',
+      folderPath: 'A-Level Math',
+      version: 3,
+    })
+  })
+
+  test.each([
+    ['folder id', { folderId: 42 }],
+    ['folder path', { folderPath: {} }],
+  ])('rejects a non-string, non-null %s', (_case, patch) => {
+    expectVersionError(
+      () => applyNotePatch(makeNote(), patch, editOptions),
+      'INVALID_NOTE_PATCH',
+    )
+  })
+
   test.each([
     ['a custom-prototype note', () => Object.assign(Object.create({ inherited: true }), makeNote())],
     ['an undefined patch value', () => ({ title: undefined })],
@@ -183,6 +213,13 @@ describe('applyNotePatch', () => {
     expect(note).toEqual(original)
   })
 
+  test('rejects an unsupported current note source', () => {
+    expectVersionError(
+      () => applyNotePatch(makeNote({ source: 'unknown_source' }), { title: 'New' }, editOptions),
+      'INVALID_NOTE',
+    )
+  })
+
   test.each([
     ['zero current version', { version: 0 }],
     ['missing version history', { versions: undefined }],
@@ -197,6 +234,7 @@ describe('applyNotePatch', () => {
         content: [],
         linkedTopics: [],
         linkedErrors: [],
+        source: 'typed',
         changedAt: '2026-08-02T00:00:00Z',
         reason: 'edit',
       }],
@@ -212,9 +250,41 @@ describe('applyNotePatch', () => {
         content: [],
         linkedTopics: [],
         linkedErrors: [],
+        source: 'typed',
         changedAt: '2026-08-02T00:00:00Z',
         reason: 'edit',
         extra: true,
+      }],
+    }],
+    ['snapshot missing source', {
+      version: 2,
+      versions: [{
+        version: 1,
+        title: 'V1',
+        folderId: 'f-math',
+        folderPath: 'A-Level Math',
+        tags: [],
+        content: [],
+        linkedTopics: [],
+        linkedErrors: [],
+        changedAt: '2026-08-02T00:00:00Z',
+        reason: 'edit',
+      }],
+    }],
+    ['snapshot with invalid source', {
+      version: 2,
+      versions: [{
+        version: 1,
+        title: 'V1',
+        folderId: 'f-math',
+        folderPath: 'A-Level Math',
+        tags: [],
+        content: [],
+        linkedTopics: [],
+        linkedErrors: [],
+        source: 'unknown_source',
+        changedAt: '2026-08-02T00:00:00Z',
+        reason: 'edit',
       }],
     }],
   ])('rejects an invalid note version state: %s', (_case, overrides) => {
@@ -465,6 +535,7 @@ describe('undoLastNoteVersion', () => {
       content: [{ t: 'p', v: 'Original paragraph' }],
       linkedTopics: ['topic-existing'],
       linkedErrors: ['error-existing'],
+      source: 'typed',
       changedAt: '2026-08-06T10:01:00Z',
       reason: 'undo',
     })
@@ -481,7 +552,7 @@ describe('undoLastNoteVersion', () => {
     const secondUndo = undoLastNoteVersion(firstUndo, '2026-08-06T10:03:00Z')
 
     expect(organized.version).toBe(3)
-    expect(firstUndo).toMatchObject({ version: 4, title: 'Edited', source: 'ai_organized' })
+    expect(firstUndo).toMatchObject({ version: 4, title: 'Edited', source: 'typed' })
     expect(firstUndo.tags).toEqual(['calculus'])
     expect(secondUndo).toMatchObject({ version: 5, title: 'Edited', source: 'ai_organized' })
     expect(secondUndo.tags).toEqual(['calculus', 'exam-ready', 'organized'])
@@ -492,6 +563,57 @@ describe('undoLastNoteVersion', () => {
       'undo',
       'undo',
     ])
+  })
+
+  test('keeps the UI source badge and note content synchronized across organize and repeated undo', () => {
+    const handwritten = makeNote({
+      source: 'handwritten',
+      tags: ['draft'],
+      content: [{ t: 'p', v: 'Raw handwriting' }],
+      aiSuggestions: [{
+        id: 's-content',
+        type: 'append_content',
+        content: [{ t: 'p', v: 'AI organization summary' }],
+      }],
+    })
+
+    const organized = applyNoteOrganization(
+      handwritten,
+      ['s-content'],
+      '2026-08-06T12:00:00Z',
+    )
+    const restoredHandwritten = undoLastNoteVersion(organized, '2026-08-06T12:01:00Z')
+    const restoredAiOrganization = undoLastNoteVersion(
+      restoredHandwritten,
+      '2026-08-06T12:02:00Z',
+    )
+
+    expect(organized.source).toBe('ai_organized')
+    expect(organized.content).toEqual([
+      { t: 'p', v: 'Raw handwriting' },
+      { t: 'p', v: 'AI organization summary' },
+    ])
+    expect(restoredHandwritten.source).toBe('handwritten')
+    expect(restoredHandwritten.content).toEqual([{ t: 'p', v: 'Raw handwriting' }])
+    expect(restoredAiOrganization.source).toBe('ai_organized')
+    expect(restoredAiOrganization.content).toEqual(organized.content)
+    expect(restoredAiOrganization.versions.map(({ source }) => source)).toEqual([
+      'handwritten',
+      'ai_organized',
+      'handwritten',
+    ])
+  })
+
+  test('uses a null source sentinel in history and deletes source when undo restores it', () => {
+    const sourceLess = makeNote()
+    Reflect.deleteProperty(sourceLess, 'source')
+
+    const edited = applyNotePatch(sourceLess, { title: 'Edited source-less note' }, editOptions)
+    const restored = undoLastNoteVersion(edited, '2026-08-06T10:01:00Z')
+
+    expect(edited.versions[0].source).toBeNull()
+    expect(restored).not.toHaveProperty('source')
+    expect(restored.title).toBe(sourceLess.title)
   })
 
   test('fails stably when there is no prior version to restore', () => {

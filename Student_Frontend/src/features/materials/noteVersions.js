@@ -7,6 +7,7 @@ const SNAPSHOT_FIELDS = Object.freeze([
   'content',
   'linkedTopics',
   'linkedErrors',
+  'source',
   'changedAt',
   'reason',
 ])
@@ -23,6 +24,7 @@ const EDITABLE_FIELDS = Object.freeze([
 
 const EDITABLE_FIELD_SET = new Set(EDITABLE_FIELDS)
 const CONTENT_TYPES = new Set(['p', 'h', 'formula', 'image', 'list', 'highlight'])
+const NOTE_SOURCES = new Set(['typed', 'handwritten', 'photo', 'ai_organized'])
 const UNSAFE_KEYS = new Set(['__proto__', 'constructor', 'prototype'])
 
 const hasOwn = (value, key) => Object.prototype.hasOwnProperty.call(value, key)
@@ -144,6 +146,7 @@ const isSnapshot = (snapshot, expectedVersion) => (
   && isContent(snapshot.content)
   && isStringArray(snapshot.linkedTopics)
   && isStringArray(snapshot.linkedErrors)
+  && (snapshot.source === null || NOTE_SOURCES.has(snapshot.source))
   && isNonemptyString(snapshot.changedAt)
   && isNonemptyString(snapshot.reason)
 )
@@ -181,6 +184,7 @@ const assertNoteShape = (note) => {
   if (!hasOwn(note, 'content') || !isContent(note.content)) invalidNote()
   if (!hasOwn(note, 'linkedTopics') || !isStringArray(note.linkedTopics)) invalidNote()
   if (!hasOwn(note, 'linkedErrors') || !isStringArray(note.linkedErrors)) invalidNote()
+  if (hasOwn(note, 'source') && !NOTE_SOURCES.has(note.source)) invalidNote()
   if (hasOwn(note, 'aiSuggestions') && !isDenseArray(note.aiSuggestions)) invalidNote()
 }
 
@@ -209,8 +213,10 @@ const cloneAndValidatePatch = (patch) => {
 
   for (const [field, value] of Object.entries(clone)) {
     if (!EDITABLE_FIELD_SET.has(field)) invalidPatch()
-    if (field === 'title' || field === 'folderId' || field === 'folderPath') {
+    if (field === 'title') {
       if (!isNonemptyString(value)) invalidPatch()
+    } else if (field === 'folderId' || field === 'folderPath') {
+      if (value !== null && !isNonemptyString(value)) invalidPatch()
     } else if (field === 'content') {
       if (!isContent(value)) invalidPatch()
     } else if (!isStringArray(value)) {
@@ -255,6 +261,7 @@ const createSnapshot = (note, changedAt, reason) => ({
   content: cloneSnapshotValue(note.content),
   linkedTopics: cloneSnapshotValue(note.linkedTopics),
   linkedErrors: cloneSnapshotValue(note.linkedErrors),
+  source: hasOwn(note, 'source') ? note.source : null,
   changedAt,
   reason,
 })
@@ -481,7 +488,7 @@ export function undoLastNoteVersion(note, changedAt) {
   const target = noteClone.versions[noteClone.versions.length - 1]
   const currentSnapshot = createSnapshot(noteClone, stableChangedAt, 'undo')
 
-  return {
+  const restored = {
     ...noteClone,
     title: target.title,
     folderId: target.folderId,
@@ -494,4 +501,12 @@ export function undoLastNoteVersion(note, changedAt) {
     versions: [...noteClone.versions, currentSnapshot],
     version: noteClone.version + 1,
   }
+
+  if (target.source === null) {
+    Reflect.deleteProperty(restored, 'source')
+  } else {
+    restored.source = target.source
+  }
+
+  return restored
 }
