@@ -65,6 +65,14 @@ const parseEvidenceTime = (value) => {
 const normalizeEvidenceTime = (value) => parseEvidenceTime(value)?.normalized ?? null
 const evidenceTimeValue = (value) => parseEvidenceTime(value)?.timeValue ?? null
 export const isValidEvidenceTime = (value) => parseEvidenceTime(value) !== null
+export const compareEvidenceTimes = (left, right) => {
+  const leftTimeValue = evidenceTimeValue(left)
+  const rightTimeValue = evidenceTimeValue(right)
+  if (leftTimeValue === null && rightTimeValue === null) return 0
+  if (leftTimeValue === null) return 1
+  if (rightTimeValue === null) return -1
+  return leftTimeValue - rightTimeValue
+}
 
 const isCompleteRedoEvidence = (attempt) => (
   isRecord(attempt)
@@ -88,6 +96,84 @@ const normalizeRedoHistory = (value) => (
   Array.isArray(value) ? value.filter(isRecord).map(cloneData) : []
 )
 const normalizeRepeatCount = (value) => (Number.isInteger(value) && value >= 0 ? value : 0)
+
+const legacyOccurrenceSlots = (errorItem) => {
+  const occurrences = Array.isArray(errorItem.occurrences)
+    ? errorItem.occurrences.map(normalizeEvidenceTime)
+    : []
+  if (occurrences.length === 0) {
+    const first = normalizeEvidenceTime(errorItem.firstOccurredAt)
+    const last = normalizeEvidenceTime(errorItem.lastOccurredAt)
+    if (first) occurrences.push(first)
+    if (last && last !== first) occurrences.push(last)
+  }
+  return occurrences
+}
+
+const fallbackOccurrenceKey = (errorItem, occurredAt, index) => {
+  const questionId = nonemptyString(errorItem.questionId)
+  const sessionId = nonemptyString(errorItem.sessionId)
+  if (index === 0 && sessionId && questionId) {
+    return `session:${sessionId}:question:${questionId}`
+  }
+  if (questionId) return `legacy:${questionId}:${occurredAt}`
+
+  const errorId = nonemptyString(errorItem.id)
+  return errorId ? `card:${errorId}:${occurredAt}` : `legacy:unknown:${occurredAt}`
+}
+
+const normalizeOccurrenceEvidence = (errorItem) => {
+  const occurrenceRecords = Array.isArray(errorItem.occurrenceRecords)
+    ? errorItem.occurrenceRecords
+    : []
+  const occurrenceKeys = Array.isArray(errorItem.occurrenceKeys)
+    ? errorItem.occurrenceKeys
+    : []
+  const occurrenceSlots = legacyOccurrenceSlots(errorItem)
+  const recordCount = Math.max(
+    occurrenceRecords.length,
+    occurrenceKeys.length,
+    occurrenceSlots.length,
+  )
+  const seen = new Set()
+  const records = []
+
+  for (let index = 0; index < recordCount; index += 1) {
+    const record = isRecord(occurrenceRecords[index]) ? occurrenceRecords[index] : {}
+    const occurredAt = normalizeEvidenceTime(record.occurredAt) ?? occurrenceSlots[index]
+    if (!occurredAt) continue
+
+    const key = nonemptyString(record.key)
+      ?? nonemptyString(occurrenceKeys[index])
+      ?? fallbackOccurrenceKey(errorItem, occurredAt, index)
+    if (seen.has(key)) continue
+    seen.add(key)
+    records.push({ key, occurredAt })
+  }
+
+  return records
+}
+
+const redoOccurrenceKey = (errorItem, attemptedAt) => {
+  const errorId = nonemptyString(errorItem.id)
+  if (errorId) return `redo:error:${errorId}:${attemptedAt}`
+
+  const questionId = nonemptyString(errorItem.questionId)
+  return questionId
+    ? `redo:question:${questionId}:${attemptedAt}`
+    : `redo:unknown:${attemptedAt}`
+}
+
+const occurrenceTimeBounds = (records) => records.reduce((bounds, record) => {
+  const timeValue = evidenceTimeValue(record.occurredAt)
+  const firstTimeValue = bounds.first ? evidenceTimeValue(bounds.first.occurredAt) : null
+  const lastTimeValue = bounds.last ? evidenceTimeValue(bounds.last.occurredAt) : null
+  return {
+    first: firstTimeValue === null || timeValue < firstTimeValue ? record : bounds.first,
+    last: lastTimeValue === null || timeValue > lastTimeValue ? record : bounds.last,
+  }
+}, { first: null, last: null })
+
 const latestCompleteRedo = (errorItem) => {
   const history = Array.isArray(errorItem?.redoHistory) ? errorItem.redoHistory : []
   return history.reduce((latest, candidate) => {
@@ -143,9 +229,29 @@ export function applyRedoAttempt(errorItem, attempt) {
 
   const redoHistory = [...normalizeRedoHistory(current.redoHistory), normalizedAttempt]
   const repeatCount = normalizeRepeatCount(current.repeatCount)
+  const recurrenceEvidence = {}
+
+  if (!normalizedAttempt.isCorrect) {
+    const occurrenceRecords = normalizeOccurrenceEvidence(current)
+    const occurrenceKey = redoOccurrenceKey(current, normalizedAttempt.attemptedAt)
+    if (occurrenceRecords.some((record) => record.key === occurrenceKey)) {
+      throw new RedoChronologyError()
+    }
+    occurrenceRecords.push({
+      key: occurrenceKey,
+      occurredAt: normalizedAttempt.attemptedAt,
+    })
+    recurrenceEvidence.occurrenceRecords = occurrenceRecords.map(cloneData)
+    recurrenceEvidence.occurrenceKeys = occurrenceRecords.map((record) => record.key)
+    recurrenceEvidence.occurrences = occurrenceRecords.map((record) => record.occurredAt)
+    const bounds = occurrenceTimeBounds(occurrenceRecords)
+    recurrenceEvidence.firstOccurredAt = bounds.first.occurredAt
+    recurrenceEvidence.lastOccurredAt = bounds.last.occurredAt
+  }
 
   return clearVerification({
     ...current,
+    ...recurrenceEvidence,
     redoHistory,
     repeatCount: normalizedAttempt.isCorrect ? repeatCount : repeatCount + 1,
     status: normalizedAttempt.isCorrect ? 'verification_due' : 'pending_review',

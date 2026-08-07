@@ -187,7 +187,7 @@ describe('buildErrorCard', () => {
 })
 
 describe('mergeErrorCards', () => {
-  test('merges repeated questions immutably, chronologically, and without duplicate occurrences', () => {
+  test('merges repeated questions immutably in stable identity order without duplicate occurrences', () => {
     const existing = [{
       id: 'e1',
       questionId: 'q1',
@@ -228,7 +228,7 @@ describe('mergeErrorCards', () => {
       id: 'e1',
       questionId: 'q1',
       repeatCount: 3,
-      occurrences: ['2026-08-01', '2026-08-03', '2026-08-06'],
+      occurrences: ['2026-08-03', '2026-08-06', '2026-08-01'],
       firstOccurredAt: '2026-08-01',
       lastOccurredAt: '2026-08-06',
       status: 'pending_review',
@@ -825,5 +825,85 @@ describe('mergeErrorCards', () => {
     }], [])
 
     expect(merged[0].variantVerification).toBeNull()
+  })
+
+  test('preserves occurrence identity order and semantic time bounds across reload and upsert', () => {
+    const earlier = {
+      key: 'session:earlier:question:q1',
+      occurredAt: '2026-08-04T01:00:00+08:00',
+    }
+    const later = {
+      key: 'session:later:question:q1',
+      occurredAt: '2026-08-04T00:30:00-02:00',
+    }
+    const redo = {
+      key: 'redo:error:e1:2026-08-04T02:00:00Z',
+      occurredAt: '2026-08-04T02:00:00Z',
+    }
+    const existing = {
+      id: 'e1',
+      questionId: 'q1',
+      repeatCount: 3,
+      status: 'pending_review',
+      occurrences: [earlier.occurredAt, later.occurredAt, redo.occurredAt],
+      occurrenceKeys: [earlier.key, later.key, redo.key],
+      occurrenceRecords: [earlier, later, redo],
+      hasIncompleteOccurrenceHistory: false,
+    }
+
+    const reloaded = mergeErrorCards([existing], [])[0]
+
+    expect(reloaded).toMatchObject({
+      firstOccurredAt: earlier.occurredAt,
+      lastOccurredAt: later.occurredAt,
+      occurrenceKeys: [earlier.key, later.key, redo.key],
+    })
+
+    const incoming = {
+      id: 'incoming-e1',
+      questionId: 'q1',
+      repeatCount: 1,
+      status: 'pending_review',
+      occurrences: ['2026-08-04T03:00:00Z'],
+      occurrenceKeys: ['session:new:question:q1'],
+      occurrenceRecords: [{
+        key: 'session:new:question:q1',
+        occurredAt: '2026-08-04T03:00:00Z',
+      }],
+      hasIncompleteOccurrenceHistory: false,
+    }
+    const merged = mergeErrorCards([reloaded], [incoming])[0]
+
+    expect(merged).toMatchObject({
+      repeatCount: 4,
+      firstOccurredAt: earlier.occurredAt,
+      lastOccurredAt: '2026-08-04T03:00:00Z',
+      occurrenceKeys: [
+        earlier.key,
+        later.key,
+        redo.key,
+        'session:new:question:q1',
+      ],
+    })
+  })
+
+  test('skips an invalid legacy occurrence slot without shifting a later timestamp onto the wrong key', () => {
+    const reloaded = mergeErrorCards([{
+      id: 'e1',
+      questionId: 'q1',
+      repeatCount: 1,
+      status: 'pending_review',
+      occurrences: ['not-a-date', '2026-08-02'],
+      occurrenceKeys: ['invalid-slot-key', 'valid-slot-key'],
+      hasIncompleteOccurrenceHistory: true,
+    }], [])[0]
+
+    expect(reloaded).toMatchObject({
+      occurrences: ['2026-08-02'],
+      occurrenceKeys: ['valid-slot-key'],
+      occurrenceRecords: [{ key: 'valid-slot-key', occurredAt: '2026-08-02' }],
+      firstOccurredAt: '2026-08-02',
+      lastOccurredAt: '2026-08-02',
+    })
   })
 })

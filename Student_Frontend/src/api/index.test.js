@@ -206,17 +206,58 @@ test('addErrors returns and persists the submitted errors', async () => {
   })
 })
 
-test('submitRedo persists redo history and error review state', async () => {
-  // Catches a mock adapter mutation that loses a redo attempt between requests.
+test('submitRedo persists aligned wrong-redo recurrence evidence that survives a later upsert', async () => {
+  // Catches reload/upsert normalization erasing a plan-required wrong-redo repeat increment.
   await resetMockState()
   const attempt = { attemptedAt: '2026-08-06', answer: '0', isCorrect: false, timeSpent: 30 }
+  const legacyKey = 'legacy:q-err-1:2026-07-30'
+  const redoKey = 'redo:error:e1:2026-08-06'
 
-  await expect(submitRedo('e1', attempt)).resolves.toMatchObject({
-    error: expect.objectContaining({ id: 'e1', redoHistory: expect.arrayContaining([attempt]), repeatCount: 3, status: 'pending_review' }),
+  const submitted = await submitRedo('e1', attempt)
+  expect(submitted).toMatchObject({
+    error: expect.objectContaining({
+      id: 'e1',
+      redoHistory: expect.arrayContaining([attempt]),
+      repeatCount: 3,
+      status: 'pending_review',
+      firstOccurredAt: '2026-07-30',
+      lastOccurredAt: '2026-08-06',
+      occurrences: ['2026-07-30', '2026-08-06'],
+      occurrenceKeys: [legacyKey, redoKey],
+      occurrenceRecords: [
+        { key: legacyKey, occurredAt: '2026-07-30' },
+        { key: redoKey, occurredAt: '2026-08-06' },
+      ],
+    }),
   })
-  await expect(bootstrap()).resolves.toMatchObject({
-    errors: expect.arrayContaining([expect.objectContaining({ id: 'e1', redoHistory: expect.arrayContaining([attempt]) })]),
+  const persisted = (await bootstrap()).errors.find((item) => item.id === 'e1')
+  expect(persisted).toMatchObject({
+    repeatCount: 3,
+    occurrenceKeys: [legacyKey, redoKey],
+    occurrenceRecords: [
+      { key: legacyKey, occurredAt: '2026-07-30' },
+      { key: redoKey, occurredAt: '2026-08-06' },
+    ],
   })
+
+  const nextSessionKey = 'session:s-after-redo:question:q-err-1'
+  const recurringSession = makeError({
+    id: 'fresh-after-redo',
+    questionId: 'q-err-1',
+    firstOccurredAt: '2026-08-07',
+    lastOccurredAt: '2026-08-07',
+    occurrences: ['2026-08-07'],
+    occurrenceKeys: [nextSessionKey],
+    occurrenceRecords: [{ key: nextSessionKey, occurredAt: '2026-08-07' }],
+  })
+  const upserted = (await upsertErrors([recurringSession])).errors.find((item) => item.id === 'e1')
+
+  expect(upserted).toMatchObject({
+    repeatCount: 4,
+    occurrenceKeys: [legacyKey, redoKey, nextSessionKey],
+    hasIncompleteOccurrenceHistory: true,
+  })
+  expect((await bootstrap()).errors.find((item) => item.id === 'e1')).toEqual(upserted)
 })
 
 test('createNote returns and persists the note', async () => {

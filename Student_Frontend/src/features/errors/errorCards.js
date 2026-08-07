@@ -1,4 +1,5 @@
 import { normalizeErrorType } from './errorTypes'
+import { compareEvidenceTimes, isValidEvidenceTime } from './masteryRules'
 
 const LINKED_ABILITY_BY_ERROR_TYPE = Object.freeze({
   knowledge: 'knowledge recall',
@@ -178,15 +179,6 @@ export function buildErrorCard({ question, session, id, occurredAt } = {}) {
   }
 }
 
-const sortOccurrenceRecords = (records) => [...records].sort((left, right) => {
-  if (left.occurredAt && right.occurredAt) {
-    const timeOrder = left.occurredAt.localeCompare(right.occurredAt)
-    if (timeOrder !== 0) return timeOrder
-  } else if (left.occurredAt) return -1
-  else if (right.occurredAt) return 1
-  return left.key.localeCompare(right.key)
-})
-
 const deduplicateOccurrenceRecords = (records) => {
   const byKey = new Map()
   records.forEach((record) => {
@@ -194,16 +186,33 @@ const deduplicateOccurrenceRecords = (records) => {
     const current = byKey.get(record.key)
     if (!current || (!current.occurredAt && record.occurredAt)) byKey.set(record.key, record)
   })
-  return sortOccurrenceRecords([...byKey.values()])
+  return [...byKey.values()]
 }
 
-const legacyOccurrenceValues = (card) => {
+const occurrenceTimeBounds = (records) => records.reduce((bounds, record) => {
+  if (!isValidEvidenceTime(record.occurredAt)) return bounds
+  return {
+    first: !bounds.first || compareEvidenceTimes(record.occurredAt, bounds.first) < 0
+      ? record.occurredAt
+      : bounds.first,
+    last: !bounds.last || compareEvidenceTimes(record.occurredAt, bounds.last) > 0
+      ? record.occurredAt
+      : bounds.last,
+  }
+}, { first: null, last: null })
+
+const legacyOccurrenceSlots = (card) => {
   const occurrences = Array.isArray(card.occurrences)
-    ? card.occurrences.map(nonemptyString).filter(Boolean)
+    ? card.occurrences.map((value) => {
+      const occurredAt = nonemptyString(value)
+      return isValidEvidenceTime(occurredAt) ? occurredAt : null
+    })
     : []
   if (occurrences.length === 0) {
-    const first = nonemptyString(card.firstOccurredAt)
-    const last = nonemptyString(card.lastOccurredAt)
+    const firstCandidate = nonemptyString(card.firstOccurredAt)
+    const lastCandidate = nonemptyString(card.lastOccurredAt)
+    const first = isValidEvidenceTime(firstCandidate) ? firstCandidate : null
+    const last = isValidEvidenceTime(lastCandidate) ? lastCandidate : null
     if (first) occurrences.push(first)
     if (last && last !== first) occurrences.push(last)
   }
@@ -219,16 +228,17 @@ const normalizeOccurrenceRecords = (card, questionId, id) => {
     if (persisted.length > 0) return deduplicateOccurrenceRecords(persisted)
   }
 
-  const occurrences = legacyOccurrenceValues(card)
+  const occurrenceSlots = legacyOccurrenceSlots(card)
   const providedKeys = Array.isArray(card.occurrenceKeys)
-    ? card.occurrenceKeys.map(nonemptyString).filter(Boolean)
+    ? card.occurrenceKeys.map(nonemptyString)
     : []
   const sessionId = nonemptyString(card.sessionId)
-  const recordCount = Math.max(occurrences.length, providedKeys.length)
+  const recordCount = Math.max(occurrenceSlots.length, providedKeys.length)
   const records = []
 
   for (let index = 0; index < recordCount; index += 1) {
-    const occurredAt = occurrences[index] ?? null
+    const occurredAt = occurrenceSlots[index] ?? null
+    if (index < occurrenceSlots.length && !occurredAt) continue
     const key = providedKeys[index]
       ?? (index === 0 ? sessionOccurrenceKey(sessionId, questionId) : null)
       ?? legacyOccurrenceKey(questionId, occurredAt)
@@ -329,8 +339,9 @@ const normalizeCard = (card, source) => {
   const occurrenceRecords = normalizeOccurrenceRecords(card, questionId, id)
   const occurrences = occurrenceRecords.map((record) => record.occurredAt).filter(Boolean)
   const occurrenceKeys = occurrenceRecords.map((record) => record.key)
-  const firstOccurredAt = occurrences.at(0) ?? nonemptyString(card.firstOccurredAt)
-  const lastOccurredAt = occurrences.at(-1) ?? nonemptyString(card.lastOccurredAt)
+  const occurrenceBounds = occurrenceTimeBounds(occurrenceRecords)
+  const firstOccurredAt = occurrenceBounds.first ?? nonemptyString(card.firstOccurredAt)
+  const lastOccurredAt = occurrenceBounds.last ?? nonemptyString(card.lastOccurredAt)
   const rawStatus = nonemptyString(card.status)
   const status = normalizeStatus(rawStatus, source)
   const lifecycleEvidenceAllowed = source === 'existing'
@@ -387,6 +398,7 @@ const mergeRepeatedCard = (current, incoming) => {
   ])
   const occurrences = occurrenceRecords.map((record) => record.occurredAt).filter(Boolean)
   const occurrenceKeys = occurrenceRecords.map((record) => record.key)
+  const occurrenceBounds = occurrenceTimeBounds(occurrenceRecords)
   const repeatCount = Math.max(
     current.repeatCount + newOccurrenceRecords.length,
     incoming.repeatCount,
@@ -402,10 +414,10 @@ const mergeRepeatedCard = (current, incoming) => {
     occurrences,
     occurrenceKeys,
     occurrenceRecords: occurrenceRecords.map(cloneData),
-    firstOccurredAt: occurrences.at(0)
+    firstOccurredAt: occurrenceBounds.first
       ?? current.firstOccurredAt
       ?? incoming.firstOccurredAt,
-    lastOccurredAt: occurrences.at(-1)
+    lastOccurredAt: occurrenceBounds.last
       ?? incoming.lastOccurredAt
       ?? current.lastOccurredAt,
     repeatCount,

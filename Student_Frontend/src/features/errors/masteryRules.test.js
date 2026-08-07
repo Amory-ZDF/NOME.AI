@@ -5,6 +5,7 @@ import {
   canMarkMastered,
   recordVariantVerification,
 } from './masteryRules'
+import { mergeErrorCards } from './errorCards'
 
 const correctRedo = {
   attemptedAt: '2026-08-06T10:30:00.000Z',
@@ -160,6 +161,16 @@ describe('applyRedoAttempt', () => {
     const item = {
       status: 'verification_due',
       repeatCount: 2,
+      occurrences: ['2026-08-08T09:00:00Z', '2026-08-09T09:00:00Z'],
+      occurrenceKeys: [
+        'session:s-1:question:q-1',
+        'session:s-2:question:q-1',
+      ],
+      occurrenceRecords: [
+        { key: 'session:s-1:question:q-1', occurredAt: '2026-08-08T09:00:00Z' },
+        { key: 'session:s-2:question:q-1', occurredAt: '2026-08-09T09:00:00Z' },
+      ],
+      hasIncompleteOccurrenceHistory: false,
       redoHistory: [
         redoAt('2026-08-10T09:00:00Z'),
         redoAt('2026-08-01T09:00:00Z'),
@@ -204,6 +215,197 @@ describe('applyRedoAttempt', () => {
       redoAt('2026-08-10T02:00:01Z', false),
     ])
     expect(item).toEqual(before)
+  })
+
+  test('backs a wrong-redo increment with a stable occurrence identity across reload and recurrence merge', () => {
+    const sessionKey = 'session:s-1:question:q-1'
+    const item = {
+      id: 'error-1',
+      questionId: 'q-1',
+      status: 'reviewing',
+      repeatCount: 1,
+      occurrences: ['2026-08-01T09:00:00Z'],
+      occurrenceKeys: [sessionKey],
+      occurrenceRecords: [{ key: sessionKey, occurredAt: '2026-08-01T09:00:00Z' }],
+      hasIncompleteOccurrenceHistory: false,
+      redoHistory: [],
+    }
+    const before = structuredClone(item)
+    const attempt = redoAt('2026-08-02T09:00:00Z', false)
+    const redoKey = 'redo:error:error-1:2026-08-02T09:00:00Z'
+
+    const redone = applyRedoAttempt(item, attempt)
+
+    expect(redone).toMatchObject({
+      repeatCount: 2,
+      hasIncompleteOccurrenceHistory: false,
+      firstOccurredAt: '2026-08-01T09:00:00Z',
+      lastOccurredAt: '2026-08-02T09:00:00Z',
+      occurrences: ['2026-08-01T09:00:00Z', '2026-08-02T09:00:00Z'],
+      occurrenceKeys: [sessionKey, redoKey],
+      occurrenceRecords: [
+        { key: sessionKey, occurredAt: '2026-08-01T09:00:00Z' },
+        { key: redoKey, occurredAt: '2026-08-02T09:00:00Z' },
+      ],
+    })
+
+    const reloaded = mergeErrorCards([redone], [])[0]
+    expect(reloaded).toMatchObject({
+      repeatCount: 2,
+      occurrenceKeys: [sessionKey, redoKey],
+      hasIncompleteOccurrenceHistory: false,
+    })
+
+    const nextSessionKey = 'session:s-2:question:q-1'
+    const merged = mergeErrorCards([reloaded], [{
+      ...item,
+      id: 'incoming-error',
+      repeatCount: 1,
+      occurrences: ['2026-08-03T09:00:00Z'],
+      occurrenceKeys: [nextSessionKey],
+      occurrenceRecords: [{ key: nextSessionKey, occurredAt: '2026-08-03T09:00:00Z' }],
+    }])[0]
+
+    expect(merged).toMatchObject({
+      id: 'error-1',
+      repeatCount: 3,
+      occurrenceKeys: [sessionKey, redoKey, nextSessionKey],
+      hasIncompleteOccurrenceHistory: false,
+    })
+    expect(item).toEqual(before)
+  })
+
+  test('deduplicates prior occurrence evidence before appending one wrong-redo identity', () => {
+    const sessionRecord = { key: 'session:s-1:question:q-1', occurredAt: '2026-08-01' }
+    const item = {
+      id: 'error-1',
+      questionId: 'q-1',
+      status: 'reviewing',
+      repeatCount: 1,
+      occurrences: ['2026-08-01', '2026-08-01'],
+      occurrenceKeys: [sessionRecord.key, sessionRecord.key],
+      occurrenceRecords: [sessionRecord, structuredClone(sessionRecord)],
+      hasIncompleteOccurrenceHistory: false,
+      redoHistory: [],
+    }
+
+    const next = applyRedoAttempt(item, redoAt('2026-08-02', false))
+
+    expect(next.repeatCount).toBe(2)
+    expect(next.occurrences).toEqual(['2026-08-01', '2026-08-02'])
+    expect(next.occurrenceKeys).toEqual([
+      sessionRecord.key,
+      'redo:error:error-1:2026-08-02',
+    ])
+    expect(next.occurrenceRecords).toHaveLength(2)
+  })
+
+  test('skips an invalid occurrence slot without shifting a later timestamp onto the wrong key', () => {
+    const item = {
+      id: 'error-1',
+      questionId: 'q-1',
+      status: 'reviewing',
+      repeatCount: 1,
+      occurrences: ['not-a-date', '2026-08-02'],
+      occurrenceKeys: ['invalid-slot-key', 'valid-slot-key'],
+      occurrenceRecords: [],
+      hasIncompleteOccurrenceHistory: true,
+      redoHistory: [],
+    }
+
+    const next = applyRedoAttempt(item, redoAt('2026-08-03', false))
+
+    expect(next.occurrenceKeys).toEqual([
+      'valid-slot-key',
+      'redo:error:error-1:2026-08-03',
+    ])
+    expect(next.occurrenceRecords).toEqual([
+      { key: 'valid-slot-key', occurredAt: '2026-08-02' },
+      { key: 'redo:error:error-1:2026-08-03', occurredAt: '2026-08-03' },
+    ])
+  })
+
+  test('derives first and last occurrence from semantic time while preserving identity order', () => {
+    const laterRecord = {
+      key: 'session:later:question:q-1',
+      occurredAt: '2026-08-04T10:00:00+08:00',
+    }
+    const earlierRecord = {
+      key: 'session:earlier:question:q-1',
+      occurredAt: '2026-08-01T23:00:00-02:00',
+    }
+    const item = {
+      id: 'error-1',
+      questionId: 'q-1',
+      status: 'reviewing',
+      repeatCount: 2,
+      occurrences: [laterRecord.occurredAt, earlierRecord.occurredAt],
+      occurrenceKeys: [laterRecord.key, earlierRecord.key],
+      occurrenceRecords: [laterRecord, earlierRecord],
+      hasIncompleteOccurrenceHistory: false,
+      redoHistory: [],
+    }
+
+    const next = applyRedoAttempt(item, redoAt('2026-08-03T00:00:00Z', false))
+
+    expect(next.occurrenceKeys).toEqual([
+      laterRecord.key,
+      earlierRecord.key,
+      'redo:error:error-1:2026-08-03T00:00:00Z',
+    ])
+    expect(next.firstOccurredAt).toBe(earlierRecord.occurredAt)
+    expect(next.lastOccurredAt).toBe(laterRecord.occurredAt)
+  })
+
+  test('preserves a legacy incomplete aggregate and increments it once for a wrong redo', () => {
+    const legacy = {
+      id: 'legacy-error',
+      questionId: 'legacy-question',
+      status: 'reviewing',
+      repeatCount: 4,
+      occurrences: ['2026-07-01'],
+      occurrenceKeys: ['legacy:legacy-question:2026-07-01'],
+      occurrenceRecords: [{ key: 'legacy:legacy-question:2026-07-01', occurredAt: '2026-07-01' }],
+      hasIncompleteOccurrenceHistory: true,
+      redoHistory: [],
+    }
+
+    const redone = applyRedoAttempt(legacy, redoAt('2026-08-02', false))
+    const reloaded = mergeErrorCards([redone], [])[0]
+
+    expect(redone).toMatchObject({
+      repeatCount: 5,
+      hasIncompleteOccurrenceHistory: true,
+      occurrenceKeys: [
+        'legacy:legacy-question:2026-07-01',
+        'redo:error:legacy-error:2026-08-02',
+      ],
+    })
+    expect(reloaded).toMatchObject({
+      repeatCount: 5,
+      hasIncompleteOccurrenceHistory: true,
+    })
+  })
+
+  test('a correct redo changes neither recurrence count nor occurrence identities', () => {
+    const item = {
+      id: 'error-1',
+      questionId: 'q-1',
+      status: 'reviewing',
+      repeatCount: 1,
+      occurrences: ['2026-08-01'],
+      occurrenceKeys: ['session:s-1:question:q-1'],
+      occurrenceRecords: [{ key: 'session:s-1:question:q-1', occurredAt: '2026-08-01' }],
+      hasIncompleteOccurrenceHistory: false,
+      redoHistory: [],
+    }
+
+    const next = applyRedoAttempt(item, redoAt('2026-08-02', true))
+
+    expect(next.repeatCount).toBe(1)
+    expect(next.occurrences).toEqual(item.occurrences)
+    expect(next.occurrenceKeys).toEqual(item.occurrenceKeys)
+    expect(next.occurrenceRecords).toEqual(item.occurrenceRecords)
   })
 })
 
