@@ -46,7 +46,7 @@ import {
 } from '../features/materials/materialContracts'
 
 const repository = createMockRepository({ seedFactory: createSeedState })
-const cancelledUploadIds = new Set()
+const pendingUploadCancellations = new Map()
 
 const isRecord = (value) => value !== null && typeof value === 'object' && !Array.isArray(value)
 const hasId = (value, field = 'id') => typeof value?.[field] === 'string' && value[field].trim().length > 0
@@ -256,8 +256,19 @@ const replaceUploadJob = (state, replacement) => ({
 })
 
 const throwTerminalUploadState = (job) => {
-  if (cancelledUploadIds.has(job.id) || job.status === 'cancelled') throw uploadCancelled()
+  if (job.status === 'cancelled') throw uploadCancelled()
   if (job.status === 'completed') throw uploadAlreadyCompleted()
+}
+
+const createCancellationAttempt = () => {
+  let settle
+  const settled = new Promise((resolve) => { settle = resolve })
+  return { settle, settled }
+}
+
+const waitForPendingCancellation = async (id) => {
+  const pending = pendingUploadCancellations.get(id)
+  return pending ? pending.settled : false
 }
 
 const toMaterialApiError = (error) => {
@@ -711,7 +722,8 @@ export function bootstrap() {
 }
 
 export async function resetMockState() {
-  cancelledUploadIds.clear()
+  pendingUploadCancellations.forEach(({ settle }) => settle(false))
+  pendingUploadCancellations.clear()
   await repository.reset()
   return persistMaterialMigration()
 }
@@ -982,7 +994,8 @@ export const processUploadJob = async (id, options = {}) => {
   }
   assertUploadId(id)
   throwIfAborted(options?.signal)
-  if (cancelledUploadIds.has(id)) throw uploadCancelled()
+  if (await waitForPendingCancellation(id)) throw uploadCancelled()
+  throwIfAborted(options?.signal)
 
   let processingJob
   try {
@@ -1005,7 +1018,8 @@ export const processUploadJob = async (id, options = {}) => {
     })
 
     throwIfAborted(options?.signal)
-    if (cancelledUploadIds.has(id)) throw uploadCancelled()
+    if (await waitForPendingCancellation(id)) throw uploadCancelled()
+    throwIfAborted(options?.signal)
     const fixtureKey = selectMaterialFixture(processingJob)
     const processed = adaptProcessedJob(
       processingJob,
@@ -1027,7 +1041,7 @@ export const processUploadJob = async (id, options = {}) => {
       await repository.update((current) => {
         const materialState = normalizeMaterialState(current)
         const currentJob = findUploadJob(materialState, id)
-        if (!currentJob || currentJob.status !== 'processing' || cancelledUploadIds.has(id)) return materialState
+        if (!currentJob || currentJob.status !== 'processing') return materialState
         return replaceUploadJob(materialState, { ...currentJob, status: 'queued', progress: 0 })
       })
       throw error
@@ -1039,7 +1053,7 @@ export const processUploadJob = async (id, options = {}) => {
     await repository.update((current) => {
       const materialState = normalizeMaterialState(current)
       const currentJob = findUploadJob(materialState, id)
-      if (!currentJob || currentJob.status !== 'processing' || cancelledUploadIds.has(id)) return materialState
+      if (!currentJob || currentJob.status !== 'processing') return materialState
       failedJob = {
         ...currentJob,
         status: 'failed',
@@ -1099,7 +1113,13 @@ export const cancelUploadJob = async (id, options = {}) => {
   )
   assertUploadId(id)
   throwIfAborted(options?.signal)
-  cancelledUploadIds.add(id)
+  const priorAttempt = pendingUploadCancellations.get(id)
+  if (priorAttempt) await priorAttempt.settled
+  throwIfAborted(options?.signal)
+
+  const attempt = createCancellationAttempt()
+  pendingUploadCancellations.set(id, attempt)
+  let durableCancellation = false
   try {
     const state = await repository.update((current) => {
       throwIfAborted(options?.signal)
@@ -1111,11 +1131,14 @@ export const cancelUploadJob = async (id, options = {}) => {
       const { failure: _failedOnlyDiagnostic, ...cancellableJob } = job
       return replaceUploadJob(materialState, { ...cancellableJob, status: 'cancelled' })
     })
-    return { job: findUploadJob(state, id) }
+    const job = findUploadJob(state, id)
+    durableCancellation = job?.status === 'cancelled'
+    return { job }
   } catch (error) {
     mapMaterialDomainError(error)
   } finally {
-    cancelledUploadIds.delete(id)
+    attempt.settle(durableCancellation)
+    if (pendingUploadCancellations.get(id) === attempt) pendingUploadCancellations.delete(id)
   }
 }
 

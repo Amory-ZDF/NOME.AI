@@ -430,6 +430,9 @@ All four material lifecycle calls accept an optional `AbortSignal`, and the real
 to `fetch`. Mock transactions recheck the signal inside the serialized repository recipe, before any
 durable mutation. Cancellation barriers exist only while cancellation is in flight and are removed in
 `finally` after the transaction settles, so a later independently recreated job may safely reuse an id.
+Processing waits for an in-flight cancellation outcome: only a durably persisted `cancelled` job ends
+processing as cancelled. If cancellation aborts or fails before persistence, processing continues or
+recovers to a retryable state and never leaves a `processing` job stranded.
 
 Every upload job crossing bootstrap, success, or error boundaries is validated as a plain, dense JSON
 object with the exact documented top-level fields. `result` must match the complete

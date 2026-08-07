@@ -518,6 +518,87 @@ test('makes cancellation terminal before and during processing without resurrect
   expect((await bootstrap()).uploadJobs.find(({ id }) => id === 'job-race')).toMatchObject({ status: 'cancelled' })
 })
 
+test('keeps processing recoverable when a waiting cancellation is aborted before persistence', async () => {
+  // Catches a transient cancellation barrier being mistaken for a durable cancelled state.
+  await resetMockState()
+  await createUploadJob(makeUploadMetadata({ id: 'job-aborted-cancel-race' }))
+  const controller = new AbortController()
+  const nativeSetItem = Storage.prototype.setItem
+  let cancellationOutcomePromise
+  const setItem = vi.spyOn(Storage.prototype, 'setItem').mockImplementation(function abortCancellationDuringProcessing(key, value) {
+    nativeSetItem.call(this, key, value)
+    const storedJob = JSON.parse(value)?.data?.uploadJobs?.find(({ id }) => id === 'job-aborted-cancel-race')
+    if (storedJob?.status === 'processing' && !cancellationOutcomePromise) {
+      cancellationOutcomePromise = cancelUploadJob('job-aborted-cancel-race', { signal: controller.signal })
+        .then((result) => ({ result }), (error) => ({ error }))
+      controller.abort()
+    }
+  })
+  const processing = processUploadJob('job-aborted-cancel-race')
+  const processingOutcomePromise = processing.then(
+    (value) => ({ value }),
+    (error) => ({ error }),
+  )
+  const processingOutcome = await processingOutcomePromise
+  const cancellationOutcome = await cancellationOutcomePromise
+  setItem.mockRestore()
+
+  expect(cancellationOutcome.error).toMatchObject({ name: 'AbortError' })
+  let persisted = (await bootstrap()).uploadJobs.find(({ id }) => id === 'job-aborted-cancel-race')
+
+  expect(persisted.status).not.toBe('processing')
+  if (persisted.status === 'queued' || persisted.status === 'failed') {
+    await expect(processUploadJob(persisted.id)).resolves.toMatchObject({
+      job: { id: persisted.id, status: 'needs_confirmation' },
+    })
+    persisted = (await bootstrap()).uploadJobs.find(({ id }) => id === persisted.id)
+  } else {
+    expect(processingOutcome).toMatchObject({
+      value: { job: { id: persisted.id, status: 'needs_confirmation' } },
+    })
+  }
+  expect(persisted).toMatchObject({ status: 'needs_confirmation', progress: 100 })
+})
+
+test('a pre-aborted cancellation never blocks a later processing retry', async () => {
+  // Catches a rejected cancellation registering an in-memory tombstone before its transaction starts.
+  await resetMockState()
+  await createUploadJob(makeUploadMetadata({ id: 'job-pre-aborted-cancel' }))
+  const controller = new AbortController()
+  controller.abort()
+
+  await expect(cancelUploadJob('job-pre-aborted-cancel', { signal: controller.signal }))
+    .rejects.toMatchObject({ name: 'AbortError' })
+  await expect(processUploadJob('job-pre-aborted-cancel')).resolves.toMatchObject({
+    job: { id: 'job-pre-aborted-cancel', status: 'needs_confirmation' },
+  })
+})
+
+test('a cancellation persisted before a late abort still resolves as durable cancellation', async () => {
+  // Catches a post-commit signal check reporting failure after the cancelled state is already durable.
+  await resetMockState()
+  await createUploadJob(makeUploadMetadata({ id: 'job-late-abort-cancel' }))
+  const controller = new AbortController()
+  const nativeSetItem = Storage.prototype.setItem
+  const setItem = vi.spyOn(Storage.prototype, 'setItem').mockImplementation(function persistThenAbort(key, value) {
+    nativeSetItem.call(this, key, value)
+    const storedJob = JSON.parse(value)?.data?.uploadJobs?.find(({ id }) => id === 'job-late-abort-cancel')
+    if (storedJob?.status === 'cancelled') controller.abort()
+  })
+
+  try {
+    await expect(cancelUploadJob('job-late-abort-cancel', { signal: controller.signal }))
+      .resolves.toMatchObject({ job: { status: 'cancelled' } })
+  } finally {
+    setItem.mockRestore()
+  }
+  await expect(processUploadJob('job-late-abort-cancel')).rejects.toMatchObject({
+    code: 'UPLOAD_CANCELLED',
+  })
+  expect((await bootstrap()).uploadJobs.find(({ id }) => id === 'job-late-abort-cancel'))
+    .toMatchObject({ status: 'cancelled' })
+})
+
 test('persists a safe failed processing state and retries it after the cause is repaired', async () => {
   // Catches processor failures being reset to queued or exposing stack/cause/raw input in durable state.
   await resetMockState()
