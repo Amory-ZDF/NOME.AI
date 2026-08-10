@@ -1,5 +1,5 @@
-import type { FastifyInstance } from 'fastify'
-import { afterEach, describe, expect, it } from 'vitest'
+import type { ZodTypeProvider } from 'fastify-type-provider-zod'
+import { afterEach, describe, expect, expectTypeOf, it } from 'vitest'
 import { z } from 'zod'
 
 import { buildApp } from '../../src/app.js'
@@ -13,12 +13,50 @@ const testEnv = parseEnv({
   LOG_LEVEL: 'silent',
 })
 
-const openApps: FastifyInstance[] = []
+const openApps: Array<ReturnType<typeof buildApp>> = []
 
-function createApp() {
-  const app = buildApp({ env: testEnv })
+function createApp(loggerStream?: { write(message: string): void }) {
+  const app = buildApp({
+    env: {
+      ...testEnv,
+      LOG_LEVEL: loggerStream === undefined ? 'silent' : 'error',
+    },
+    ...(loggerStream === undefined ? {} : { loggerStream }),
+  })
   openApps.push(app)
   return app
+}
+
+function createLogCapture() {
+  let output = ''
+
+  return {
+    stream: {
+      write(message: string) {
+        output += message
+      },
+    },
+    read: () => output,
+  }
+}
+
+function registerStrictBodyRoute(
+  app: ReturnType<typeof buildApp>,
+  options: { bodyLimit?: number } = {},
+) {
+  app.register(async (instance) => {
+    const routes = instance.withTypeProvider<ZodTypeProvider>()
+    routes.post(
+      '/strict-body',
+      {
+        ...(options.bodyLimit === undefined ? {} : { bodyLimit: options.bodyLimit }),
+        schema: {
+          body: z.strictObject({ name: z.string().min(1) }),
+        },
+      },
+      async (request) => ({ accepted: request.body.name }),
+    )
+  })
 }
 
 afterEach(async () => {
@@ -68,6 +106,36 @@ describe('Fastify application foundation', () => {
     expect(unconfigured.headers['access-control-allow-origin']).toBeUndefined()
   })
 
+  it.each(['PATCH', 'DELETE'])('allows configured-origin %s preflight', async (method) => {
+    const response = await createApp().inject({
+      method: 'OPTIONS',
+      url: '/cors-preflight',
+      headers: {
+        origin: 'https://student.example.com',
+        'access-control-request-method': method,
+      },
+    })
+
+    expect(response.statusCode).toBe(204)
+    expect(response.headers['access-control-allow-origin']).toBe(
+      'https://student.example.com',
+    )
+    expect(response.headers['access-control-allow-methods']).toContain(method)
+  })
+
+  it('does not allow an unconfigured-origin preflight', async () => {
+    const response = await createApp().inject({
+      method: 'OPTIONS',
+      url: '/cors-preflight',
+      headers: {
+        origin: 'https://attacker.example.com',
+        'access-control-request-method': 'DELETE',
+      },
+    })
+
+    expect(response.headers['access-control-allow-origin']).toBeUndefined()
+  })
+
   it('publishes OpenAPI JSON containing the health route', async () => {
     const response = await createApp().inject({
       method: 'GET',
@@ -96,6 +164,59 @@ describe('Fastify application foundation', () => {
     expect(response.headers['content-security-policy']).toBeDefined()
   })
 
+  it('preserves root Zod inference and documents plugin-registered routes', async () => {
+    const bodySchema = z.object({ value: z.string() })
+    const responseSchema = z.object({ echoed: z.string() })
+    const app = createApp()
+
+    app.post(
+      '/root-type-proof',
+      {
+        schema: {
+          body: bodySchema,
+          response: { 200: responseSchema },
+        },
+      },
+      async (request, reply) => {
+        expectTypeOf(request.body).toEqualTypeOf<{ value: string }>()
+        expectTypeOf(reply.send).parameter(0).toEqualTypeOf<{ echoed: string }>()
+        return reply.send({ echoed: request.body.value })
+      },
+    )
+
+    app.register(async (instance) => {
+      const routes = instance.withTypeProvider<ZodTypeProvider>()
+      routes.post(
+        '/plugin-echo',
+        {
+          schema: {
+            body: bodySchema,
+            response: { 200: responseSchema },
+          },
+        },
+        async (request, reply) => {
+          expectTypeOf(request.body).toEqualTypeOf<{ value: string }>()
+          expectTypeOf(reply.send).parameter(0).toEqualTypeOf<{ echoed: string }>()
+          return reply.send({ echoed: request.body.value })
+        },
+      )
+    })
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/plugin-echo',
+      payload: { value: 'typed' },
+    })
+    const documentation = await app.inject({
+      method: 'GET',
+      url: '/documentation/json',
+    })
+
+    expect(response.statusCode).toBe(200)
+    expect(response.json()).toEqual({ echoed: 'typed' })
+    expect(documentation.json().paths).toHaveProperty('/plugin-echo')
+  })
+
   it('maps AppError without exposing a stack', async () => {
     const app = createApp()
     app.get('/expected-error', async () => {
@@ -113,6 +234,33 @@ describe('Fastify application foundation', () => {
       data: { retryable: false },
     })
     expect(response.body).not.toContain('stack')
+  })
+
+  it('logs a 5xx AppError cause without exposing it to the client', async () => {
+    const capture = createLogCapture()
+    const app = createApp(capture.stream)
+    app.get('/upstream-error', async () => {
+      throw new AppError(
+        'Dependency unavailable',
+        503,
+        'UPSTREAM_UNAVAILABLE',
+        { retryable: true },
+        { cause: new Error('private upstream cause') },
+      )
+    })
+
+    const response = await app.inject({ method: 'GET', url: '/upstream-error' })
+    const logs = capture.read()
+
+    expect(response.statusCode).toBe(503)
+    expect(response.json()).toEqual({
+      code: 'UPSTREAM_UNAVAILABLE',
+      message: 'Dependency unavailable',
+      data: { retryable: true },
+    })
+    expect(response.body).not.toContain('private upstream cause')
+    expect(logs).toContain('Application error')
+    expect(logs).toContain('private upstream cause')
   })
 
   it('maps unexpected errors without exposing private details', async () => {
@@ -133,17 +281,175 @@ describe('Fastify application foundation', () => {
     expect(response.body).not.toContain('stack')
   })
 
+  it('does not trust a forged validation field and logs the unexpected error', async () => {
+    const capture = createLogCapture()
+    const app = createApp(capture.stream)
+    app.get('/forged-validation-error', async () => {
+      throw {
+        name: 'ForgedValidationError',
+        message: 'forged validation marker',
+        validation: [{ message: 'not a trusted Zod issue' }],
+      }
+    })
+
+    const response = await app.inject({ method: 'GET', url: '/forged-validation-error' })
+
+    expect(response.statusCode).toBe(500)
+    expect(response.json()).toEqual({
+      code: 'INTERNAL_ERROR',
+      message: 'Internal server error',
+      data: null,
+    })
+    expect(capture.read()).toContain('forged validation marker')
+  })
+
+  it.each([
+    ['malformed JSON', '{', undefined],
+    ['empty JSON', '', '0'],
+  ])('maps %s to a stable invalid-input envelope', async (_case, payload, contentLength) => {
+    const app = createApp()
+    registerStrictBodyRoute(app)
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/strict-body',
+      headers: {
+        'content-type': 'application/json',
+        ...(contentLength === undefined ? {} : { 'content-length': contentLength }),
+      },
+      payload,
+    })
+
+    expect(response.statusCode).toBe(400)
+    expect(response.json()).toEqual({
+      code: 'INVALID_INPUT',
+      message: 'Invalid request',
+      data: null,
+    })
+  })
+
+  it('maps an invalid content length to a stable invalid-input envelope', async () => {
+    const app = createApp()
+    registerStrictBodyRoute(app)
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/strict-body',
+      headers: {
+        'content-type': 'application/json',
+        'content-length': '100',
+      },
+      payload: '{}',
+    })
+
+    expect(response.statusCode).toBe(400)
+    expect(response.json()).toEqual({
+      code: 'INVALID_INPUT',
+      message: 'Invalid request',
+      data: null,
+    })
+  })
+
+  it('maps an unsupported media type to a stable public envelope', async () => {
+    const app = createApp()
+    registerStrictBodyRoute(app)
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/strict-body',
+      headers: { 'content-type': 'application/xml' },
+      payload: '<student />',
+    })
+
+    expect(response.statusCode).toBe(415)
+    expect(response.json()).toEqual({
+      code: 'UNSUPPORTED_MEDIA_TYPE',
+      message: 'Unsupported media type',
+      data: null,
+    })
+  })
+
+  it('maps an oversized body to a stable public envelope', async () => {
+    const app = createApp()
+    registerStrictBodyRoute(app, { bodyLimit: 16 })
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/strict-body',
+      payload: { name: 'a value larger than sixteen bytes' },
+    })
+
+    expect(response.statusCode).toBe(413)
+    expect(response.json()).toEqual({
+      code: 'PAYLOAD_TOO_LARGE',
+      message: 'Payload too large',
+      data: null,
+    })
+  })
+
+  it('logs response serialization failures and returns a private 500 envelope', async () => {
+    const capture = createLogCapture()
+    const app = createApp(capture.stream)
+    app.register(async (instance) => {
+      const routes = instance.withTypeProvider<ZodTypeProvider>()
+      routes.get(
+        '/invalid-response',
+        { schema: { response: { 200: z.object({ value: z.string() }) } } },
+        async () => ({ value: 42 }) as never,
+      )
+    })
+
+    const response = await app.inject({ method: 'GET', url: '/invalid-response' })
+
+    expect(response.statusCode).toBe(500)
+    expect(response.json()).toEqual({
+      code: 'INTERNAL_ERROR',
+      message: 'Internal server error',
+      data: null,
+    })
+    expect(capture.read()).toContain('FST_ERR_RESPONSE_SERIALIZATION')
+  })
+
+  it('whitelists useful error log fields without leaking nested secrets', async () => {
+    const capture = createLogCapture()
+    const app = createApp(capture.stream)
+    app.get('/secret-context-error', async () => {
+      const cause = Object.assign(new Error('nested cause marker'), {
+        code: 'E_NESTED_CAUSE',
+        context: { password: 'CAUSE_PASSWORD_SENTINEL' },
+      })
+      throw Object.assign(new Error('useful error marker', { cause }), {
+        code: 'E_DEEP_CONTEXT',
+        context: {
+          password: 'PASSWORD_SENTINEL',
+          nested: {
+            token: 'TOKEN_SENTINEL',
+            authorization: 'AUTHORIZATION_SENTINEL',
+            cookie: 'COOKIE_SENTINEL',
+            DATABASE_URL: 'DATABASE_URL_SENTINEL',
+          },
+        },
+      })
+    })
+
+    const response = await app.inject({ method: 'GET', url: '/secret-context-error' })
+    const logs = capture.read()
+
+    expect(response.statusCode).toBe(500)
+    expect(logs).toContain('"type":"Error"')
+    expect(logs).toContain('"name":"Error"')
+    expect(logs).toContain('useful error marker')
+    expect(logs).toContain('"code":"E_DEEP_CONTEXT"')
+    expect(logs).toContain('"stack":"Error: useful error marker')
+    expect(logs).toContain('nested cause marker')
+    expect(logs).not.toMatch(
+      /PASSWORD_SENTINEL|CAUSE_PASSWORD_SENTINEL|TOKEN_SENTINEL|AUTHORIZATION_SENTINEL|COOKIE_SENTINEL|DATABASE_URL_SENTINEL/,
+    )
+  })
+
   it('maps strict Zod body validation failures to a public error', async () => {
     const app = createApp()
-    app.post(
-      '/strict-body',
-      {
-        schema: {
-          body: z.strictObject({ name: z.string().min(1) }),
-        },
-      },
-      async () => ({ accepted: true }),
-    )
+    registerStrictBodyRoute(app)
 
     const response = await app.inject({
       method: 'POST',

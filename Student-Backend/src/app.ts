@@ -1,21 +1,26 @@
 import cors from '@fastify/cors'
 import swagger from '@fastify/swagger'
 import swaggerUi from '@fastify/swagger-ui'
-import Fastify, { type FastifyInstance } from 'fastify'
+import Fastify from 'fastify'
 import {
   jsonSchemaTransform,
   serializerCompiler,
+  type ZodTypeProvider,
   validatorCompiler,
 } from 'fastify-type-provider-zod'
 import { z } from 'zod'
 
 import { installErrorHandlers } from './common/http/error-handler.js'
 import { ok } from './common/http/envelope.js'
+import { serializeError } from './common/logging/error-serializer.js'
 import type { Env } from './config/env.js'
 
 interface BuildAppOptions {
   env: Env
+  loggerStream?: { write(message: string): void }
 }
+
+const corsMethods = ['GET', 'HEAD', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS']
 
 const healthEnvelopeSchema = z.object({
   code: z.literal(0),
@@ -25,10 +30,14 @@ const healthEnvelopeSchema = z.object({
   }),
 })
 
-export function buildApp({ env }: BuildAppOptions): FastifyInstance {
+export function buildApp({ env, loggerStream }: BuildAppOptions) {
   const app = Fastify({
     logger: {
       level: env.LOG_LEVEL,
+      serializers: {
+        err: serializeError,
+      },
+      ...(loggerStream === undefined ? {} : { stream: loggerStream }),
       redact: {
         paths: [
           'req.headers.authorization',
@@ -55,13 +64,14 @@ export function buildApp({ env }: BuildAppOptions): FastifyInstance {
         censor: '[REDACTED]',
       },
     },
-  })
+  }).withTypeProvider<ZodTypeProvider>()
 
   app.setValidatorCompiler(validatorCompiler)
   app.setSerializerCompiler(serializerCompiler)
 
   app.register(cors, {
     origin: env.CORS_ORIGINS,
+    methods: corsMethods,
   })
   app.register(swagger, {
     openapi: {
@@ -80,7 +90,8 @@ export function buildApp({ env }: BuildAppOptions): FastifyInstance {
   installErrorHandlers(app)
 
   app.register(async (routes) => {
-    routes.get(
+    const typedRoutes = routes.withTypeProvider<ZodTypeProvider>()
+    typedRoutes.get(
       '/health',
       {
         schema: {
