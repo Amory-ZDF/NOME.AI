@@ -1174,6 +1174,187 @@ test('builds and optimistically persists an adjustment request with injected ser
   })
 })
 
+test.each([
+  ['explicit snapshot success', true, false, 0],
+  ['explicit snapshot failure', true, true, 0],
+  ['default snapshot success', false, false, 1],
+  ['default snapshot failure', false, true, 1],
+])('keeps toast rendering off the business clock for %s', async (_, supplied, fails, expectedClockReads) => {
+  const actionNow = new Date('2026-08-06T00:00:00.000Z')
+  const clock = vi.fn(() => actionNow)
+  const failure = new Error('adjustment offline')
+  const reportTaskAdjustment = vi.fn((id, request) => (fails
+    ? Promise.reject(failure)
+    : Promise.resolve({ request, task: { id, status: 'pending', adjustmentStatus: 'submitted' } })))
+  let actions
+  function ToastClockProbe() {
+    actions = useApp()
+    return <output>{actions.bootStatus}</output>
+  }
+  render(<AppProvider services={createAppServices({
+    apiClient: createApi({ reportTaskAdjustment }),
+    now: clock,
+    createId: () => 'generated-id',
+  })}><ToastClockProbe /></AppProvider>)
+  await screen.findByText('ready')
+  const draft = { reason: 'difficulty', details: '', availableMinutes: 20, proposedDueAt: '2026-08-08T10:00:00.000Z' }
+  const options = supplied ? { now: actionNow } : undefined
+  const operation = actions.requestTaskAdjustment(actions.tasks[0], draft, options)
+
+  if (fails) await expect(operation).rejects.toBe(failure)
+  else await expect(operation).resolves.toBeDefined()
+
+  expect(clock).toHaveBeenCalledTimes(expectedClockReads)
+  await waitFor(() => expect(actions.toast).toMatchObject({
+    message: fails ? failure.message : 'Adjustment request sent to your teacher.',
+    type: fails ? 'error' : 'success',
+  }))
+})
+
+test('assigns unique monotonic keys to consecutive toasts without reading the app clock', async () => {
+  const clock = vi.fn(() => new Date('2026-08-06T00:00:00.000Z'))
+  let actions
+  function ToastProbe() {
+    actions = useApp()
+    return <output>{actions.bootStatus}</output>
+  }
+  render(<AppProvider services={createAppServices({
+    apiClient: createApi(),
+    now: clock,
+  })}><ToastProbe /></AppProvider>)
+  await screen.findByText('ready')
+
+  act(() => { actions.showToast('First toast') })
+  const first = actions.toast
+  act(() => { actions.showToast('Second toast') })
+  const second = actions.toast
+
+  expect(clock).not.toHaveBeenCalled()
+  expect(first).toMatchObject({ message: 'First toast', type: 'info' })
+  expect(second).toMatchObject({ message: 'Second toast', type: 'info' })
+  expect(second.key).toBeGreaterThan(first.key)
+})
+
+test.each([
+  ['a thrown clock error', () => { throw new Error('clock unavailable') }],
+  ['null', () => null],
+  ['undefined', () => undefined],
+  ['a non-Date value', () => '2026-08-06T00:00:00.000Z'],
+  ['an invalid Date', () => new Date(Number.NaN)],
+])('rejects a direct adjustment before mutation when the app clock returns %s', async (_, clock) => {
+  const reportTaskAdjustment = vi.fn(() => Promise.resolve({}))
+  let actions
+  function ClockProbe() {
+    actions = useApp()
+    return <output>{actions.bootStatus}</output>
+  }
+  render(<AppProvider services={createAppServices({
+    apiClient: createApi({ reportTaskAdjustment }),
+    now: clock,
+    createId: () => 'generated-id',
+  })}><ClockProbe /></AppProvider>)
+  await screen.findByText('ready')
+  const beforeTasks = structuredClone(actions.tasks)
+  const draft = { reason: 'difficulty', details: '', availableMinutes: 20, proposedDueAt: '2026-08-08T10:00:00.000Z' }
+  let operation
+
+  expect(() => {
+    operation = actions.requestTaskAdjustment(actions.tasks[0], draft)
+  }).not.toThrow()
+  await expect(operation).rejects.toThrow('Unable to validate current time. Try again.')
+
+  expect(reportTaskAdjustment).not.toHaveBeenCalled()
+  expect(actions.tasks).toEqual(beforeTasks)
+  expect(actions.taskAdjustments).toEqual([])
+  expect(actions.isActionPending('task:adjust:t1')).toBe(false)
+})
+
+test('rejects an invalid supplied adjustment time without consulting the app clock', async () => {
+  const reportTaskAdjustment = vi.fn(() => Promise.resolve({}))
+  const clock = vi.fn(() => new Date('2026-08-06T00:00:00.000Z'))
+  let actions
+  function SuppliedClockProbe() {
+    actions = useApp()
+    return <output>{actions.bootStatus}</output>
+  }
+  render(<AppProvider services={createAppServices({
+    apiClient: createApi({ reportTaskAdjustment }),
+    now: clock,
+    createId: () => 'generated-id',
+  })}><SuppliedClockProbe /></AppProvider>)
+  await screen.findByText('ready')
+  const beforeTasks = structuredClone(actions.tasks)
+  const draft = { reason: 'difficulty', details: '', availableMinutes: 20, proposedDueAt: '2026-08-08T10:00:00.000Z' }
+
+  const operation = actions.requestTaskAdjustment(actions.tasks[0], draft, { now: null })
+  await expect(operation).rejects.toThrow('Unable to validate current time. Try again.')
+
+  expect(clock).not.toHaveBeenCalled()
+  expect(reportTaskAdjustment).not.toHaveBeenCalled()
+  expect(actions.tasks).toEqual(beforeTasks)
+  expect(actions.taskAdjustments).toEqual([])
+  expect(actions.isActionPending('task:adjust:t1')).toBe(false)
+})
+
+test('authors a direct adjustment from the Date internal slot instead of poisoned methods', async () => {
+  const poisonedNow = new Date('2026-08-06T00:00:00.000Z')
+  Object.defineProperties(poisonedNow, {
+    getTime: { value: () => { throw new Error('poisoned getTime') } },
+    toISOString: { value: () => 'forged-created-at' },
+  })
+  const clock = vi.fn(() => new Date('2099-01-01T00:00:00.000Z'))
+  const reportTaskAdjustment = vi.fn((id, request) => Promise.resolve({
+    request,
+    task: { id, status: 'pending', adjustmentStatus: 'submitted' },
+  }))
+  let actions
+  function PoisonedDateProbe() {
+    actions = useApp()
+    return <output>{actions.bootStatus}</output>
+  }
+  render(<AppProvider services={createAppServices({
+    apiClient: createApi({ reportTaskAdjustment }),
+    now: clock,
+    createId: () => 'generated-id',
+  })}><PoisonedDateProbe /></AppProvider>)
+  await screen.findByText('ready')
+  const draft = { reason: 'difficulty', details: '', availableMinutes: 20, proposedDueAt: '2026-08-08T10:00:00.000Z' }
+
+  await expect(actions.requestTaskAdjustment(actions.tasks[0], draft, { now: poisonedNow }))
+    .resolves.toBeDefined()
+
+  expect(clock).not.toHaveBeenCalled()
+  expect(reportTaskAdjustment).toHaveBeenCalledWith('t1', expect.objectContaining({
+    createdAt: '2026-08-06T00:00:00.000Z',
+  }))
+})
+
+test('rejects a supplied Date Proxy before a direct adjustment mutates or calls the API', async () => {
+  const reportTaskAdjustment = vi.fn(() => Promise.resolve({}))
+  let actions
+  function ProxyDateProbe() {
+    actions = useApp()
+    return <output>{actions.bootStatus}</output>
+  }
+  render(<AppProvider services={createAppServices({
+    apiClient: createApi({ reportTaskAdjustment }),
+    now: () => new Date('2026-08-06T00:00:00.000Z'),
+    createId: () => 'generated-id',
+  })}><ProxyDateProbe /></AppProvider>)
+  await screen.findByText('ready')
+  const beforeTasks = structuredClone(actions.tasks)
+  const draft = { reason: 'difficulty', details: '', availableMinutes: 20, proposedDueAt: '2026-08-08T10:00:00.000Z' }
+  const proxiedNow = new Proxy(new Date('2026-08-06T00:00:00.000Z'), {})
+
+  await expect(actions.requestTaskAdjustment(actions.tasks[0], draft, { now: proxiedNow }))
+    .rejects.toThrow('Unable to validate current time. Try again.')
+
+  expect(reportTaskAdjustment).not.toHaveBeenCalled()
+  expect(actions.tasks).toEqual(beforeTasks)
+  expect(actions.taskAdjustments).toEqual([])
+  expect(actions.isActionPending('task:adjust:t1')).toBe(false)
+})
+
 test('rejects a duplicate task action and rolls back an adjustment failure without losing the task', async () => {
   // Catches duplicate task writes and a failed adjustment that leaves an optimistic request/task mutation behind.
   let rejectAdjustment

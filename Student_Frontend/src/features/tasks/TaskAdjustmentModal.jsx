@@ -1,7 +1,7 @@
 import { useRef, useState } from 'react'
 import { Modal } from '../../components/ui'
 import { useApp } from '../../store/AppStore'
-import { ADJUSTMENT_REASONS, validateAdjustmentDraft } from './adjustmentRules'
+import { ADJUSTMENT_CLOCK_ERROR, ADJUSTMENT_REASONS, validateAdjustmentDraft } from './adjustmentRules'
 
 const reasonLabels = {
   time_conflict: 'Time conflict',
@@ -18,7 +18,7 @@ const initialDraft = {
 }
 
 export function TaskAdjustmentModal({ task, open, onClose, returnFocusTarget, fallbackFocusTarget }) {
-  const { requestTaskAdjustment, isActionPending } = useApp()
+  const { getNow, requestTaskAdjustment, isActionPending } = useApp()
   const reasonRef = useRef(null)
   const [draft, setDraft] = useState(initialDraft)
   const [errors, setErrors] = useState({})
@@ -45,12 +45,21 @@ export function TaskAdjustmentModal({ task, open, onClose, returnFocusTarget, fa
     event.preventDefault()
     if (!task || pending) return
 
-    const validation = validateAdjustmentDraft(draft)
+    let actionNow
+    let validation
+    try {
+      actionNow = getNow()
+      validation = validateAdjustmentDraft(draft, actionNow)
+    } catch {
+      setErrors((current) => ({ ...current, proposedDueAt: ADJUSTMENT_CLOCK_ERROR }))
+      return
+    }
+
     setErrors(validation.errors)
     if (!validation.valid) return
 
     try {
-      await requestTaskAdjustment(task, draft)
+      await requestTaskAdjustment(task, draft, { now: actionNow })
       reset()
       onClose()
     } catch {

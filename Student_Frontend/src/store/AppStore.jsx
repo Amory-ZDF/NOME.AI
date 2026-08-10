@@ -1,7 +1,7 @@
 import { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react'
 import { runRecoverableAction } from './actionRunner'
 import { defaultAppServices } from './services'
-import { buildAdjustmentRequest } from '../features/tasks/adjustmentRules'
+import { ADJUSTMENT_CLOCK_ERROR, buildAdjustmentRequest } from '../features/tasks/adjustmentRules'
 import { isTaskAdjustmentEligible } from '../features/tasks/taskRules'
 import { isCompleteVariantResult, isRenderableExerciseSet } from '../features/exercise/exerciseContracts'
 import { mergeErrorCards } from '../features/errors/errorCards'
@@ -149,6 +149,7 @@ export function AppProvider({ children, services = defaultAppServices }) {
   const [toast, setToast] = useState(null)
   const [pendingActions, setPendingActions] = useState(() => new Set())
   const toastTimer = useRef(null)
+  const toastSequence = useRef(0)
   const mounted = useRef(true)
   const bootRequest = useRef(0)
   const actionGeneration = useRef(0)
@@ -168,6 +169,7 @@ export function AppProvider({ children, services = defaultAppServices }) {
   const sessionsRef = useRef({})
   const sessionSummariesRef = useRef({})
   const lastSessionRef = useRef(null)
+  const getNow = useCallback(() => services.now(), [services])
 
   const replaceTasks = useCallback((next) => {
     tasksRef.current = next
@@ -214,11 +216,12 @@ export function AppProvider({ children, services = defaultAppServices }) {
   const showToast = useCallback((message, type = 'info') => {
     if (!mounted.current) return
     clearTimeout(toastTimer.current)
-    setToast({ message, type, key: services.now().getTime() })
+    toastSequence.current += 1
+    setToast({ message, type, key: toastSequence.current })
     toastTimer.current = setTimeout(() => {
       if (mounted.current) setToast(null)
     }, 2800)
-  }, [services])
+  }, [])
 
   const retryBootstrap = useCallback(async () => {
     const requestId = ++bootRequest.current
@@ -347,7 +350,7 @@ export function AppProvider({ children, services = defaultAppServices }) {
     rollback: replaceTasks,
   })), [replaceTasks, runAction, services, showToast])
 
-  const requestTaskAdjustment = useCallback((task, draft) => {
+  const requestTaskAdjustment = useCallback((task, draft, options = {}) => {
     const actionKey = `task:adjust:${task.id}`
     if (actionCounts.current.has(actionKey)) {
       const error = new Error('This task action is already in progress.')
@@ -358,12 +361,23 @@ export function AppProvider({ children, services = defaultAppServices }) {
     if (!isTaskAdjustmentEligible(currentTask, taskAdjustmentsRef.current)) {
       return Promise.reject(new Error('Adjustment requests are only available for a pending teacher-assigned task without a submitted adjustment.'))
     }
-    const request = buildAdjustmentRequest({
-      task: currentTask,
-      draft,
-      now: services.now(),
-      id: services.createId(),
-    })
+    let actionNow
+    try {
+      actionNow = options && hasOwn(options, 'now') ? options.now : getNow()
+    } catch {
+      return Promise.reject(new Error(ADJUSTMENT_CLOCK_ERROR))
+    }
+    let request
+    try {
+      request = buildAdjustmentRequest({
+        task: currentTask,
+        draft,
+        now: actionNow,
+        id: services.createId(),
+      })
+    } catch (error) {
+      return Promise.reject(error)
+    }
     return runAction(actionKey, 'tasks', () => ({
       snapshot: { tasks: tasksRef.current, taskAdjustments: taskAdjustmentsRef.current },
       optimistic: () => {
@@ -387,7 +401,7 @@ export function AppProvider({ children, services = defaultAppServices }) {
         replaceTaskAdjustments(snapshot.taskAdjustments)
       },
     }))
-  }, [replaceTaskAdjustments, replaceTasks, runAction, services, showToast])
+  }, [getNow, replaceTaskAdjustments, replaceTasks, runAction, services, showToast])
 
   const addTask = useCallback((task) => {
     const createdTask = task.id ? task : { ...task, id: services.createId() }
@@ -918,7 +932,7 @@ export function AppProvider({ children, services = defaultAppServices }) {
     <AppContext.Provider value={{
       booted: bootStatus === 'ready', bootStatus, bootError, pendingActions, retryBootstrap, isActionPending,
       tasks, taskAdjustments, greeting, moduleStats, learningSummary, errors, notes, uploadJobs, noteFolders, settings, exerciseCache, sessions, sessionSummaries, lastSession, toast,
-      showToast, completeTask, requestTaskAdjustment, addTask,
+      getNow, showToast, completeTask, requestTaskAdjustment, addTask,
       addErrors, addSessionErrors, markErrorMastered, recordRedo, scheduleErrorVariant, verifyErrorVariant, loadSessionSummary,
       addNote, startMaterialUpload, processMaterialUpload, confirmMaterialUpload, cancelMaterialUpload,
       updateNote, organizeNote, undoNote, loadExerciseSet, saveSession, generateVariant, updateSettings,
