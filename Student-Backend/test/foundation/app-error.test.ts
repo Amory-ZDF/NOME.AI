@@ -3,6 +3,14 @@ import { describe, expect, it } from 'vitest'
 import { AppError } from '../../src/common/errors/app-error.js'
 
 describe('AppError', () => {
+  it('normalizes omitted and explicit undefined data to null', () => {
+    const omitted = new AppError('Omitted data', 400, 'OMITTED_DATA')
+    const explicit = new AppError('Explicit undefined', 400, 'EXPLICIT_UNDEFINED', undefined)
+
+    expect(omitted.data).toBeNull()
+    expect(explicit.data).toBeNull()
+  })
+
   it.each([399, 600, 400.5, Number.NaN])('rejects invalid HTTP status %s', (status) => {
     expect(() => new AppError('Invalid status', status, 'INVALID_STATUS')).toThrow(
       'AppError status must be an integer between 400 and 599',
@@ -11,7 +19,6 @@ describe('AppError', () => {
 
   it.each([
     ['BigInt', 1n],
-    ['undefined', undefined],
     ['non-finite number', Number.POSITIVE_INFINITY],
     ['non-plain object', new Date('2026-08-10T00:00:00.000Z')],
     ['nested undefined', { nested: undefined }],

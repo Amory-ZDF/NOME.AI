@@ -82,7 +82,7 @@ export class AppError extends Error {
       throw new TypeError('AppError status must be an integer between 400 and 599')
     }
 
-    const normalizedData = arguments.length >= 4 ? data : null
+    const normalizedData = data ?? null
     assertJsonSafe(normalizedData)
 
     this.name = 'AppError'

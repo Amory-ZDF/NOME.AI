@@ -21,6 +21,20 @@ function readString(value: object, key: string): string | undefined {
   return typeof property === 'string' ? property : undefined
 }
 
+function readConstructorName(value: object, fallback: string): string {
+  const constructor = readProperty(value, 'constructor')
+
+  if (
+    (typeof constructor === 'object' && constructor !== null) ||
+    typeof constructor === 'function'
+  ) {
+    const name = readString(constructor, 'name')
+    if (name !== undefined && name !== 'Object') return name
+  }
+
+  return fallback
+}
+
 function serializeCause(value: unknown, seen: WeakSet<object>): SerializedError {
   if (typeof value === 'object' && value !== null) {
     return serializeErrorValue(value, seen)
@@ -49,10 +63,7 @@ function serializeErrorValue(value: object, seen: WeakSet<object>): SerializedEr
   const name = readString(value, 'name') ?? 'Error'
   const message = readString(value, 'message') ?? 'Unknown error'
   const stack = readString(value, 'stack') ?? `${name}: ${message}`
-  const constructorName =
-    value instanceof Error && typeof value.constructor?.name === 'string'
-      ? value.constructor.name
-      : name
+  const constructorName = readConstructorName(value, name)
   const code = readProperty(value, 'code')
   const cause = readProperty(value, 'cause')
   const serialized: SerializedError = {

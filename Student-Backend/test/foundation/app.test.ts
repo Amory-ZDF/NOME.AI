@@ -447,6 +447,57 @@ describe('Fastify application foundation', () => {
     )
   })
 
+  it.each(['getPrototypeOf', 'constructor'] as const)(
+    'keeps the 500 envelope stable when an error cause has a throwing %s trap',
+    async (trap) => {
+      const capture = createLogCapture()
+      const app = createApp(capture.stream)
+      app.get('/hostile-error-cause', async () => {
+        const target = Object.assign(
+          Object.create(trap === 'constructor' ? Error.prototype : Object.prototype),
+          {
+            name: 'HostileCause',
+            message: 'hostile cause marker',
+            stack: 'HostileCause: hostile cause marker',
+            context: { password: 'HOSTILE_CONTEXT_SECRET' },
+          },
+        ) as object
+        const hostileCause = new Proxy(target, {
+          get(current, property, receiver) {
+            if (trap === 'constructor' && property === 'constructor') {
+              throw new Error('CONSTRUCTOR_TRAP_SECRET')
+            }
+            return Reflect.get(current, property, receiver)
+          },
+          getPrototypeOf(current) {
+            if (trap === 'getPrototypeOf') {
+              throw new Error('GET_PROTOTYPE_OF_TRAP_SECRET')
+            }
+            return Reflect.getPrototypeOf(current)
+          },
+        })
+
+        throw new Error('outer hostile error marker', { cause: hostileCause })
+      })
+
+      const response = await app.inject({ method: 'GET', url: '/hostile-error-cause' })
+      const logs = capture.read()
+
+      expect(response.statusCode).toBe(500)
+      expect(response.json()).toEqual({
+        code: 'INTERNAL_ERROR',
+        message: 'Internal server error',
+        data: null,
+      })
+      expect(response.body).not.toMatch(/HOSTILE_CONTEXT_SECRET|TRAP_SECRET/)
+      expect(logs).toContain('outer hostile error marker')
+      expect(logs).toContain('hostile cause marker')
+      expect(logs).not.toMatch(
+        /HOSTILE_CONTEXT_SECRET|CONSTRUCTOR_TRAP_SECRET|GET_PROTOTYPE_OF_TRAP_SECRET/,
+      )
+    },
+  )
+
   it('maps strict Zod body validation failures to a public error', async () => {
     const app = createApp()
     registerStrictBodyRoute(app)
