@@ -1,6 +1,7 @@
 import { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react'
 import { runRecoverableAction } from './actionRunner'
 import { defaultAppServices } from './services'
+import { ApiError } from '../api/client'
 import { ADJUSTMENT_CLOCK_ERROR, buildAdjustmentRequest } from '../features/tasks/adjustmentRules'
 import { isTaskAdjustmentEligible } from '../features/tasks/taskRules'
 import { isCompleteVariantResult, isRenderableExerciseSet } from '../features/exercise/exerciseContracts'
@@ -585,6 +586,8 @@ export function AppProvider({ children, services = defaultAppServices }) {
     }))
   }, [replaceNotes, runAction, services])
 
+  const reserveMaterialUploadId = useCallback(() => services.createId(), [services])
+
   const startMaterialUpload = useCallback((metadata, actionOptions = {}) => {
     const actionNow = services.now()
     const authoredMetadata = {
@@ -652,26 +655,49 @@ export function AppProvider({ children, services = defaultAppServices }) {
     { signal: actionOptions.signal },
   ), [replaceNotes, replaceUploadJobs, runAction, services])
 
-  const cancelMaterialUpload = useCallback((id, actionOptions = {}) => runAction(
-    `upload:cancel:${id}`,
-    `uploads:cancel:${id}`,
-    () => ({
-      snapshot: uploadJobsRef.current,
-      optimistic: () => {},
-      request: () => services.api.cancelUploadJob(id, actionOptions),
-      commit: (result) => {
-        requireUploadTransition(
-          uploadJobsRef.current,
-          id,
-          ['queued', 'processing', 'failed', 'needs_confirmation', 'cancelled'],
-        )
-        const job = strictUploadJob(result?.job, id, 'cancelled')
-        replaceUploadJobs(upsertById(uploadJobsRef.current, job))
-      },
-      rollback: () => {},
-    }),
-    { signal: actionOptions.signal },
-  ), [replaceUploadJobs, runAction, services])
+  const cancelMaterialUpload = useCallback((id, actionOptions = {}) => {
+    const { allowMissing = false, ...requestOptions } = actionOptions
+    const missingCancellation = Symbol('missing upload cancellation')
+    return runAction(
+      `upload:cancel:${id}`,
+      `uploads:cancel:${id}`,
+      () => ({
+        snapshot: uploadJobsRef.current,
+        optimistic: () => {},
+        request: async () => {
+          try {
+            return await services.api.cancelUploadJob(id, requestOptions)
+          } catch (error) {
+            if (allowMissing
+              && error instanceof ApiError
+              && error.status === 404
+              && error.code === 'NOT_FOUND') return missingCancellation
+            throw error
+          }
+        },
+        commit: (result) => {
+          if (result === missingCancellation) {
+            replaceUploadJobs(uploadJobsRef.current.filter((job) => job.id !== id))
+            return
+          }
+          const current = uploadJobsRef.current.find((job) => job.id === id)
+          if (current) {
+            requireUploadTransition(
+              uploadJobsRef.current,
+              id,
+              ['queued', 'processing', 'failed', 'needs_confirmation', 'cancelled'],
+            )
+          } else if (!allowMissing) {
+            throw invalidUploadResponse()
+          }
+          const job = strictUploadJob(result?.job, id, 'cancelled')
+          replaceUploadJobs(upsertById(uploadJobsRef.current, job))
+        },
+        rollback: () => {},
+      }),
+      { signal: requestOptions.signal },
+    ).then((result) => (result === missingCancellation ? undefined : result))
+  }, [replaceUploadJobs, runAction, services])
 
   const loadExerciseSet = useCallback(({ taskId, bankSetId } = {}) => {
     const id = taskId || bankSetId
@@ -934,7 +960,7 @@ export function AppProvider({ children, services = defaultAppServices }) {
       tasks, taskAdjustments, greeting, moduleStats, learningSummary, errors, notes, uploadJobs, noteFolders, settings, exerciseCache, sessions, sessionSummaries, lastSession, toast,
       getNow, showToast, completeTask, requestTaskAdjustment, addTask,
       addErrors, addSessionErrors, markErrorMastered, recordRedo, scheduleErrorVariant, verifyErrorVariant, loadSessionSummary,
-      addNote, startMaterialUpload, processMaterialUpload, confirmMaterialUpload, cancelMaterialUpload,
+      addNote, reserveMaterialUploadId, startMaterialUpload, processMaterialUpload, confirmMaterialUpload, cancelMaterialUpload,
       updateNote, organizeNote, undoNote, loadExerciseSet, saveSession, generateVariant, updateSettings,
     }}>
       {children}

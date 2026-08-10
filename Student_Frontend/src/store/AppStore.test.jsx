@@ -2,6 +2,7 @@ import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { expect, test, vi } from 'vitest'
 import { AppProvider, useApp } from './AppStore'
 import { createAppServices } from './services'
+import { ApiError } from '../api/client'
 import { applyNoteOrganization, applyNotePatch, undoLastNoteVersion } from '../features/materials/noteVersions'
 import { MATERIAL_FIXTURES } from '../data/materialFixtures'
 
@@ -1968,6 +1969,80 @@ test('authors upload identity once, exposes upload:create, and rejects an unsafe
   })
   expect(harness.app.uploadJobs).toEqual([])
   expect(harness.app.isActionPending('upload:create')).toBe(false)
+})
+
+test('reserves a stable upload id and can reconcile a durable cancellation missing from local state', async () => {
+  const createId = vi.fn(() => 'reserved-upload-id')
+  const cancelled = validUploadJob({ id: 'reserved-upload-id', status: 'cancelled' })
+  const cancelUploadJob = vi.fn(() => Promise.resolve({ job: cancelled }))
+  const harness = await renderApp(createApi({ cancelUploadJob }), { createId })
+
+  expect(harness.app.reserveMaterialUploadId()).toBe('reserved-upload-id')
+  expect(createId).toHaveBeenCalledTimes(1)
+  await act(async () => {
+    await harness.app.cancelMaterialUpload('reserved-upload-id', { allowMissing: true })
+  })
+
+  expect(cancelUploadJob).toHaveBeenCalledWith('reserved-upload-id', {})
+  expect(harness.app.uploadJobs).toEqual([cancelled])
+})
+
+test('treats exact HTTP 404 NOT_FOUND as successful allow-missing upload cancellation', async () => {
+  const notFound = new ApiError('Upload not found', { status: 404, code: 'NOT_FOUND' })
+  const cancelUploadJob = vi.fn(() => Promise.reject(notFound))
+  const harness = await renderApp(createApi({ cancelUploadJob }))
+
+  await act(async () => {
+    await expect(harness.app.cancelMaterialUpload('missing-upload', { allowMissing: true }))
+      .resolves.toBeUndefined()
+  })
+
+  expect(cancelUploadJob).toHaveBeenCalledWith('missing-upload', {})
+  expect(harness.app.uploadJobs).toEqual([])
+  expect(harness.app.toast).toBeNull()
+})
+
+test.each([
+  ['processing', validUploadJob({ status: 'processing', progress: 35 })],
+  ['needs confirmation', validUploadJob({
+    status: 'needs_confirmation',
+    progress: 100,
+    result: validClassificationResult(),
+  })],
+])('removes a stale local %s upload after canonical allow-missing 404', async (_, localJob) => {
+  const cancelUploadJob = vi.fn(() => Promise.reject(
+    new ApiError('Upload not found', { status: 404, code: 'NOT_FOUND' }),
+  ))
+  const harness = await renderApp(createApi({
+    bootstrap: () => Promise.resolve({ ...bootData, uploadJobs: [localJob] }),
+    cancelUploadJob,
+  }))
+
+  await act(async () => {
+    await expect(harness.app.cancelMaterialUpload(localJob.id, { allowMissing: true }))
+      .resolves.toBeUndefined()
+  })
+
+  expect(harness.app.uploadJobs.some(({ id }) => id === localJob.id)).toBe(false)
+  expect(harness.app.isActionPending(`upload:cancel:${localJob.id}`)).toBe(false)
+  expect(harness.app.toast).toBeNull()
+})
+
+test('rejects a non-HTTP NOT_FOUND code and preserves the local upload for recovery', async () => {
+  const localJob = validUploadJob({ status: 'processing', progress: 35 })
+  const nonHttpNotFound = new ApiError('Upload not found', { status: 0, code: 'NOT_FOUND' })
+  const harness = await renderApp(createApi({
+    bootstrap: () => Promise.resolve({ ...bootData, uploadJobs: [localJob] }),
+    cancelUploadJob: () => Promise.reject(nonHttpNotFound),
+  }))
+
+  await act(async () => {
+    await expect(harness.app.cancelMaterialUpload(localJob.id, { allowMissing: true }))
+      .rejects.toBe(nonHttpNotFound)
+  })
+
+  expect(harness.app.uploadJobs).toEqual([localJob])
+  expect(harness.app.toast).toMatchObject({ message: 'Upload not found', type: 'error' })
 })
 
 test('filters recursively unsafe upload jobs during bootstrap', async () => {
