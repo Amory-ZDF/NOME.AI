@@ -66,7 +66,7 @@ Expected checkpoint result: every command exits `0`; Vitest reports no failed or
 
 **Step 1: Create the manifest and compiler/test configuration**
 
-Create `package.json` with these scripts and dependency major ranges; `npm install` will lock exact compatible versions:
+Create `package.json` with these scripts and dependency major ranges, including the security-driven Swagger UI 6 exception; `npm install` will lock exact compatible versions:
 
 ```json
 {
@@ -90,7 +90,7 @@ Create `package.json` with these scripts and dependency major ranges; `npm insta
   "dependencies": {
     "@fastify/cors": "^11.0.0",
     "@fastify/swagger": "^9.0.0",
-    "@fastify/swagger-ui": "^5.0.0",
+    "@fastify/swagger-ui": "^6.1.1",
     "@prisma/adapter-better-sqlite3": "^7.0.0",
     "@prisma/client": "^7.0.0",
     "fastify": "^5.0.0",
@@ -108,6 +108,8 @@ Create `package.json` with these scripts and dependency major ranges; `npm insta
   }
 }
 ```
+
+`@fastify/swagger-ui` 6.1.1 is required to resolve patched `@fastify/static` >=10.1.2.
 
 Configure strict ESM TypeScript with `module`/`moduleResolution: "NodeNext"`, `target: "ES2023"`, `noUncheckedIndexedAccess`, `exactOptionalPropertyTypes`, `rootDir: "."`, and Vitest globals disabled. Override `rootDir` to `src/` in `tsconfig.build.json` and build only `src/**/*.ts` directly into `dist/`, so `npm start` resolves `dist/server.js`.
 
