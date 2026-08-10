@@ -178,15 +178,16 @@ const isSuggestion = (suggestion) => {
   ].includes(suggestion.type)
 }
 
-const hasExactSnapshotFields = (snapshot) => {
+const hasValidSnapshotFields = (snapshot) => {
   if (!isRecord(snapshot)) return false
   const keys = Reflect.ownKeys(snapshot)
-  return keys.length === SNAPSHOT_FIELDS.length
+  const requiredFields = SNAPSHOT_FIELDS.filter((field) => field !== 'source')
+  return requiredFields.every((field) => hasOwn(snapshot, field))
     && keys.every((key) => typeof key === 'string' && SNAPSHOT_FIELDS.includes(key))
 }
 
 const isSnapshot = (snapshot, expectedVersion) => (
-  hasExactSnapshotFields(snapshot)
+  hasValidSnapshotFields(snapshot)
   && snapshot.version === expectedVersion
   && isPositiveInteger(snapshot.version)
   && isNonemptyString(snapshot.title)
@@ -196,7 +197,7 @@ const isSnapshot = (snapshot, expectedVersion) => (
   && isContent(snapshot.content)
   && isStringArray(snapshot.linkedTopics)
   && isStringArray(snapshot.linkedErrors)
-  && (snapshot.source === null || NOTE_SOURCES.has(snapshot.source))
+  && (!hasOwn(snapshot, 'source') || snapshot.source === null || NOTE_SOURCES.has(snapshot.source))
   && isNonemptyString(snapshot.changedAt)
   && isNonemptyString(snapshot.reason)
 )
@@ -281,6 +282,12 @@ const contentHasRawCarrier = (content) => content.some((block) => (
   hasOwn(block, 'reference') && isRawCarrierReference(block.reference)
 ))
 
+export const sanitizePersistedNoteContent = (content) => {
+  const clone = cloneJson(content, invalidNote)
+  if (!isContent(clone) || contentHasRawCarrier(clone)) invalidNote()
+  return clone
+}
+
 export const sanitizePersistedNote = (note, { expectedId, expectedSourceJobId } = {}) => {
   const clone = cloneAndValidateNote(note)
   if (PERSISTED_NOTE_REQUIRED_FIELDS.some((field) => !hasOwn(clone, field))) invalidNote()
@@ -317,6 +324,8 @@ const cloneAndValidatePatch = (patch) => {
   return clone
 }
 
+export const sanitizeNotePatchCommand = (patch) => cloneAndValidatePatch(patch)
+
 const cloneChangeMetadata = (metadata) => {
   const invalid = () => fail('INVALID_CHANGE_METADATA', 'Change metadata is invalid')
   const clone = cloneJson(metadata, invalid)
@@ -333,11 +342,22 @@ const cloneChangeMetadata = (metadata) => {
   return clone
 }
 
+export const sanitizeNoteChangeMetadata = (metadata) => cloneChangeMetadata(metadata)
+
 const cloneChangedAt = (changedAt) => {
   if (!isNonemptyString(changedAt)) {
     fail('INVALID_CHANGE_METADATA', 'Change metadata is invalid')
   }
   return changedAt
+}
+
+export const sanitizeNoteChangedAt = (changedAt) => cloneChangedAt(changedAt)
+
+export const sanitizeNoteReason = (reason) => {
+  if (!isNonemptyString(reason)) {
+    fail('INVALID_CHANGE_METADATA', 'Change metadata is invalid')
+  }
+  return reason
 }
 
 const cloneSnapshotValue = (value) => cloneJson(value, invalidNote)
@@ -525,6 +545,8 @@ const cloneSuggestionIds = (suggestionIds) => {
   return uniqueStrings(clone)
 }
 
+export const sanitizeNoteSuggestionIds = (suggestionIds) => cloneSuggestionIds(suggestionIds)
+
 export function applyNoteOrganization(note, suggestionIds, changedAt) {
   const noteClone = cloneAndValidateNote(note)
   const selectedIds = cloneSuggestionIds(suggestionIds)
@@ -592,9 +614,7 @@ export function undoLastNoteVersion(note, changedAt) {
     version: noteClone.version + 1,
   }
 
-  if (target.source === null) {
-    Reflect.deleteProperty(restored, 'source')
-  } else {
+  if (hasOwn(target, 'source') && target.source !== null) {
     restored.source = target.source
   }
 

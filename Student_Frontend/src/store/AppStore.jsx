@@ -44,6 +44,85 @@ const requireUploadTransition = (items, id, allowedStatuses) => {
   if (!current || !allowedStatuses.includes(current.status)) throw invalidUploadResponse()
   return current
 }
+const invalidNoteResponse = () => Object.assign(
+  new Error('Note API response is invalid'),
+  { code: 'INVALID_NOTE_RESPONSE' },
+)
+const hasOwn = (value, key) => Object.prototype.hasOwnProperty.call(value, key)
+const sameJsonValue = (left, right) => {
+  if (Object.is(left, right)) return true
+  if (left === null || right === null || typeof left !== 'object' || typeof right !== 'object') return false
+  if (Array.isArray(left) !== Array.isArray(right)) return false
+  if (Array.isArray(left)) {
+    return left.length === right.length && left.every((value, index) => sameJsonValue(value, right[index]))
+  }
+  const leftKeys = Object.keys(left).sort()
+  const rightKeys = Object.keys(right).sort()
+  return leftKeys.length === rightKeys.length
+    && leftKeys.every((key, index) => key === rightKeys[index] && sameJsonValue(left[key], right[key]))
+}
+const sameOwnJsonField = (left, right, field) => (
+  hasOwn(left, field) === hasOwn(right, field)
+  && (!hasOwn(left, field) || sameJsonValue(left[field], right[field]))
+)
+const immutableNoteFields = [
+  'sourceJobId',
+  'materialType',
+  'examBoard',
+  'subject',
+  'chapter',
+  'questionBlocks',
+  'answerBlocks',
+  'aiSuggestions',
+  'createdAt',
+]
+const mutableNoteOutcomeFields = [
+  'title',
+  'folderId',
+  'folderPath',
+  'tags',
+  'content',
+  'linkedTopics',
+  'linkedErrors',
+  'source',
+]
+const strictNoteMutationResult = (items, id, response, expectedValue) => {
+  const currentValue = items.find((note) => note.id === id)
+  if (!currentValue) throw invalidNoteResponse()
+  const current = sanitizePersistedNote(currentValue, { expectedId: id })
+  const candidate = sanitizePersistedNote(response?.note, { expectedId: id })
+  const expected = sanitizePersistedNote(expectedValue, { expectedId: id })
+  if (!immutableNoteFields.every((field) => sameOwnJsonField(candidate, current, field))) {
+    throw invalidNoteResponse()
+  }
+  if (candidate.version === current.version) {
+    if (!sameJsonValue(candidate, current) || !sameJsonValue(candidate, expected)) {
+      throw invalidNoteResponse()
+    }
+    return candidate
+  }
+  if (candidate.version !== current.version + 1
+    || candidate.version !== expected.version
+    || candidate.versions.length !== current.versions.length + 1
+    || !candidate.versions.slice(0, -1).every((snapshot, index) => (
+      sameJsonValue(snapshot, current.versions[index])
+    ))) throw invalidNoteResponse()
+  const prior = candidate.versions[candidate.versions.length - 1]
+  const snapshotFields = ['version', 'title', 'folderId', 'folderPath', 'tags', 'content', 'linkedTopics', 'linkedErrors', 'source']
+  if (!snapshotFields.every((field) => sameJsonValue(prior[field], current[field]))) {
+    throw invalidNoteResponse()
+  }
+  const expectedPrior = expected.versions[expected.versions.length - 1]
+  if (!expectedPrior
+    || prior.reason !== expectedPrior.reason
+    || !sameOwnJsonField(prior, expectedPrior, 'changedAt')
+    || !sameOwnJsonField(candidate, expected, 'updatedAt')
+    || candidate.updatedAt !== prior.changedAt
+    || !mutableNoteOutcomeFields.every((field) => sameOwnJsonField(candidate, expected, field))) {
+    throw invalidNoteResponse()
+  }
+  return candidate
+}
 const upsertById = (items, replacement, { prepend = false } = {}) => {
   const index = items.findIndex((item) => item.id === replacement.id)
   if (index < 0) return prepend ? [replacement, ...items] : [...items, replacement]
@@ -633,67 +712,91 @@ export function AppProvider({ children, services = defaultAppServices }) {
       const suggestionIds = sourceNote
         ? normalizeNoteSuggestions(sourceNote).map(({ id: suggestionId }) => suggestionId)
         : []
-      return runAction(`note:update:${id}`, 'notes', () => ({
-        snapshot: notesRef.current,
-        optimistic: () => replaceNotes(notesRef.current.map((note) => (
-          note.id === id ? applyNoteOrganization(note, suggestionIds, changedAt) : note
+      return runAction(`note:update:${id}`, 'notes', () => {
+        const currentNotes = notesRef.current
+        const currentNote = currentNotes.find((note) => note.id === id)
+        const expectedNote = currentNote
+          ? applyNoteOrganization(currentNote, suggestionIds, changedAt)
+          : null
+        return {
+          snapshot: currentNotes,
+          optimistic: () => replaceNotes(currentNotes.map((note) => (
+            note.id === id ? expectedNote : note
+          ))),
+          request: () => services.api.organizeNote(id, suggestionIds, { changedAt }),
+          commit: (result) => {
+            const persistedNote = strictNoteMutationResult(currentNotes, id, result, expectedNote)
+            replaceNotes(currentNotes.map((note) => (
+              note.id === id ? persistedNote : note
+            )))
+          },
+          rollback: replaceNotes,
+        }
+      })
+    }
+    return runAction(`note:update:${id}`, 'notes', () => {
+      const currentNotes = notesRef.current
+      const currentNote = currentNotes.find((note) => note.id === id)
+      const expectedNote = currentNote ? applyNotePatch(currentNote, patch, metadata) : null
+      return {
+        snapshot: currentNotes,
+        optimistic: () => replaceNotes(currentNotes.map((note) => (
+          note.id === id ? expectedNote : note
         ))),
-        request: () => services.api.organizeNote(id, suggestionIds, { changedAt }),
+        request: () => services.api.updateNote(id, { ...patch, ...metadata }),
         commit: (result) => {
-          if (!result?.note || result.note.id !== id) return
-          replaceNotes(notesRef.current.map((note) => (
-            note.id === id ? { ...note, ...result.note } : note
+          const persistedNote = strictNoteMutationResult(currentNotes, id, result, expectedNote)
+          replaceNotes(currentNotes.map((note) => (
+            note.id === id ? persistedNote : note
           )))
         },
         rollback: replaceNotes,
-      }))
-    }
-    return runAction(`note:update:${id}`, 'notes', () => ({
-      snapshot: notesRef.current,
-      optimistic: () => replaceNotes(notesRef.current.map((note) => (
-        note.id === id ? applyNotePatch(note, patch, metadata) : note
-      ))),
-      request: () => services.api.updateNote(id, { ...patch, ...metadata }),
-      commit: (result) => {
-        if (!result?.note || result.note.id !== id) return
-        replaceNotes(notesRef.current.map((note) => (
-          note.id === id ? { ...note, ...result.note } : note
-        )))
-      },
-      rollback: replaceNotes,
-    }))
+      }
+    })
   }, [replaceNotes, runAction, services])
 
   const organizeNote = useCallback((id, suggestionIds) => {
     const changedAt = services.now().toISOString()
-    return runAction(`note:organize:${id}`, 'notes', () => ({
-      snapshot: notesRef.current,
-      optimistic: () => replaceNotes(notesRef.current.map((note) => (
-        note.id === id ? applyNoteOrganization(note, suggestionIds, changedAt) : note
-      ))),
-      request: () => services.api.organizeNote(id, suggestionIds, { changedAt }),
-      commit: (result) => {
-        if (!result?.note || result.note.id !== id) return
-        replaceNotes(upsertById(notesRef.current, result.note))
-      },
-      rollback: replaceNotes,
-    }))
+    return runAction(`note:organize:${id}`, 'notes', () => {
+      const currentNotes = notesRef.current
+      const currentNote = currentNotes.find((note) => note.id === id)
+      const expectedNote = currentNote
+        ? applyNoteOrganization(currentNote, suggestionIds, changedAt)
+        : null
+      return {
+        snapshot: currentNotes,
+        optimistic: () => replaceNotes(currentNotes.map((note) => (
+          note.id === id ? expectedNote : note
+        ))),
+        request: () => services.api.organizeNote(id, suggestionIds, { changedAt }),
+        commit: (result) => {
+          const note = strictNoteMutationResult(currentNotes, id, result, expectedNote)
+          replaceNotes(upsertById(currentNotes, note))
+        },
+        rollback: replaceNotes,
+      }
+    })
   }, [replaceNotes, runAction, services])
 
   const undoNote = useCallback((id) => {
     const changedAt = services.now().toISOString()
-    return runAction(`note:undo:${id}`, 'notes', () => ({
-      snapshot: notesRef.current,
-      optimistic: () => replaceNotes(notesRef.current.map((note) => (
-        note.id === id ? undoLastNoteVersion(note, changedAt) : note
-      ))),
-      request: () => services.api.undoNote(id, { changedAt }),
-      commit: (result) => {
-        if (!result?.note || result.note.id !== id) return
-        replaceNotes(upsertById(notesRef.current, result.note))
-      },
-      rollback: replaceNotes,
-    }))
+    return runAction(`note:undo:${id}`, 'notes', () => {
+      const currentNotes = notesRef.current
+      const currentNote = currentNotes.find((note) => note.id === id)
+      const expectedNote = currentNote ? undoLastNoteVersion(currentNote, changedAt) : null
+      return {
+        snapshot: currentNotes,
+        optimistic: () => replaceNotes(currentNotes.map((note) => (
+          note.id === id ? expectedNote : note
+        ))),
+        request: () => services.api.undoNote(id, { changedAt }),
+        commit: (result) => {
+          const note = strictNoteMutationResult(currentNotes, id, result, expectedNote)
+          replaceNotes(upsertById(currentNotes, note))
+        },
+        rollback: replaceNotes,
+      }
+    })
   }, [replaceNotes, runAction, services])
 
   const saveSession = useCallback((session) => {

@@ -318,21 +318,6 @@ describe('applyNotePatch', () => {
         extra: true,
       }],
     }],
-    ['snapshot missing source', {
-      version: 2,
-      versions: [{
-        version: 1,
-        title: 'V1',
-        folderId: 'f-math',
-        folderPath: 'A-Level Math',
-        tags: [],
-        content: [],
-        linkedTopics: [],
-        linkedErrors: [],
-        changedAt: '2026-08-02T00:00:00Z',
-        reason: 'edit',
-      }],
-    }],
     ['snapshot with invalid source', {
       version: 2,
       versions: [{
@@ -666,16 +651,15 @@ describe('undoLastNoteVersion', () => {
     ])
   })
 
-  test('uses a null source sentinel in history and deletes source when undo restores it', () => {
-    const sourceLess = makeNote()
-    Reflect.deleteProperty(sourceLess, 'source')
-
-    const edited = applyNotePatch(sourceLess, { title: 'Edited source-less note' }, editOptions)
+  test.each(['null', 'missing'])('treats a %s legacy history source as unknown and preserves the current legal source', (legacySource) => {
+    const edited = applyNotePatch(makeNote(), { title: 'Edited note' }, editOptions)
+    if (legacySource === 'null') edited.versions[0].source = null
+    else Reflect.deleteProperty(edited.versions[0], 'source')
     const restored = undoLastNoteVersion(edited, '2026-08-06T10:01:00Z')
 
-    expect(edited.versions[0].source).toBeNull()
-    expect(restored).not.toHaveProperty('source')
-    expect(restored.title).toBe(sourceLess.title)
+    expect(restored.source).toBe('typed')
+    expect(restored.title).toBe('Old title')
+    expect(restored.versions[1]).toMatchObject({ source: 'typed', reason: 'undo' })
   })
 
   test('fails stably when there is no prior version to restore', () => {

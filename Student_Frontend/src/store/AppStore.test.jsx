@@ -2,7 +2,7 @@ import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { expect, test, vi } from 'vitest'
 import { AppProvider, useApp } from './AppStore'
 import { createAppServices } from './services'
-import { applyNoteOrganization, undoLastNoteVersion } from '../features/materials/noteVersions'
+import { applyNoteOrganization, applyNotePatch, undoLastNoteVersion } from '../features/materials/noteVersions'
 import { MATERIAL_FIXTURES } from '../data/materialFixtures'
 
 const bootData = {
@@ -2114,13 +2114,35 @@ test('clears failed-only diagnostics when Store commits cancellation', async () 
   expect(harness.app.isActionPending('upload:cancel:job-1')).toBe(false)
 })
 
+test('commits needs-confirmation cancellation without retaining classification result state', async () => {
+  // Catches the Store rejecting or losing a legal needs_confirmation -> cancelled transition.
+  const classified = validUploadJob({
+    status: 'needs_confirmation',
+    progress: 100,
+    result: validClassificationResult(),
+  })
+  const cancelled = validUploadJob({ status: 'cancelled', progress: 100 })
+  const harness = await renderApp(createApi({
+    bootstrap: () => Promise.resolve({ ...bootData, notes: [], uploadJobs: [classified] }),
+    cancelUploadJob: () => Promise.resolve({ job: cancelled }),
+  }))
+
+  await act(async () => {
+    await harness.app.cancelMaterialUpload('job-1')
+  })
+
+  expect(harness.app.uploadJobs).toEqual([cancelled])
+  expect(harness.app.uploadJobs[0]).not.toHaveProperty('result')
+  expect(harness.app.uploadJobs[0]).not.toHaveProperty('failure')
+})
+
 test('rolls back note edits with an error toast and commits organize and undo canonically', async () => {
   // Catches optimistic version history surviving a failure or canonical source/version data being ignored.
   const original = validNote()
   let rejectUpdate
   const updateNote = vi.fn(() => new Promise((_, reject) => { rejectUpdate = reject }))
   const organized = applyNoteOrganization(original, ['s-tag'], '2026-08-06T00:00:00.000Z')
-  const undone = undoLastNoteVersion(organized, '2026-08-06T00:01:00.000Z')
+  const undone = undoLastNoteVersion(organized, '2026-08-06T00:00:00.000Z')
   const organizeNote = vi.fn(() => Promise.resolve({ note: organized }))
   const undoNote = vi.fn(() => Promise.resolve({ note: undone }))
   const harness = await renderApp(createApi({
@@ -2147,6 +2169,177 @@ test('rolls back note edits with an error toast and commits organize and undo ca
   expect(undoNote).toHaveBeenCalledWith('n1', { changedAt: '2026-08-06T00:00:00.000Z' })
   expect(harness.app.notes).toEqual([undone])
   expect(harness.app.isActionPending('note:undo:n1')).toBe(false)
+})
+
+test.each([
+  ['update with an unsafe note', 'update', () => validNote(), (current) => ({
+    ...applyNotePatch(current, { title: 'Server edit' }, {
+      changedAt: '2026-08-06T00:00:00.000Z', reason: 'edit',
+    }),
+    rawBytes: 'AA==',
+  })],
+  ['organize with a wrong id', 'organize', () => validNote(), (current) => ({
+    ...applyNoteOrganization(current, ['s-tag'], '2026-08-06T00:00:00.000Z'),
+    id: 'wrong-id',
+  })],
+  ['undo with a skipped version', 'undo', () => applyNotePatch(validNote(), { title: 'Version 2' }, {
+    changedAt: '2026-08-05T00:00:00.000Z', reason: 'edit',
+  }), () => {
+    const version2 = applyNotePatch(validNote(), { title: 'Server version 2' }, {
+      changedAt: '2026-08-05T00:00:00.000Z', reason: 'edit',
+    })
+    const version3 = applyNotePatch(version2, { title: 'Server version 3' }, {
+      changedAt: '2026-08-05T00:01:00.000Z', reason: 'edit',
+    })
+    return applyNotePatch(version3, { title: 'Server version 4' }, {
+      changedAt: '2026-08-05T00:02:00.000Z', reason: 'edit',
+    })
+  }],
+])('atomically rejects a forged note mutation result: %s', async (_, action, makeInitial, makeResponse) => {
+  // Catches Store commits trusting test stubs or a bypassed API boundary.
+  const initial = makeInitial()
+  const response = makeResponse(initial)
+  const harness = await renderApp(createApi({
+    bootstrap: () => Promise.resolve({ ...bootData, notes: [initial] }),
+    updateNote: () => Promise.resolve({ note: response }),
+    organizeNote: () => Promise.resolve({ note: response }),
+    undoNote: () => Promise.resolve({ note: response }),
+  }))
+  const invoke = {
+    update: () => harness.app.updateNote('n1', { title: 'Optimistic edit' }),
+    organize: () => harness.app.organizeNote('n1', ['s-tag']),
+    undo: () => harness.app.undoNote('n1'),
+  }[action]
+
+  await act(async () => {
+    await expect(invoke()).rejects.toBeDefined()
+  })
+  expect(harness.app.notes).toEqual([initial])
+})
+
+const storeMutationMetadata = {
+  changedAt: '2026-08-06T00:00:00.000Z',
+  reason: 'edit',
+}
+
+const noteWithVersion = (overrides = {}) => applyNotePatch(validNote(overrides), {
+  title: 'Version 2',
+}, {
+  changedAt: '2026-08-05T00:00:00.000Z',
+  reason: 'edit',
+})
+
+test.each([
+  ['update adds immutable subject', 'update', () => validNote(), (current) => ({
+    ...applyNotePatch(current, { title: 'Optimistic edit' }, storeMutationMetadata),
+    subject: 'A-Level Math',
+  })],
+  ['organize removes immutable materialType', 'organize', () => validNote({
+    materialType: 'class_note',
+  }), (current) => {
+    const forged = applyNoteOrganization(current, ['s-tag'], storeMutationMetadata.changedAt)
+    delete forged.materialType
+    return forged
+  }],
+  ['undo changes immutable aiSuggestions', 'undo', () => noteWithVersion(), (current) => ({
+    ...undoLastNoteVersion(current, storeMutationMetadata.changedAt),
+    aiSuggestions: [],
+  })],
+  ['update changes source', 'update', () => validNote(), (current) => ({
+    ...applyNotePatch(current, { title: 'Optimistic edit' }, storeMutationMetadata),
+    source: 'photo',
+  })],
+  ['organize keeps the pre-organization source', 'organize', () => validNote(), (current) => ({
+    ...applyNoteOrganization(current, ['s-tag'], storeMutationMetadata.changedAt),
+    source: current.source,
+  })],
+  ['undo does not restore the snapshot source', 'undo', () => applyNoteOrganization(
+    validNote(),
+    ['s-tag'],
+    '2026-08-05T00:00:00.000Z',
+  ), (current) => ({
+    ...undoLastNoteVersion(current, storeMutationMetadata.changedAt),
+    source: current.source,
+  })],
+  ['undo replaces a legacy null snapshot source', 'undo', () => {
+    const current = noteWithVersion({ source: 'typed' })
+    current.versions[current.versions.length - 1].source = null
+    return current
+  }, (current) => ({
+    ...undoLastNoteVersion(current, storeMutationMetadata.changedAt),
+    source: 'photo',
+  })],
+])('atomically rejects an action-inconsistent note response: %s', async (_, action, makeInitial, makeResponse) => {
+  // Catches schema-valid responses mutating immutable top-level fields or using the wrong action source.
+  const initial = makeInitial()
+  const response = makeResponse(initial)
+  const harness = await renderApp(createApi({
+    bootstrap: () => Promise.resolve({ ...bootData, notes: [initial] }),
+    updateNote: () => Promise.resolve({ note: response }),
+    organizeNote: () => Promise.resolve({ note: response }),
+    undoNote: () => Promise.resolve({ note: response }),
+  }))
+  const invoke = {
+    update: () => harness.app.updateNote('n1', { title: 'Optimistic edit' }),
+    organize: () => harness.app.organizeNote('n1', ['s-tag']),
+    undo: () => harness.app.undoNote('n1'),
+  }[action]
+
+  await act(async () => {
+    await expect(invoke()).rejects.toMatchObject({ code: 'INVALID_NOTE_RESPONSE' })
+  })
+  expect(harness.app.notes).toEqual([initial])
+})
+
+test.each([
+  ['update', () => validNote(), (current) => applyNotePatch(current, {
+    title: 'Optimistic edit',
+  }, {
+    changedAt: '2099-01-01T00:00:00.000Z',
+    reason: 'edit',
+  })],
+  ['organize', () => validNote(), (current) => applyNoteOrganization(
+    current,
+    ['s-tag'],
+    '2099-01-01T00:00:00.000Z',
+  )],
+  ['undo', () => noteWithVersion(), (current) => undoLastNoteVersion(
+    current,
+    '2099-01-01T00:00:00.000Z',
+  )],
+])('atomically rejects an internally consistent forged %s mutation timestamp', async (action, makeInitial, makeResponse) => {
+  // Catches a response synchronizing updatedAt and snapshot.changedAt to a timestamp the Store never sent.
+  const initial = makeInitial()
+  const response = makeResponse(initial)
+  const harness = await renderApp(createApi({
+    bootstrap: () => Promise.resolve({ ...bootData, notes: [initial] }),
+    updateNote: () => Promise.resolve({ note: response }),
+    organizeNote: () => Promise.resolve({ note: response }),
+    undoNote: () => Promise.resolve({ note: response }),
+  }))
+  const invoke = {
+    update: () => harness.app.updateNote('n1', { title: 'Optimistic edit' }),
+    organize: () => harness.app.organizeNote('n1', ['s-tag']),
+    undo: () => harness.app.undoNote('n1'),
+  }[action]
+
+  await act(async () => {
+    await expect(invoke()).rejects.toMatchObject({ code: 'INVALID_NOTE_RESPONSE' })
+  })
+  expect(harness.app.notes).toEqual([initial])
+})
+
+test('rejects a successful note mutation when the current note does not exist', async () => {
+  // Catches a late/stubbed response inserting a note that was absent when the action committed.
+  const harness = await renderApp(createApi({
+    bootstrap: () => Promise.resolve({ ...bootData, notes: [] }),
+    updateNote: () => Promise.resolve({ note: validNote() }),
+  }))
+
+  await act(async () => {
+    await expect(harness.app.updateNote('n1', { title: 'Ghost edit' })).rejects.toBeDefined()
+  })
+  expect(harness.app.notes).toEqual([])
 })
 
 test('routes the existing one-click organize update consumer through the versioned organize endpoint', async () => {

@@ -34,6 +34,10 @@
   `uploadJobs` collection when absent and migrates legacy Module 0–3 notes that have neither
   version field to `version: 1, versions: []`; the migrated shape is written back to the same
   version-1 envelope.
+- Persisted-note migration: after legacy version fields are normalized, bootstrap and list apply the
+  same strict persisted-note boundary. Invalid notes are omitted and persistently removed from mock
+  storage; valid legacy and current notes retain their complete contract shape. A migrated or filtered
+  shape is written back once, while later reads do not rewrite already-valid notes.
 - Test helper: `resetMockState()` is exported from `src/api/index.js`. It clears that local key and
   returns a fresh bootstrapped seed state asynchronously. It does not introduce or alter an HTTP
   endpoint.
@@ -408,6 +412,26 @@ already accepted timestamp reject with code `INVALID_INPUT`; these failures do n
 snapshot. Identity, source, version counters, upload provenance, and classification fields cannot
 be overwritten through this endpoint.
 
+Update, organize, and undo commands are strict plain/dense JSON and are validated before either a
+mock transaction or real network request. Their note id must be a string containing a non-whitespace
+character; this id preflight runs before any command field is read. Metadata defaults apply only when
+the own `changedAt`/`updatedAt`/`reason` field is absent. An explicitly supplied `null`, `undefined`,
+non-string, or non-JSON value is rejected with `INVALID_CHANGE_METADATA` before transport or storage.
+Every own metadata field is validated independently before precedence is applied, so a legal option
+cannot hide an invalid patch field. Update time precedence is option `changedAt`, patch `changedAt`,
+patch `updatedAt`, then the generated default; reason precedence is option `reason`, patch `reason`,
+then `edit`.
+Every successful mutation response is projected through the complete persisted-note contract and
+must preserve the requested note id. The Store additionally requires the current note and accepts
+only an exact no-op or one continuous action-consistent version step whose prior history and final
+snapshot match that current note. Upload/classification provenance, AI suggestions, and `createdAt`
+remain byte-for-byte JSON-equivalent (including field presence); update preserves `source`, organize
+uses the organizer's `ai_organized` result, and undo uses the restored snapshot source (or preserves
+the current legal source for a legacy null/missing snapshot). Invalid responses roll back atomically.
+For a version-advancing Store commit, both top-level `updatedAt` and the newest snapshot's own
+`changedAt` must exactly match the action's locally calculated result; an internally consistent but
+unsolicited server timestamp is rejected.
+
 `POST /api/notes` accepts legacy seeds and the Task 2/Task 5 note fields documented above, but
 rejects unknown keys and non-plain/non-dense JSON anywhere in the object. `undefined`, symbols,
 accessors, custom prototypes, cycles, `Blob`, typed arrays, and raw/base64 carrier fields fail with
@@ -418,6 +442,10 @@ stricter. Create and material confirmation require `id`, `title`, `folderId`, `f
 `linkedTopics`, `linkedErrors`, `source`, `createdAt`, `updatedAt`, `content`, and `aiSuggestions`;
 `version`/`versions` may be supplied together or are initialized to version 1. Image/object references
 must be durable references; `data:`, `base64:`, `raw:`, and inline `;base64,` references are rejected.
+Bootstrap and `GET /api/notes` run this validation after legacy version migration and use stable
+filtering: polluted records are never returned, and the mock adapter removes them from local storage.
+For legacy version snapshots, a missing or `null` `source` means “unknown”; undo preserves the current
+persisted note's legal source while restoring every other snapshot field and recording the new version.
 
 ### Material uploads
 
@@ -426,7 +454,7 @@ must be durable references; `data:`, `base64:`, `raw:`, and inline `;base64,` re
 | `POST /api/material-uploads` | `{ id?, fileName, mimeType, size, materialType, examBoard?, subject?, chapter?, createdAt? }` | `{ job }` | Validate and persist one queued metadata-only job |
 | `POST /api/material-uploads/{id}/process` | none | `{ job }` | Process a `queued` or `failed` job; retry clears old failure, success persists `needs_confirmation`, and non-cancellation failure rejects while persisting/attaching the safe failed job |
 | `POST /api/material-uploads/{id}/confirm` | Partial\<MaterialClassificationResult\> | `{ job, note }` | Atomically complete the job and create the linked version-1 Note |
-| `POST /api/material-uploads/{id}/cancel` | none | `{ job }` | Terminal cancellation before completion; retrying cancel is idempotent |
+| `POST /api/material-uploads/{id}/cancel` | none | `{ job }` | Terminal cancellation before completion; removes state-specific `failure`/`result`; retrying cancel is idempotent |
 
 Creation accepts serialized metadata only. Unknown keys and raw-byte/base64 fields reject with
 `INVALID_UPLOAD_METADATA`; invalid MIME/size/material-type values retain their stable domain codes

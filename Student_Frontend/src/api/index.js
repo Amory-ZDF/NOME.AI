@@ -38,7 +38,13 @@ import {
   applyNoteOrganization,
   applyNotePatch,
   NoteVersionError,
+  sanitizeNoteChangedAt,
+  sanitizeNoteChangeMetadata,
+  sanitizeNotePatchCommand,
+  sanitizeNoteReason,
+  sanitizeNoteSuggestionIds,
   sanitizePersistedNote,
+  sanitizePersistedNoteContent,
   sanitizeNote,
   undoLastNoteVersion,
 } from '../features/materials/noteVersions'
@@ -152,16 +158,31 @@ const cloneCommand = (value, onInvalid) => {
 }
 
 const normalizeLegacyNote = (note) => {
+  if (!isPlainRecord(note)) return note
   const hasVersion = hasOwn(note, 'version')
   const hasVersions = hasOwn(note, 'versions')
   if (!hasVersion && !hasVersions) return { ...note, versions: [], version: 1 }
   return note
 }
 
+const sanitizeMaterialNotes = (notes) => {
+  if (!Array.isArray(notes)) return []
+  const sanitized = []
+  for (const note of notes) {
+    try {
+      sanitized.push(sanitizePersistedNote(normalizeLegacyNote(note)))
+    } catch (error) {
+      if (!(error instanceof NoteVersionError)) throw error
+    }
+  }
+  return sanitized
+}
+
 const needsMaterialMigration = (state) => (
   !Array.isArray(state.uploadJobs)
   || sanitizeUploadJobs(state.uploadJobs).length !== state.uploadJobs.length
   || !Array.isArray(state.notes)
+  || sanitizeMaterialNotes(state.notes).length !== state.notes.length
   || state.notes.some((note) => !hasOwn(note, 'version') && !hasOwn(note, 'versions'))
 )
 
@@ -170,7 +191,7 @@ const normalizeMaterialState = (state) => {
   return {
     ...state,
     uploadJobs: sanitizeUploadJobs(state.uploadJobs),
-    notes: Array.isArray(state.notes) ? state.notes.map(normalizeLegacyNote) : [],
+    notes: sanitizeMaterialNotes(state.notes),
   }
 }
 
@@ -211,9 +232,18 @@ const sanitizeConfirmSuccess = (response, id) => {
   }
 }
 
-const sanitizeBootstrapUploadJobs = (data) => {
+const sanitizeBootstrapMaterialState = (data) => {
   if (!isPlainRecord(data)) return data
-  return { ...data, uploadJobs: sanitizeUploadJobs(data.uploadJobs) }
+  return {
+    ...data,
+    uploadJobs: sanitizeUploadJobs(data.uploadJobs),
+    notes: sanitizeMaterialNotes(data.notes),
+  }
+}
+
+const sanitizeNotesResponse = (data) => {
+  if (!isPlainRecord(data)) return { notes: [] }
+  return { ...data, notes: sanitizeMaterialNotes(data.notes) }
 }
 
 const throwIfAborted = (signal) => {
@@ -726,19 +756,126 @@ const invalidNotePatchError = () => domainError(new NoteVersionError(
   'Note patch contains invalid fields',
 ))
 
+const invalidChangeMetadataError = () => domainError(new NoteVersionError(
+  'INVALID_CHANGE_METADATA',
+  'Change metadata is invalid',
+))
+
+const assertNoteMutationId = (id) => {
+  if (!hasId({ id })) throw invalid('Note id is required')
+}
+
+const readCommandFields = (value, onInvalid) => {
+  if (!isPlainRecord(value)) throw onInvalid()
+  const fields = Object.create(null)
+  for (const key of Reflect.ownKeys(value)) {
+    const descriptor = Object.getOwnPropertyDescriptor(value, key)
+    if (typeof key !== 'string'
+      || !descriptor
+      || !hasOwn(descriptor, 'value')
+      || !descriptor.enumerable) throw onInvalid()
+    fields[key] = descriptor.value
+  }
+  return fields
+}
+
+const sanitizeNoteCommand = (action) => {
+  try {
+    return action()
+  } catch (error) {
+    mapMaterialDomainError(error)
+  }
+}
+
 const snapshotNoteCommand = (patch, options = {}) => {
-  if (!isPlainRecord(patch) || !isPlainRecord(options)) throw invalidNotePatchError()
-  const patchClone = cloneCommand(patch, invalidNotePatchError)
-  const optionsClone = cloneCommand(options, invalidNotePatchError)
-  const changedAt = optionsClone.changedAt
-    ?? patchClone.changedAt
-    ?? patchClone.updatedAt
-    ?? new Date().toISOString()
-  const reason = optionsClone.reason ?? patchClone.reason ?? 'edit'
-  Reflect.deleteProperty(patchClone, 'changedAt')
-  Reflect.deleteProperty(patchClone, 'updatedAt')
-  Reflect.deleteProperty(patchClone, 'reason')
-  return { patch: patchClone, metadata: { changedAt, reason } }
+  const patchFields = readCommandFields(patch, invalidNotePatchError)
+  const optionFields = readCommandFields(options, invalidChangeMetadataError)
+  if (Reflect.ownKeys(optionFields).some((field) => !['changedAt', 'reason'].includes(field))) {
+    throw invalidChangeMetadataError()
+  }
+  for (const field of ['changedAt', 'updatedAt']) {
+    if (hasOwn(patchFields, field)) {
+      sanitizeNoteCommand(() => sanitizeNoteChangedAt(patchFields[field]))
+    }
+  }
+  if (hasOwn(patchFields, 'reason')) {
+    sanitizeNoteCommand(() => sanitizeNoteReason(patchFields.reason))
+  }
+  if (hasOwn(optionFields, 'changedAt')) {
+    sanitizeNoteCommand(() => sanitizeNoteChangedAt(optionFields.changedAt))
+  }
+  if (hasOwn(optionFields, 'reason')) {
+    sanitizeNoteCommand(() => sanitizeNoteReason(optionFields.reason))
+  }
+  const embeddedMetadata = {}
+  for (const field of ['changedAt', 'updatedAt', 'reason']) {
+    if (hasOwn(patchFields, field)) {
+      embeddedMetadata[field] = patchFields[field]
+      Reflect.deleteProperty(patchFields, field)
+    }
+  }
+  if (hasOwn(patchFields, 'content')) {
+    sanitizeNoteCommand(() => sanitizePersistedNoteContent(patchFields.content))
+  }
+  const patchClone = sanitizeNoteCommand(() => sanitizeNotePatchCommand(patchFields))
+  const changedAt = hasOwn(optionFields, 'changedAt')
+    ? optionFields.changedAt
+    : hasOwn(embeddedMetadata, 'changedAt')
+      ? embeddedMetadata.changedAt
+      : hasOwn(embeddedMetadata, 'updatedAt')
+        ? embeddedMetadata.updatedAt
+        : new Date().toISOString()
+  const reason = hasOwn(optionFields, 'reason')
+    ? optionFields.reason
+    : hasOwn(embeddedMetadata, 'reason')
+      ? embeddedMetadata.reason
+      : 'edit'
+  const metadata = sanitizeNoteCommand(() => sanitizeNoteChangeMetadata({ changedAt, reason }))
+  return { patch: patchClone, metadata }
+}
+
+const snapshotOrganizationCommand = (suggestionIds, options = {}) => {
+  const optionFields = readCommandFields(options, invalidChangeMetadataError)
+  if (Reflect.ownKeys(optionFields).some((field) => field !== 'changedAt')) {
+    throw invalidChangeMetadataError()
+  }
+  if (hasOwn(optionFields, 'changedAt')) {
+    sanitizeNoteCommand(() => sanitizeNoteChangedAt(optionFields.changedAt))
+  }
+  return {
+    suggestionIds: sanitizeNoteCommand(() => sanitizeNoteSuggestionIds(suggestionIds)),
+    changedAt: sanitizeNoteCommand(() => sanitizeNoteChangedAt(
+      hasOwn(optionFields, 'changedAt') ? optionFields.changedAt : new Date().toISOString(),
+    )),
+  }
+}
+
+const snapshotUndoCommand = (options = {}) => {
+  const optionFields = readCommandFields(options, invalidChangeMetadataError)
+  if (Reflect.ownKeys(optionFields).some((field) => field !== 'changedAt')) {
+    throw invalidChangeMetadataError()
+  }
+  if (hasOwn(optionFields, 'changedAt')) {
+    sanitizeNoteCommand(() => sanitizeNoteChangedAt(optionFields.changedAt))
+  }
+  return {
+    changedAt: sanitizeNoteCommand(() => sanitizeNoteChangedAt(
+      hasOwn(optionFields, 'changedAt') ? optionFields.changedAt : new Date().toISOString(),
+    )),
+  }
+}
+
+const sanitizeNoteMutationSuccess = (response, id) => {
+  try {
+    if (!isPlainRecord(response)) throw new NoteVersionError('INVALID_NOTE', 'Note response is invalid')
+    const descriptor = Object.getOwnPropertyDescriptor(response, 'note')
+    if (!descriptor || !hasOwn(descriptor, 'value') || !descriptor.enumerable) {
+      throw new NoteVersionError('INVALID_NOTE', 'Note response is invalid')
+    }
+    return { note: sanitizePersistedNote(descriptor.value, { expectedId: id }) }
+  } catch (error) {
+    throw invalidUploadResponse(error)
+  }
 }
 
 const updateVersionedNote = async (id, recipe) => {
@@ -748,7 +885,7 @@ const updateVersionedNote = async (id, recipe) => {
       const materialState = normalizeMaterialState(current)
       const note = materialState.notes.find((item) => item.id === id)
       if (!note) throw notFound('Note', id)
-      const replacement = recipe(note)
+      const replacement = sanitizePersistedNote(recipe(note), { expectedId: id })
       return {
         ...materialState,
         notes: materialState.notes.map((item) => (item.id === id ? replacement : item)),
@@ -762,8 +899,8 @@ const updateVersionedNote = async (id, recipe) => {
 
 // ---------- Bootstrap (GET /api/student/bootstrap) ----------
 export async function bootstrap() {
-  if (!isMockMode) return sanitizeBootstrapUploadJobs(await http.get('/api/student/bootstrap'))
-  return sanitizeBootstrapUploadJobs(await persistMaterialMigration())
+  if (!isMockMode) return sanitizeBootstrapMaterialState(await http.get('/api/student/bootstrap'))
+  return sanitizeBootstrapMaterialState(await persistMaterialMigration())
 }
 
 export async function resetMockState() {
@@ -946,7 +1083,7 @@ export const verifyErrorVariant = async (id, result) => {
 
 // ---------- Notes ----------
 export const listNotes = async () => {
-  if (!isMockMode) return http.get('/api/notes')
+  if (!isMockMode) return sanitizeNotesResponse(await http.get('/api/notes'))
   const state = await persistMaterialMigration()
   return { notes: state.notes }
 }
@@ -976,40 +1113,43 @@ export const createNote = async (note) => {
   }) }
 }
 export const updateNote = async (id, patch, options = {}) => {
+  assertNoteMutationId(id)
   const command = snapshotNoteCommand(patch, options)
-  if (!isMockMode) return http.patch(`/api/notes/${encodeURIComponent(id)}`, {
-    ...command.patch,
-    ...command.metadata,
-  })
-  return {
+  if (!isMockMode) return sanitizeNoteMutationSuccess(await http.patch(
+    `/api/notes/${encodeURIComponent(id)}`,
+    { ...command.patch, ...command.metadata },
+  ), id)
+  return sanitizeNoteMutationSuccess({
     note: await updateVersionedNote(id, (note) => applyNotePatch(note, command.patch, command.metadata)),
-  }
+  }, id)
 }
 
 export const organizeNote = async (id, suggestionIds, options = {}) => {
-  if (!isPlainRecord(options)) throw invalidNotePatchError()
-  const selectedIds = cloneCommand(suggestionIds, invalidNotePatchError)
-  const changedAt = options.changedAt !== undefined
-    ? options.changedAt
-    : new Date().toISOString()
-  if (!isMockMode) return http.post(`/api/notes/${encodeURIComponent(id)}/organize`, {
-    suggestionIds: selectedIds,
-    changedAt,
-  })
-  return {
-    note: await updateVersionedNote(id, (note) => applyNoteOrganization(note, selectedIds, changedAt)),
-  }
+  assertNoteMutationId(id)
+  const command = snapshotOrganizationCommand(suggestionIds, options)
+  if (!isMockMode) return sanitizeNoteMutationSuccess(await http.post(
+    `/api/notes/${encodeURIComponent(id)}/organize`,
+    command,
+  ), id)
+  return sanitizeNoteMutationSuccess({
+    note: await updateVersionedNote(id, (note) => applyNoteOrganization(
+      note,
+      command.suggestionIds,
+      command.changedAt,
+    )),
+  }, id)
 }
 
 export const undoNote = async (id, options = {}) => {
-  if (!isPlainRecord(options)) throw invalidNotePatchError()
-  const changedAt = options.changedAt !== undefined
-    ? options.changedAt
-    : new Date().toISOString()
-  if (!isMockMode) return http.post(`/api/notes/${encodeURIComponent(id)}/undo`, { changedAt })
-  return {
-    note: await updateVersionedNote(id, (note) => undoLastNoteVersion(note, changedAt)),
-  }
+  assertNoteMutationId(id)
+  const command = snapshotUndoCommand(options)
+  if (!isMockMode) return sanitizeNoteMutationSuccess(await http.post(
+    `/api/notes/${encodeURIComponent(id)}/undo`,
+    command,
+  ), id)
+  return sanitizeNoteMutationSuccess({
+    note: await updateVersionedNote(id, (note) => undoLastNoteVersion(note, command.changedAt)),
+  }, id)
 }
 
 // ---------- Material uploads ----------
@@ -1203,7 +1343,11 @@ export const cancelUploadJob = async (id, options = {}) => {
       if (!job) throw notFound('Upload job', id)
       if (job.status === 'completed') throw uploadAlreadyCompleted()
       if (job.status === 'cancelled') return materialState
-      const { failure: _failedOnlyDiagnostic, ...cancellableJob } = job
+      const {
+        failure: _failedOnlyDiagnostic,
+        result: _confirmationOnlyResult,
+        ...cancellableJob
+      } = job
       return replaceUploadJob(materialState, { ...cancellableJob, status: 'cancelled' })
     })
     const job = findUploadJob(state, id)
