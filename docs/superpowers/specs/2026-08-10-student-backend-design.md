@@ -192,6 +192,7 @@ The initial schema contains:
 - `Session`
 - `ErrorItem`
 - `Note`
+- `NoteFolder`
 - `MaterialUploadJob`
 - `StudentSettings`
 
