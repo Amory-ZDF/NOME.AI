@@ -1,0 +1,41 @@
+{
+  "entities": [
+    {"id": "math-vectors-01", "name": "Scalar and Vector Quantities", "type": "topic"},
+    {"id": "math-vectors-02", "name": "Vector Addition and Subtraction", "type": "topic"},
+    {"id": "math-vectors-03", "name": "Vector Resolution (Components)", "type": "topic"},
+    {"id": "kin-01", "name": "Kinematics Fundamentals", "type": "topic"},
+    {"id": "kin-02", "name": "SUVAT Equations", "type": "topic"},
+    {"id": "kin-03", "name": "Motion Graphs", "type": "topic"},
+    {"id": "kin-04", "name": "Projectile Motion", "type": "topic"},
+    {"id": "dyn-01", "name": "Newton's Laws of Motion", "type": "topic"},
+    {"id": "dyn-02", "name": "Forces and Free-Body Diagrams", "type": "topic"},
+    {"id": "dyn-03", "name": "Momentum and Impulse", "type": "topic"},
+    {"id": "dyn-04", "name": "Work, Energy, and Power", "type": "topic"},
+    {"id": "math-algebra-01", "name": "Quadratic Equations", "type": "topic"},
+    {"id": "math-trig-01", "name": "Trigonometric Functions", "type": "topic"},
+    {"id": "math-calc-01", "name": "Differentiation Basics", "type": "topic"},
+    {"id": "math-calc-02", "name": "Integration Basics", "type": "topic"}
+  ],
+  "relations": [
+    {"source": "math-vectors-01", "target": "math-vectors-02", "type": "PREREQUISITE_OF"},
+    {"source": "math-vectors-02", "target": "math-vectors-03", "type": "PREREQUISITE_OF"},
+    {"source": "math-vectors-03", "target": "kin-01", "type": "PREREQUISITE_OF"},
+    {"source": "kin-01", "target": "kin-02", "type": "PREREQUISITE_OF"},
+    {"source": "math-algebra-01", "target": "kin-02", "type": "PREREQUISITE_OF"},
+    {"source": "kin-02", "target": "kin-04", "type": "PREREQUISITE_OF"},
+    {"source": "math-trig-01", "target": "kin-04", "type": "PREREQUISITE_OF"},
+    {"source": "kin-01", "target": "kin-03", "type": "PREREQUISITE_OF"},
+    {"source": "math-vectors-03", "target": "dyn-02", "type": "PREREQUISITE_OF"},
+    {"source": "dyn-01", "target": "dyn-02", "type": "PREREQUISITE_OF"},
+    {"source": "dyn-02", "target": "dyn-03", "type": "PREREQUISITE_OF"},
+    {"source": "dyn-01", "target": "dyn-04", "type": "REQUIRES_SKILL"},
+    {"source": "math-calc-01", "target": "dyn-04", "type": "REQUIRES_SKILL"},
+    {"source": "kin-02", "target": "dyn-03", "type": "REQUIRES_SKILL"},
+    {"source": "math-algebra-01", "target": "math-calc-01", "type": "PREREQUISITE_OF"},
+    {"source": "math-calc-01", "target": "math-calc-02", "type": "PREREQUISITE_OF"},
+    {"source": "kin-02", "target": "kin-03", "type": "TESTED_TOGETHER"},
+    {"source": "kin-04", "target": "dyn-02", "type": "TESTED_TOGETHER"},
+    {"source": "dyn-03", "target": "dyn-04", "type": "TESTED_TOGETHER"},
+    {"source": "math-vectors-02", "target": "math-vectors-03", "type": "COMMONLY_CONFUSED"}
+  ]
+}
