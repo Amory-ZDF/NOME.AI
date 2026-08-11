@@ -1,0 +1,164 @@
+import { afterAll, beforeEach, describe, expect, it } from 'vitest'
+
+import { buildApp } from '../../src/app.js'
+import { parseEnv } from '../../src/config/env.js'
+import { toInputJson } from '../../src/db/json.js'
+import { sanitizeCreatedNote } from '../../src/modules/notes/note-versions.js'
+import { createTestPrisma, resetDatabase, TEST_DATABASE_URL } from '../helpers/database.js'
+
+const prisma = createTestPrisma()
+const studentId = 'student-notes'
+const otherStudentId = 'student-other-notes'
+
+function note(id = 'note-1') {
+  return {
+    id,
+    title: 'Derivative rules',
+    folderId: null,
+    folderPath: null,
+    tags: ['calculus'],
+    linkedTopics: ['derivatives'],
+    linkedErrors: [],
+    source: 'typed',
+    createdAt: '2026-08-10T09:00:00.000Z',
+    updatedAt: '2026-08-10T09:00:00.000Z',
+    content: [{ t: 'p', v: 'Differentiate powers first.' }],
+    aiSuggestions: [],
+  }
+}
+
+async function insertStudent(id = studentId) {
+  await prisma.student.create({
+    data: {
+      id,
+      name: id,
+      avatar: null,
+      joinedDays: 1,
+      gradeInfo: 'Year 12',
+      greeting: toInputJson({ message: 'Hello', fallback: 'Hello' }),
+      moduleStats: toInputJson({ notesCount: 0, weeklyExercises: 0, latestAccuracy: 0, pendingErrorReview: 0 }),
+      learningSummary: toInputJson({ overallMastery: 0, weeklyCompleted: 0, weeklyTotal: 0, overdueTasks: 0, weakTopics: [], knowledgeHeatmap: [] }),
+    },
+  })
+}
+
+function createApp(id = studentId) {
+  return buildApp({
+    env: parseEnv({ NODE_ENV: 'test', DATABASE_URL: TEST_DATABASE_URL, STUDENT_ID: id, LOG_LEVEL: 'silent' }),
+    prisma,
+  })
+}
+
+beforeEach(async () => resetDatabase(prisma))
+afterAll(async () => { await resetDatabase(prisma); await prisma.$disconnect() })
+
+describe('notes create and list', () => {
+  it('creates a full note after normalizing legacy version fields', async () => {
+    await insertStudent()
+    const app = createApp()
+    const payload = note()
+    const response = await app.inject({ method: 'POST', url: '/api/notes', payload })
+    await app.close()
+
+    expect(response.statusCode).toBe(200)
+    expect(response.json()).toEqual({
+      code: 0,
+      message: 'ok',
+      data: { note: { ...payload, version: 1, versions: [] } },
+    })
+    await expect(prisma.note.findUnique({ where: { studentId_id: { studentId, id: payload.id } } }))
+      .resolves.toMatchObject({ version: 1, updatedAtValue: new Date(payload.updatedAt), payload: { ...payload, version: 1, versions: [] } })
+  })
+
+  it('lists only valid student notes in updated-time then id deterministic order', async () => {
+    await insertStudent()
+    await insertStudent(otherStudentId)
+    const first = { ...note('note-a'), updatedAt: '2026-08-10T10:00:00.000Z', version: 1, versions: [] }
+    const second = { ...note('note-b'), updatedAt: '2026-08-10T10:00:00.000Z', version: 1, versions: [] }
+    const other = { ...note('note-other'), version: 1, versions: [] }
+    await prisma.note.createMany({ data: [first, second].map((value) => ({ id: value.id, studentId, version: value.version, updatedAtValue: new Date(value.updatedAt), payload: toInputJson(value) })).concat([{ id: other.id, studentId: otherStudentId, version: other.version, updatedAtValue: new Date(other.updatedAt), payload: toInputJson(other) }]) })
+    const app = createApp()
+    const response = await app.inject({ method: 'GET', url: '/api/notes' })
+    await app.close()
+
+    expect(response.statusCode).toBe(200)
+    expect(response.json()).toEqual({ code: 0, message: 'ok', data: { notes: [first, second] } })
+  })
+
+  it('rejects duplicate ids and unsafe or raw-carrier notes before a mutation', async () => {
+    await insertStudent()
+    const created = { ...note(), version: 1, versions: [] }
+    await prisma.note.create({ data: { id: created.id, studentId, version: 1, updatedAtValue: new Date(created.updatedAt), payload: toInputJson(created) } })
+    const app = createApp()
+    const duplicate = await app.inject({ method: 'POST', url: '/api/notes', payload: note() })
+    const raw = await app.inject({ method: 'POST', url: '/api/notes', payload: { ...note('note-raw'), content: [{ t: 'image', v: 'preview', reference: 'data:image/png;base64,abc', alt: 'scan' }] } })
+    await app.close()
+
+    expect(duplicate.statusCode).toBe(409)
+    expect(duplicate.json()).toEqual({ code: 'DUPLICATE_ID', message: 'Note id already exists', data: null })
+    expect(raw.statusCode).toBe(400)
+    expect(raw.json()).toEqual({ code: 'INVALID_NOTE', message: 'Note contains invalid or non-JSON data', data: null })
+    await expect(prisma.note.count({ where: { studentId } })).resolves.toBe(1)
+  })
+
+  it('atomically accepts only one concurrent create for a student-scoped id', async () => {
+    await insertStudent()
+    const app = createApp()
+    const responses = await Promise.all([
+      app.inject({ method: 'POST', url: '/api/notes', payload: note('note-race') }),
+      app.inject({ method: 'POST', url: '/api/notes', payload: note('note-race') }),
+    ])
+    await app.close()
+    expect(responses.map(({ statusCode }) => statusCode).sort()).toEqual([200, 409])
+    await expect(prisma.note.count({ where: { studentId, id: 'note-race' } })).resolves.toBe(1)
+  })
+
+  it('fails safely rather than returning a corrupt stored note', async () => {
+    await insertStudent()
+    await prisma.note.create({ data: { id: 'note-bad', studentId, version: 1, updatedAtValue: new Date('2026-08-10T09:00:00.000Z'), payload: toInputJson({ id: 'note-bad' }) } })
+    const app = createApp()
+    const response = await app.inject({ method: 'GET', url: '/api/notes' })
+    await app.close()
+
+    expect(response.statusCode).toBe(500)
+    expect(response.json()).toEqual({ code: 'STORED_DATA_INVALID', message: 'Stored student data is invalid', data: null })
+    expect(response.body).not.toMatch(/payload|zod|stack/i)
+  })
+
+  it.each([
+    ['unknown field', () => ({ ...note('unsafe-unknown'), extra: true })],
+    ['raw image reference', () => ({ ...note('unsafe-reference'), content: [{ t: 'image', v: 'preview', reference: 'raw:bytes', alt: 'scan' }] })],
+    ['base64 list reference', () => ({ ...note('unsafe-list'), content: [{ t: 'list', v: 'item', reference: 'base64:bytes' }] })],
+    ['base64 highlight reference', () => ({ ...note('unsafe-highlight'), content: [{ t: 'highlight', v: 'mark', reference: 'data:text/plain;base64,abc' }] })],
+    ['accessor field', () => { const value = note('unsafe-accessor'); Object.defineProperty(value, 'title', { enumerable: true, get: () => 'bad' }); return value }],
+    ['custom prototype', () => Object.assign(Object.create({ inherited: true }), note('unsafe-prototype'))],
+    ['sparse content', () => { const value = note('unsafe-sparse'); value.content = new Array(1) as typeof value.content; return value }],
+  ])('rejects %s before any database mutation', async (_label, makeUnsafe) => {
+    await insertStudent()
+    expect(() => sanitizeCreatedNote(makeUnsafe())).toThrow('INVALID_NOTE')
+    await expect(prisma.note.count()).resolves.toBe(0)
+  })
+
+  it('treats scalar/payload note corruption as a safe stored-data failure', async () => {
+    await insertStudent()
+    const value = { ...note('note-scalar'), version: 1, versions: [] }
+    await prisma.note.create({ data: { id: value.id, studentId, version: 2, updatedAtValue: new Date(value.updatedAt), payload: toInputJson(value) } })
+    const app = createApp()
+    const response = await app.inject({ method: 'GET', url: '/api/notes' })
+    await app.close()
+    expect(response.statusCode).toBe(500)
+    expect(response.json()).toEqual({ code: 'STORED_DATA_INVALID', message: 'Stored student data is invalid', data: null })
+  })
+
+  it('documents transport errors and the public note routes', async () => {
+    const app = createApp()
+    const unsupported = await app.inject({ method: 'POST', url: '/api/notes', headers: { 'content-type': 'application/xml' }, payload: '<note />' })
+    const oversized = await app.inject({ method: 'POST', url: '/api/notes', headers: { 'content-type': 'application/json' }, payload: JSON.stringify({ title: 'x'.repeat(1_048_576) }) })
+    const docs = await app.inject({ method: 'GET', url: '/documentation/json' })
+    await app.close()
+    expect(unsupported.statusCode).toBe(415)
+    expect(oversized.statusCode).toBe(413)
+    expect(Object.keys(docs.json().paths['/api/notes'].post.responses).sort()).toEqual(['200', '400', '404', '409', '413', '415', '500'])
+    expect(Object.keys(docs.json().paths['/api/notes/{id}'].patch.responses).sort()).toEqual(['200', '400', '404', '409', '413', '415', '500'])
+  })
+})
