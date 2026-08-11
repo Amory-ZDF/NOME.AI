@@ -46,7 +46,8 @@ CREATE TABLE "ExerciseSet" (
     "payload" JSONB NOT NULL,
 
     PRIMARY KEY ("studentId", "id"),
-    CONSTRAINT "ExerciseSet_studentId_fkey" FOREIGN KEY ("studentId") REFERENCES "Student" ("id") ON DELETE CASCADE ON UPDATE CASCADE
+    CONSTRAINT "ExerciseSet_studentId_fkey" FOREIGN KEY ("studentId") REFERENCES "Student" ("id") ON DELETE CASCADE ON UPDATE CASCADE,
+    CONSTRAINT "ExerciseSet_studentId_taskId_fkey" FOREIGN KEY ("studentId", "taskId") REFERENCES "Task" ("studentId", "id") ON DELETE CASCADE ON UPDATE CASCADE
 );
 
 -- CreateTable
@@ -95,7 +96,8 @@ CREATE TABLE "NoteFolder" (
     "payload" JSONB NOT NULL,
 
     PRIMARY KEY ("studentId", "id"),
-    CONSTRAINT "NoteFolder_studentId_fkey" FOREIGN KEY ("studentId") REFERENCES "Student" ("id") ON DELETE CASCADE ON UPDATE CASCADE
+    CONSTRAINT "NoteFolder_studentId_fkey" FOREIGN KEY ("studentId") REFERENCES "Student" ("id") ON DELETE CASCADE ON UPDATE CASCADE,
+    CONSTRAINT "NoteFolder_studentId_parentId_fkey" FOREIGN KEY ("studentId", "parentId") REFERENCES "NoteFolder" ("studentId", "id") ON DELETE NO ACTION ON UPDATE CASCADE
 );
 
 -- CreateTable

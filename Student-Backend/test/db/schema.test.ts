@@ -3,6 +3,7 @@ import { readFile } from 'node:fs/promises'
 import { afterAll, beforeEach, describe, expect, expectTypeOf, it, vi } from 'vitest'
 
 import { buildApp } from '../../src/app.js'
+import { createPrisma } from '../../src/db/client.js'
 import { toInputJson } from '../../src/db/json.js'
 import { createShutdown } from '../../src/server.js'
 import { parseEnv } from '../../src/config/env.js'
@@ -277,9 +278,136 @@ describe('Student persistence schema', () => {
     expect(secondStudentError?.status).toBe('mastered')
   })
 
+  it.each([
+    ['another student', 'student-b', 'task-a'],
+    ['no task', 'student-a', 'missing-task'],
+  ])('rejects an exercise link to %s', async (_case, studentId, taskId) => {
+    await Promise.all([
+      createStudent(prisma, 'student-a'),
+      createStudent(prisma, 'student-b'),
+    ])
+    await prisma.task.create({
+      data: {
+        id: 'task-a',
+        studentId: 'student-a',
+        type: 'teacher',
+        status: 'pending',
+        dueAt: null,
+        payload: toInputJson({ id: 'task-a' }),
+      },
+    })
+
+    await expect(
+      prisma.exerciseSet.create({
+        data: {
+          id: `exercise-${taskId}`,
+          studentId,
+          taskId,
+          kind: 'task',
+          payload: toInputJson({ id: `exercise-${taskId}` }),
+        },
+      }),
+    ).rejects.toMatchObject({ code: 'P2003' })
+    await expect(prisma.exerciseSet.count()).resolves.toBe(0)
+  })
+
+  it('cascades task-linked exercises when their task is deleted', async () => {
+    await createStudent(prisma, 'student-a')
+    await prisma.task.create({
+      data: {
+        id: 'task-a',
+        studentId: 'student-a',
+        type: 'teacher',
+        status: 'pending',
+        dueAt: null,
+        payload: toInputJson({ id: 'task-a' }),
+      },
+    })
+    await prisma.exerciseSet.create({
+      data: {
+        id: 'exercise-a',
+        studentId: 'student-a',
+        taskId: 'task-a',
+        kind: 'task',
+        payload: toInputJson({ id: 'exercise-a' }),
+      },
+    })
+
+    await prisma.task.delete({
+      where: { studentId_id: { studentId: 'student-a', id: 'task-a' } },
+    })
+
+    await expect(prisma.exerciseSet.count()).resolves.toBe(0)
+  })
+
+  it.each([
+    ['another student', 'student-b', 'parent-a'],
+    ['no folder', 'student-a', 'missing-parent'],
+  ])('rejects a note-folder parent from %s', async (_case, studentId, parentId) => {
+    await Promise.all([
+      createStudent(prisma, 'student-a'),
+      createStudent(prisma, 'student-b'),
+    ])
+    await prisma.noteFolder.create({
+      data: {
+        id: 'parent-a',
+        studentId: 'student-a',
+        parentId: null,
+        payload: toInputJson({ id: 'parent-a' }),
+      },
+    })
+
+    await expect(
+      prisma.noteFolder.create({
+        data: {
+          id: `child-${parentId}`,
+          studentId,
+          parentId,
+          payload: toInputJson({ id: `child-${parentId}` }),
+        },
+      }),
+    ).rejects.toMatchObject({ code: 'P2003' })
+    await expect(prisma.noteFolder.count()).resolves.toBe(1)
+  })
+
+  it('restricts deletion of a note folder that still has children', async () => {
+    await createStudent(prisma, 'student-a')
+    await prisma.noteFolder.create({
+      data: {
+        id: 'parent-a',
+        studentId: 'student-a',
+        parentId: null,
+        payload: toInputJson({ id: 'parent-a' }),
+      },
+    })
+    await prisma.noteFolder.create({
+      data: {
+        id: 'child-a',
+        studentId: 'student-a',
+        parentId: 'parent-a',
+        payload: toInputJson({ id: 'child-a' }),
+      },
+    })
+
+    await expect(
+      prisma.noteFolder.delete({
+        where: { studentId_id: { studentId: 'student-a', id: 'parent-a' } },
+      }),
+    ).rejects.toMatchObject({ code: 'P2003' })
+    await expect(prisma.noteFolder.count()).resolves.toBe(2)
+  })
+
   it('cascades every aggregate when its student is deleted', async () => {
     await createStudent(prisma, 'student-a')
     await createEveryAggregate(prisma, 'student-a')
+    await prisma.noteFolder.create({
+      data: {
+        id: 'folder-child',
+        studentId: 'student-a',
+        parentId: 'folder-1',
+        payload: toInputJson({ id: 'folder-child', title: 'Mechanics' }),
+      },
+    })
 
     await prisma.student.delete({ where: { id: 'student-a' } })
 
@@ -322,8 +450,11 @@ describe('Student persistence schema', () => {
 
 describe('Database boundaries', () => {
   it('accepts JSON values and rejects non-JSON values before Prisma sees them', () => {
-    expect(toInputJson({ nested: [null, true, 3, 'value'] })).toEqual({
+    const shared = { preserved: [0, false, ''] }
+    expect(toInputJson({ nested: [null, true, 3, 'value'], left: shared, right: shared })).toEqual({
       nested: [null, true, 3, 'value'],
+      left: { preserved: [0, false, ''] },
+      right: { preserved: [0, false, ''] },
     })
     expect(() => toInputJson({ invalid: undefined })).toThrow(/JSON/i)
     expect(() => toInputJson({ invalid: BigInt(1) })).toThrow(/JSON/i)
@@ -333,12 +464,126 @@ describe('Database boundaries', () => {
     expect(() => toInputJson(cyclic)).toThrow(/JSON/i)
   })
 
+  it('rejects sparse arrays and extra array properties', () => {
+    const sparse = new Array<unknown>(1)
+    const withExtraProperty = [1] as number[] & { metadata?: string }
+    withExtraProperty.metadata = 'not JSON array data'
+
+    expect(() => toInputJson(sparse)).toThrow(TypeError)
+    expect(() => toInputJson(withExtraProperty)).toThrow(TypeError)
+  })
+
+  it('rejects array accessors without executing their getter', () => {
+    let getterCalls = 0
+    const input: unknown[] = []
+    Object.defineProperty(input, '0', {
+      configurable: true,
+      enumerable: true,
+      get() {
+        getterCalls += 1
+        return 'must not be read'
+      },
+    })
+    input.length = 1
+
+    expect(() => toInputJson(input)).toThrow(TypeError)
+    expect(getterCalls).toBe(0)
+  })
+
+  it.each(['getPrototypeOf', 'ownKeys', 'getOwnPropertyDescriptor'] as const)(
+    'normalizes a throwing %s Proxy trap to a controlled TypeError',
+    (trap) => {
+      const proxy = new Proxy(
+        { safe: true },
+        {
+          getOwnPropertyDescriptor(target, key) {
+            if (trap === 'getOwnPropertyDescriptor') {
+              throw new Error('PROXY_DESCRIPTOR_SENTINEL')
+            }
+            return Reflect.getOwnPropertyDescriptor(target, key)
+          },
+          getPrototypeOf(target) {
+            if (trap === 'getPrototypeOf') {
+              throw new Error('PROXY_PROTOTYPE_SENTINEL')
+            }
+            return Reflect.getPrototypeOf(target)
+          },
+          ownKeys(target) {
+            if (trap === 'ownKeys') {
+              throw new Error('PROXY_KEYS_SENTINEL')
+            }
+            return Reflect.ownKeys(target)
+          },
+        },
+      )
+
+      expect(() => toInputJson(proxy)).toThrowError(TypeError)
+      expect(() => toInputJson(proxy)).toThrow(/valid JSON/)
+    },
+  )
+
+  it('normalizes a revoked Proxy to a controlled TypeError', () => {
+    const { proxy, revoke } = Proxy.revocable([], {})
+    revoke()
+
+    expect(() => toInputJson(proxy)).toThrowError(TypeError)
+    expect(() => toInputJson(proxy)).toThrow(/valid JSON/)
+  })
+
+  it('rejects excessive depth with TypeError rather than overflowing the stack', () => {
+    const root: { next?: unknown } = {}
+    let cursor = root
+    for (let index = 0; index < 10_000; index += 1) {
+      const next: { next?: unknown } = {}
+      cursor.next = next
+      cursor = next
+    }
+
+    let thrown: unknown
+    try {
+      toInputJson(root)
+    } catch (error) {
+      thrown = error
+    }
+
+    expect(thrown).toBeInstanceOf(TypeError)
+    expect(thrown).not.toBeInstanceOf(RangeError)
+  })
+
+  it('bounds JSON array length and total node count', () => {
+    const longArray = Array.from({ length: 5_001 }, () => 0)
+    const wideObject = Object.fromEntries(
+      Array.from({ length: 10_001 }, (_, index) => [`key-${index}`, index]),
+    )
+
+    expect(() => toInputJson(longArray)).toThrow(TypeError)
+    expect(() => toInputJson(wideObject)).toThrow(TypeError)
+  })
+
   it('keeps the Prisma client independent from global environment state', async () => {
     const source = await readFile(new URL('../../src/db/client.ts', import.meta.url), 'utf8')
 
     expect(source).not.toMatch(/process\.env/)
     expect(TEST_DATABASE_URL).toBe('file:./prisma/test.db')
     await expect(prisma.student.count()).resolves.toBe(0)
+  })
+
+  it.each([
+    'postgresql://database.example/student',
+    'https://database.example/student.db',
+    './student.db',
+    'file:',
+    'file:   ',
+    '   ',
+  ])('rejects an unsupported Prisma database URL: %s', (databaseUrl) => {
+    expect(() => createPrisma(databaseUrl)).toThrow(/SQLite.*file:/i)
+  })
+
+  it('connects with the explicitly supported SQLite in-memory URL', async () => {
+    const memoryPrisma = createPrisma(' file::memory: ')
+
+    await expect(memoryPrisma.$connect()).resolves.toBeUndefined()
+    await memoryPrisma.$disconnect()
   })
 
   it('injects Prisma into Fastify without making Fastify own its lifecycle', async () => {

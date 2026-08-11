@@ -15,6 +15,7 @@ export async function resetDatabase(prisma: TestPrisma): Promise<void> {
     prisma.exerciseSet.deleteMany(),
     prisma.errorItem.deleteMany(),
     prisma.note.deleteMany(),
+    prisma.noteFolder.updateMany({ data: { parentId: null } }),
     prisma.noteFolder.deleteMany(),
     prisma.materialUploadJob.deleteMany(),
     prisma.studentSettings.deleteMany(),

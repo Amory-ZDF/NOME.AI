@@ -171,6 +171,8 @@ export type NoteFolderWhereInput = {
   parentId?: Prisma.StringNullableFilter<"NoteFolder"> | string | null
   payload?: Prisma.JsonFilter<"NoteFolder">
   student?: Prisma.XOR<Prisma.StudentScalarRelationFilter, Prisma.StudentWhereInput>
+  parent?: Prisma.XOR<Prisma.NoteFolderNullableScalarRelationFilter, Prisma.NoteFolderWhereInput> | null
+  children?: Prisma.NoteFolderListRelationFilter
 }
 
 export type NoteFolderOrderByWithRelationInput = {
@@ -179,6 +181,8 @@ export type NoteFolderOrderByWithRelationInput = {
   parentId?: Prisma.SortOrderInput | Prisma.SortOrder
   payload?: Prisma.SortOrder
   student?: Prisma.StudentOrderByWithRelationInput
+  parent?: Prisma.NoteFolderOrderByWithRelationInput
+  children?: Prisma.NoteFolderOrderByRelationAggregateInput
 }
 
 export type NoteFolderWhereUniqueInput = Prisma.AtLeast<{
@@ -191,6 +195,8 @@ export type NoteFolderWhereUniqueInput = Prisma.AtLeast<{
   parentId?: Prisma.StringNullableFilter<"NoteFolder"> | string | null
   payload?: Prisma.JsonFilter<"NoteFolder">
   student?: Prisma.XOR<Prisma.StudentScalarRelationFilter, Prisma.StudentWhereInput>
+  parent?: Prisma.XOR<Prisma.NoteFolderNullableScalarRelationFilter, Prisma.NoteFolderWhereInput> | null
+  children?: Prisma.NoteFolderListRelationFilter
 }, "studentId_id">
 
 export type NoteFolderOrderByWithAggregationInput = {
@@ -215,9 +221,10 @@ export type NoteFolderScalarWhereWithAggregatesInput = {
 
 export type NoteFolderCreateInput = {
   id: string
-  parentId?: string | null
   payload: Prisma.JsonNullValueInput | runtime.InputJsonValue
   student: Prisma.StudentCreateNestedOneWithoutNoteFoldersInput
+  parent?: Prisma.NoteFolderCreateNestedOneWithoutChildrenInput
+  children?: Prisma.NoteFolderCreateNestedManyWithoutParentInput
 }
 
 export type NoteFolderUncheckedCreateInput = {
@@ -225,13 +232,15 @@ export type NoteFolderUncheckedCreateInput = {
   studentId: string
   parentId?: string | null
   payload: Prisma.JsonNullValueInput | runtime.InputJsonValue
+  children?: Prisma.NoteFolderUncheckedCreateNestedManyWithoutParentInput
 }
 
 export type NoteFolderUpdateInput = {
   id?: Prisma.StringFieldUpdateOperationsInput | string
-  parentId?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   payload?: Prisma.JsonNullValueInput | runtime.InputJsonValue
   student?: Prisma.StudentUpdateOneRequiredWithoutNoteFoldersNestedInput
+  parent?: Prisma.NoteFolderUpdateOneWithoutChildrenNestedInput
+  children?: Prisma.NoteFolderUpdateManyWithoutParentNestedInput
 }
 
 export type NoteFolderUncheckedUpdateInput = {
@@ -239,6 +248,7 @@ export type NoteFolderUncheckedUpdateInput = {
   studentId?: Prisma.StringFieldUpdateOperationsInput | string
   parentId?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   payload?: Prisma.JsonNullValueInput | runtime.InputJsonValue
+  children?: Prisma.NoteFolderUncheckedUpdateManyWithoutParentNestedInput
 }
 
 export type NoteFolderCreateManyInput = {
@@ -250,7 +260,6 @@ export type NoteFolderCreateManyInput = {
 
 export type NoteFolderUpdateManyMutationInput = {
   id?: Prisma.StringFieldUpdateOperationsInput | string
-  parentId?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   payload?: Prisma.JsonNullValueInput | runtime.InputJsonValue
 }
 
@@ -269,6 +278,11 @@ export type NoteFolderListRelationFilter = {
 
 export type NoteFolderOrderByRelationAggregateInput = {
   _count?: Prisma.SortOrder
+}
+
+export type NoteFolderNullableScalarRelationFilter = {
+  is?: Prisma.NoteFolderWhereInput | null
+  isNot?: Prisma.NoteFolderWhereInput | null
 }
 
 export type NoteFolderStudentIdIdCompoundUniqueInput = {
@@ -337,16 +351,76 @@ export type NoteFolderUncheckedUpdateManyWithoutStudentNestedInput = {
   deleteMany?: Prisma.NoteFolderScalarWhereInput | Prisma.NoteFolderScalarWhereInput[]
 }
 
+export type NoteFolderCreateNestedOneWithoutChildrenInput = {
+  create?: Prisma.XOR<Prisma.NoteFolderCreateWithoutChildrenInput, Prisma.NoteFolderUncheckedCreateWithoutChildrenInput>
+  connectOrCreate?: Prisma.NoteFolderCreateOrConnectWithoutChildrenInput
+  connect?: Prisma.NoteFolderWhereUniqueInput
+}
+
+export type NoteFolderCreateNestedManyWithoutParentInput = {
+  create?: Prisma.XOR<Prisma.NoteFolderCreateWithoutParentInput, Prisma.NoteFolderUncheckedCreateWithoutParentInput> | Prisma.NoteFolderCreateWithoutParentInput[] | Prisma.NoteFolderUncheckedCreateWithoutParentInput[]
+  connectOrCreate?: Prisma.NoteFolderCreateOrConnectWithoutParentInput | Prisma.NoteFolderCreateOrConnectWithoutParentInput[]
+  createMany?: Prisma.NoteFolderCreateManyParentInputEnvelope
+  connect?: Prisma.NoteFolderWhereUniqueInput | Prisma.NoteFolderWhereUniqueInput[]
+}
+
+export type NoteFolderUncheckedCreateNestedManyWithoutParentInput = {
+  create?: Prisma.XOR<Prisma.NoteFolderCreateWithoutParentInput, Prisma.NoteFolderUncheckedCreateWithoutParentInput> | Prisma.NoteFolderCreateWithoutParentInput[] | Prisma.NoteFolderUncheckedCreateWithoutParentInput[]
+  connectOrCreate?: Prisma.NoteFolderCreateOrConnectWithoutParentInput | Prisma.NoteFolderCreateOrConnectWithoutParentInput[]
+  createMany?: Prisma.NoteFolderCreateManyParentInputEnvelope
+  connect?: Prisma.NoteFolderWhereUniqueInput | Prisma.NoteFolderWhereUniqueInput[]
+}
+
+export type NoteFolderUpdateOneWithoutChildrenNestedInput = {
+  create?: Prisma.XOR<Prisma.NoteFolderCreateWithoutChildrenInput, Prisma.NoteFolderUncheckedCreateWithoutChildrenInput>
+  connectOrCreate?: Prisma.NoteFolderCreateOrConnectWithoutChildrenInput
+  upsert?: Prisma.NoteFolderUpsertWithoutChildrenInput
+  disconnect?: Prisma.NoteFolderWhereInput | boolean
+  delete?: Prisma.NoteFolderWhereInput | boolean
+  connect?: Prisma.NoteFolderWhereUniqueInput
+  update?: Prisma.XOR<Prisma.XOR<Prisma.NoteFolderUpdateToOneWithWhereWithoutChildrenInput, Prisma.NoteFolderUpdateWithoutChildrenInput>, Prisma.NoteFolderUncheckedUpdateWithoutChildrenInput>
+}
+
+export type NoteFolderUpdateManyWithoutParentNestedInput = {
+  create?: Prisma.XOR<Prisma.NoteFolderCreateWithoutParentInput, Prisma.NoteFolderUncheckedCreateWithoutParentInput> | Prisma.NoteFolderCreateWithoutParentInput[] | Prisma.NoteFolderUncheckedCreateWithoutParentInput[]
+  connectOrCreate?: Prisma.NoteFolderCreateOrConnectWithoutParentInput | Prisma.NoteFolderCreateOrConnectWithoutParentInput[]
+  upsert?: Prisma.NoteFolderUpsertWithWhereUniqueWithoutParentInput | Prisma.NoteFolderUpsertWithWhereUniqueWithoutParentInput[]
+  createMany?: Prisma.NoteFolderCreateManyParentInputEnvelope
+  set?: Prisma.NoteFolderWhereUniqueInput | Prisma.NoteFolderWhereUniqueInput[]
+  disconnect?: Prisma.NoteFolderWhereUniqueInput | Prisma.NoteFolderWhereUniqueInput[]
+  delete?: Prisma.NoteFolderWhereUniqueInput | Prisma.NoteFolderWhereUniqueInput[]
+  connect?: Prisma.NoteFolderWhereUniqueInput | Prisma.NoteFolderWhereUniqueInput[]
+  update?: Prisma.NoteFolderUpdateWithWhereUniqueWithoutParentInput | Prisma.NoteFolderUpdateWithWhereUniqueWithoutParentInput[]
+  updateMany?: Prisma.NoteFolderUpdateManyWithWhereWithoutParentInput | Prisma.NoteFolderUpdateManyWithWhereWithoutParentInput[]
+  deleteMany?: Prisma.NoteFolderScalarWhereInput | Prisma.NoteFolderScalarWhereInput[]
+}
+
+export type NoteFolderUncheckedUpdateManyWithoutParentNestedInput = {
+  create?: Prisma.XOR<Prisma.NoteFolderCreateWithoutParentInput, Prisma.NoteFolderUncheckedCreateWithoutParentInput> | Prisma.NoteFolderCreateWithoutParentInput[] | Prisma.NoteFolderUncheckedCreateWithoutParentInput[]
+  connectOrCreate?: Prisma.NoteFolderCreateOrConnectWithoutParentInput | Prisma.NoteFolderCreateOrConnectWithoutParentInput[]
+  upsert?: Prisma.NoteFolderUpsertWithWhereUniqueWithoutParentInput | Prisma.NoteFolderUpsertWithWhereUniqueWithoutParentInput[]
+  createMany?: Prisma.NoteFolderCreateManyParentInputEnvelope
+  set?: Prisma.NoteFolderWhereUniqueInput | Prisma.NoteFolderWhereUniqueInput[]
+  disconnect?: Prisma.NoteFolderWhereUniqueInput | Prisma.NoteFolderWhereUniqueInput[]
+  delete?: Prisma.NoteFolderWhereUniqueInput | Prisma.NoteFolderWhereUniqueInput[]
+  connect?: Prisma.NoteFolderWhereUniqueInput | Prisma.NoteFolderWhereUniqueInput[]
+  update?: Prisma.NoteFolderUpdateWithWhereUniqueWithoutParentInput | Prisma.NoteFolderUpdateWithWhereUniqueWithoutParentInput[]
+  updateMany?: Prisma.NoteFolderUpdateManyWithWhereWithoutParentInput | Prisma.NoteFolderUpdateManyWithWhereWithoutParentInput[]
+  deleteMany?: Prisma.NoteFolderScalarWhereInput | Prisma.NoteFolderScalarWhereInput[]
+}
+
 export type NoteFolderCreateWithoutStudentInput = {
   id: string
-  parentId?: string | null
   payload: Prisma.JsonNullValueInput | runtime.InputJsonValue
+  parent?: Prisma.NoteFolderCreateNestedOneWithoutChildrenInput
+  children?: Prisma.NoteFolderCreateNestedManyWithoutParentInput
 }
 
 export type NoteFolderUncheckedCreateWithoutStudentInput = {
   id: string
   parentId?: string | null
   payload: Prisma.JsonNullValueInput | runtime.InputJsonValue
+  children?: Prisma.NoteFolderUncheckedCreateNestedManyWithoutParentInput
 }
 
 export type NoteFolderCreateOrConnectWithoutStudentInput = {
@@ -384,6 +458,88 @@ export type NoteFolderScalarWhereInput = {
   payload?: Prisma.JsonFilter<"NoteFolder">
 }
 
+export type NoteFolderCreateWithoutChildrenInput = {
+  id: string
+  payload: Prisma.JsonNullValueInput | runtime.InputJsonValue
+  student: Prisma.StudentCreateNestedOneWithoutNoteFoldersInput
+  parent?: Prisma.NoteFolderCreateNestedOneWithoutChildrenInput
+}
+
+export type NoteFolderUncheckedCreateWithoutChildrenInput = {
+  id: string
+  studentId: string
+  parentId?: string | null
+  payload: Prisma.JsonNullValueInput | runtime.InputJsonValue
+}
+
+export type NoteFolderCreateOrConnectWithoutChildrenInput = {
+  where: Prisma.NoteFolderWhereUniqueInput
+  create: Prisma.XOR<Prisma.NoteFolderCreateWithoutChildrenInput, Prisma.NoteFolderUncheckedCreateWithoutChildrenInput>
+}
+
+export type NoteFolderCreateWithoutParentInput = {
+  id: string
+  payload: Prisma.JsonNullValueInput | runtime.InputJsonValue
+  student: Prisma.StudentCreateNestedOneWithoutNoteFoldersInput
+  children?: Prisma.NoteFolderCreateNestedManyWithoutParentInput
+}
+
+export type NoteFolderUncheckedCreateWithoutParentInput = {
+  id: string
+  payload: Prisma.JsonNullValueInput | runtime.InputJsonValue
+  children?: Prisma.NoteFolderUncheckedCreateNestedManyWithoutParentInput
+}
+
+export type NoteFolderCreateOrConnectWithoutParentInput = {
+  where: Prisma.NoteFolderWhereUniqueInput
+  create: Prisma.XOR<Prisma.NoteFolderCreateWithoutParentInput, Prisma.NoteFolderUncheckedCreateWithoutParentInput>
+}
+
+export type NoteFolderCreateManyParentInputEnvelope = {
+  data: Prisma.NoteFolderCreateManyParentInput | Prisma.NoteFolderCreateManyParentInput[]
+}
+
+export type NoteFolderUpsertWithoutChildrenInput = {
+  update: Prisma.XOR<Prisma.NoteFolderUpdateWithoutChildrenInput, Prisma.NoteFolderUncheckedUpdateWithoutChildrenInput>
+  create: Prisma.XOR<Prisma.NoteFolderCreateWithoutChildrenInput, Prisma.NoteFolderUncheckedCreateWithoutChildrenInput>
+  where?: Prisma.NoteFolderWhereInput
+}
+
+export type NoteFolderUpdateToOneWithWhereWithoutChildrenInput = {
+  where?: Prisma.NoteFolderWhereInput
+  data: Prisma.XOR<Prisma.NoteFolderUpdateWithoutChildrenInput, Prisma.NoteFolderUncheckedUpdateWithoutChildrenInput>
+}
+
+export type NoteFolderUpdateWithoutChildrenInput = {
+  id?: Prisma.StringFieldUpdateOperationsInput | string
+  payload?: Prisma.JsonNullValueInput | runtime.InputJsonValue
+  student?: Prisma.StudentUpdateOneRequiredWithoutNoteFoldersNestedInput
+  parent?: Prisma.NoteFolderUpdateOneWithoutChildrenNestedInput
+}
+
+export type NoteFolderUncheckedUpdateWithoutChildrenInput = {
+  id?: Prisma.StringFieldUpdateOperationsInput | string
+  studentId?: Prisma.StringFieldUpdateOperationsInput | string
+  parentId?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  payload?: Prisma.JsonNullValueInput | runtime.InputJsonValue
+}
+
+export type NoteFolderUpsertWithWhereUniqueWithoutParentInput = {
+  where: Prisma.NoteFolderWhereUniqueInput
+  update: Prisma.XOR<Prisma.NoteFolderUpdateWithoutParentInput, Prisma.NoteFolderUncheckedUpdateWithoutParentInput>
+  create: Prisma.XOR<Prisma.NoteFolderCreateWithoutParentInput, Prisma.NoteFolderUncheckedCreateWithoutParentInput>
+}
+
+export type NoteFolderUpdateWithWhereUniqueWithoutParentInput = {
+  where: Prisma.NoteFolderWhereUniqueInput
+  data: Prisma.XOR<Prisma.NoteFolderUpdateWithoutParentInput, Prisma.NoteFolderUncheckedUpdateWithoutParentInput>
+}
+
+export type NoteFolderUpdateManyWithWhereWithoutParentInput = {
+  where: Prisma.NoteFolderScalarWhereInput
+  data: Prisma.XOR<Prisma.NoteFolderUpdateManyMutationInput, Prisma.NoteFolderUncheckedUpdateManyWithoutParentInput>
+}
+
 export type NoteFolderCreateManyStudentInput = {
   id: string
   parentId?: string | null
@@ -392,14 +548,16 @@ export type NoteFolderCreateManyStudentInput = {
 
 export type NoteFolderUpdateWithoutStudentInput = {
   id?: Prisma.StringFieldUpdateOperationsInput | string
-  parentId?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   payload?: Prisma.JsonNullValueInput | runtime.InputJsonValue
+  parent?: Prisma.NoteFolderUpdateOneWithoutChildrenNestedInput
+  children?: Prisma.NoteFolderUpdateManyWithoutParentNestedInput
 }
 
 export type NoteFolderUncheckedUpdateWithoutStudentInput = {
   id?: Prisma.StringFieldUpdateOperationsInput | string
   parentId?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   payload?: Prisma.JsonNullValueInput | runtime.InputJsonValue
+  children?: Prisma.NoteFolderUncheckedUpdateManyWithoutParentNestedInput
 }
 
 export type NoteFolderUncheckedUpdateManyWithoutStudentInput = {
@@ -408,6 +566,58 @@ export type NoteFolderUncheckedUpdateManyWithoutStudentInput = {
   payload?: Prisma.JsonNullValueInput | runtime.InputJsonValue
 }
 
+export type NoteFolderCreateManyParentInput = {
+  id: string
+  payload: Prisma.JsonNullValueInput | runtime.InputJsonValue
+}
+
+export type NoteFolderUpdateWithoutParentInput = {
+  id?: Prisma.StringFieldUpdateOperationsInput | string
+  payload?: Prisma.JsonNullValueInput | runtime.InputJsonValue
+  student?: Prisma.StudentUpdateOneRequiredWithoutNoteFoldersNestedInput
+  children?: Prisma.NoteFolderUpdateManyWithoutParentNestedInput
+}
+
+export type NoteFolderUncheckedUpdateWithoutParentInput = {
+  id?: Prisma.StringFieldUpdateOperationsInput | string
+  payload?: Prisma.JsonNullValueInput | runtime.InputJsonValue
+  children?: Prisma.NoteFolderUncheckedUpdateManyWithoutParentNestedInput
+}
+
+export type NoteFolderUncheckedUpdateManyWithoutParentInput = {
+  id?: Prisma.StringFieldUpdateOperationsInput | string
+  payload?: Prisma.JsonNullValueInput | runtime.InputJsonValue
+}
+
+
+/**
+ * Count Type NoteFolderCountOutputType
+ */
+
+export type NoteFolderCountOutputType = {
+  children: number
+}
+
+export type NoteFolderCountOutputTypeSelect<ExtArgs extends runtime.Types.Extensions.InternalArgs = runtime.Types.Extensions.DefaultArgs> = {
+  children?: boolean | NoteFolderCountOutputTypeCountChildrenArgs
+}
+
+/**
+ * NoteFolderCountOutputType without action
+ */
+export type NoteFolderCountOutputTypeDefaultArgs<ExtArgs extends runtime.Types.Extensions.InternalArgs = runtime.Types.Extensions.DefaultArgs> = {
+  /**
+   * Select specific fields to fetch from the NoteFolderCountOutputType
+   */
+  select?: Prisma.NoteFolderCountOutputTypeSelect<ExtArgs> | null
+}
+
+/**
+ * NoteFolderCountOutputType without action
+ */
+export type NoteFolderCountOutputTypeCountChildrenArgs<ExtArgs extends runtime.Types.Extensions.InternalArgs = runtime.Types.Extensions.DefaultArgs> = {
+  where?: Prisma.NoteFolderWhereInput
+}
 
 
 export type NoteFolderSelect<ExtArgs extends runtime.Types.Extensions.InternalArgs = runtime.Types.Extensions.DefaultArgs> = runtime.Types.Extensions.GetSelect<{
@@ -416,6 +626,9 @@ export type NoteFolderSelect<ExtArgs extends runtime.Types.Extensions.InternalAr
   parentId?: boolean
   payload?: boolean
   student?: boolean | Prisma.StudentDefaultArgs<ExtArgs>
+  parent?: boolean | Prisma.NoteFolder$parentArgs<ExtArgs>
+  children?: boolean | Prisma.NoteFolder$childrenArgs<ExtArgs>
+  _count?: boolean | Prisma.NoteFolderCountOutputTypeDefaultArgs<ExtArgs>
 }, ExtArgs["result"]["noteFolder"]>
 
 export type NoteFolderSelectCreateManyAndReturn<ExtArgs extends runtime.Types.Extensions.InternalArgs = runtime.Types.Extensions.DefaultArgs> = runtime.Types.Extensions.GetSelect<{
@@ -424,6 +637,7 @@ export type NoteFolderSelectCreateManyAndReturn<ExtArgs extends runtime.Types.Ex
   parentId?: boolean
   payload?: boolean
   student?: boolean | Prisma.StudentDefaultArgs<ExtArgs>
+  parent?: boolean | Prisma.NoteFolder$parentArgs<ExtArgs>
 }, ExtArgs["result"]["noteFolder"]>
 
 export type NoteFolderSelectUpdateManyAndReturn<ExtArgs extends runtime.Types.Extensions.InternalArgs = runtime.Types.Extensions.DefaultArgs> = runtime.Types.Extensions.GetSelect<{
@@ -432,6 +646,7 @@ export type NoteFolderSelectUpdateManyAndReturn<ExtArgs extends runtime.Types.Ex
   parentId?: boolean
   payload?: boolean
   student?: boolean | Prisma.StudentDefaultArgs<ExtArgs>
+  parent?: boolean | Prisma.NoteFolder$parentArgs<ExtArgs>
 }, ExtArgs["result"]["noteFolder"]>
 
 export type NoteFolderSelectScalar = {
@@ -444,18 +659,25 @@ export type NoteFolderSelectScalar = {
 export type NoteFolderOmit<ExtArgs extends runtime.Types.Extensions.InternalArgs = runtime.Types.Extensions.DefaultArgs> = runtime.Types.Extensions.GetOmit<"id" | "studentId" | "parentId" | "payload", ExtArgs["result"]["noteFolder"]>
 export type NoteFolderInclude<ExtArgs extends runtime.Types.Extensions.InternalArgs = runtime.Types.Extensions.DefaultArgs> = {
   student?: boolean | Prisma.StudentDefaultArgs<ExtArgs>
+  parent?: boolean | Prisma.NoteFolder$parentArgs<ExtArgs>
+  children?: boolean | Prisma.NoteFolder$childrenArgs<ExtArgs>
+  _count?: boolean | Prisma.NoteFolderCountOutputTypeDefaultArgs<ExtArgs>
 }
 export type NoteFolderIncludeCreateManyAndReturn<ExtArgs extends runtime.Types.Extensions.InternalArgs = runtime.Types.Extensions.DefaultArgs> = {
   student?: boolean | Prisma.StudentDefaultArgs<ExtArgs>
+  parent?: boolean | Prisma.NoteFolder$parentArgs<ExtArgs>
 }
 export type NoteFolderIncludeUpdateManyAndReturn<ExtArgs extends runtime.Types.Extensions.InternalArgs = runtime.Types.Extensions.DefaultArgs> = {
   student?: boolean | Prisma.StudentDefaultArgs<ExtArgs>
+  parent?: boolean | Prisma.NoteFolder$parentArgs<ExtArgs>
 }
 
 export type $NoteFolderPayload<ExtArgs extends runtime.Types.Extensions.InternalArgs = runtime.Types.Extensions.DefaultArgs> = {
   name: "NoteFolder"
   objects: {
     student: Prisma.$StudentPayload<ExtArgs>
+    parent: Prisma.$NoteFolderPayload<ExtArgs> | null
+    children: Prisma.$NoteFolderPayload<ExtArgs>[]
   }
   scalars: runtime.Types.Extensions.GetPayloadResult<{
     id: string
@@ -857,6 +1079,8 @@ readonly fields: NoteFolderFieldRefs;
 export interface Prisma__NoteFolderClient<T, Null = never, ExtArgs extends runtime.Types.Extensions.InternalArgs = runtime.Types.Extensions.DefaultArgs, GlobalOmitOptions = {}> extends Prisma.PrismaPromise<T> {
   readonly [Symbol.toStringTag]: "PrismaPromise"
   student<T extends Prisma.StudentDefaultArgs<ExtArgs> = {}>(args?: Prisma.Subset<T, Prisma.StudentDefaultArgs<ExtArgs>>): Prisma.Prisma__StudentClient<runtime.Types.Result.GetResult<Prisma.$StudentPayload<ExtArgs>, T, "findUniqueOrThrow", GlobalOmitOptions> | Null, Null, ExtArgs, GlobalOmitOptions>
+  parent<T extends Prisma.NoteFolder$parentArgs<ExtArgs> = {}>(args?: Prisma.Subset<T, Prisma.NoteFolder$parentArgs<ExtArgs>>): Prisma.Prisma__NoteFolderClient<runtime.Types.Result.GetResult<Prisma.$NoteFolderPayload<ExtArgs>, T, "findUniqueOrThrow", GlobalOmitOptions> | null, null, ExtArgs, GlobalOmitOptions>
+  children<T extends Prisma.NoteFolder$childrenArgs<ExtArgs> = {}>(args?: Prisma.Subset<T, Prisma.NoteFolder$childrenArgs<ExtArgs>>): Prisma.PrismaPromise<runtime.Types.Result.GetResult<Prisma.$NoteFolderPayload<ExtArgs>, T, "findMany", GlobalOmitOptions> | Null>
   /**
    * Attaches callbacks for the resolution and/or rejection of the Promise.
    * @param onfulfilled The callback to execute when the Promise is resolved.
@@ -1286,6 +1510,49 @@ export type NoteFolderDeleteManyArgs<ExtArgs extends runtime.Types.Extensions.In
    * Limit how many NoteFolders to delete.
    */
   limit?: number
+}
+
+/**
+ * NoteFolder.parent
+ */
+export type NoteFolder$parentArgs<ExtArgs extends runtime.Types.Extensions.InternalArgs = runtime.Types.Extensions.DefaultArgs> = {
+  /**
+   * Select specific fields to fetch from the NoteFolder
+   */
+  select?: Prisma.NoteFolderSelect<ExtArgs> | null
+  /**
+   * Omit specific fields from the NoteFolder
+   */
+  omit?: Prisma.NoteFolderOmit<ExtArgs> | null
+  /**
+   * Choose, which related nodes to fetch as well
+   */
+  include?: Prisma.NoteFolderInclude<ExtArgs> | null
+  where?: Prisma.NoteFolderWhereInput
+}
+
+/**
+ * NoteFolder.children
+ */
+export type NoteFolder$childrenArgs<ExtArgs extends runtime.Types.Extensions.InternalArgs = runtime.Types.Extensions.DefaultArgs> = {
+  /**
+   * Select specific fields to fetch from the NoteFolder
+   */
+  select?: Prisma.NoteFolderSelect<ExtArgs> | null
+  /**
+   * Omit specific fields from the NoteFolder
+   */
+  omit?: Prisma.NoteFolderOmit<ExtArgs> | null
+  /**
+   * Choose, which related nodes to fetch as well
+   */
+  include?: Prisma.NoteFolderInclude<ExtArgs> | null
+  where?: Prisma.NoteFolderWhereInput
+  orderBy?: Prisma.NoteFolderOrderByWithRelationInput | Prisma.NoteFolderOrderByWithRelationInput[]
+  cursor?: Prisma.NoteFolderWhereUniqueInput
+  take?: number
+  skip?: number
+  distinct?: Prisma.NoteFolderScalarFieldEnum | Prisma.NoteFolderScalarFieldEnum[]
 }
 
 /**

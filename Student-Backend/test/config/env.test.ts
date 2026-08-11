@@ -82,6 +82,11 @@ describe('parseEnv', () => {
     ['a non-integral PORT', { ...BASE_ENV, PORT: '3001.5' }],
     ['a blank DATABASE_URL', { ...BASE_ENV, DATABASE_URL: '' }],
     ['a whitespace-only DATABASE_URL', { ...BASE_ENV, DATABASE_URL: '   ' }],
+    ['a PostgreSQL DATABASE_URL', { ...BASE_ENV, DATABASE_URL: 'postgresql://db' }],
+    ['an HTTP DATABASE_URL', { ...BASE_ENV, DATABASE_URL: 'https://db.example' }],
+    ['a bare database path', { ...BASE_ENV, DATABASE_URL: './student.db' }],
+    ['an empty SQLite URL', { ...BASE_ENV, DATABASE_URL: 'file:' }],
+    ['a whitespace SQLite URL', { ...BASE_ENV, DATABASE_URL: 'file:   ' }],
     ['an invalid CORS origin', { ...BASE_ENV, CORS_ORIGINS: 'not a URL' }],
     ['a non-HTTP CORS origin', { ...BASE_ENV, CORS_ORIGINS: 'ftp://example.com' }],
     [
@@ -95,6 +100,12 @@ describe('parseEnv', () => {
     ['an invalid LOG_LEVEL', { ...BASE_ENV, LOG_LEVEL: 'verbose' }],
   ])('rejects %s in isolation', (_case, input) => {
     expect(() => parseEnv(input)).toThrow(/^Invalid environment/)
+  })
+
+  it('normalizes the supported SQLite in-memory URL', () => {
+    expect(parseEnv({ ...BASE_ENV, DATABASE_URL: ' file::memory: ' }).DATABASE_URL).toBe(
+      'file::memory:',
+    )
   })
 
   it('does not expose the database URL when reporting another invalid value', () => {

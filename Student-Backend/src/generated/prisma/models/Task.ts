@@ -188,6 +188,7 @@ export type TaskWhereInput = {
   payload?: Prisma.JsonFilter<"Task">
   student?: Prisma.XOR<Prisma.StudentScalarRelationFilter, Prisma.StudentWhereInput>
   adjustments?: Prisma.TaskAdjustmentListRelationFilter
+  exerciseSets?: Prisma.ExerciseSetListRelationFilter
   sessions?: Prisma.SessionListRelationFilter
 }
 
@@ -200,6 +201,7 @@ export type TaskOrderByWithRelationInput = {
   payload?: Prisma.SortOrder
   student?: Prisma.StudentOrderByWithRelationInput
   adjustments?: Prisma.TaskAdjustmentOrderByRelationAggregateInput
+  exerciseSets?: Prisma.ExerciseSetOrderByRelationAggregateInput
   sessions?: Prisma.SessionOrderByRelationAggregateInput
 }
 
@@ -216,6 +218,7 @@ export type TaskWhereUniqueInput = Prisma.AtLeast<{
   payload?: Prisma.JsonFilter<"Task">
   student?: Prisma.XOR<Prisma.StudentScalarRelationFilter, Prisma.StudentWhereInput>
   adjustments?: Prisma.TaskAdjustmentListRelationFilter
+  exerciseSets?: Prisma.ExerciseSetListRelationFilter
   sessions?: Prisma.SessionListRelationFilter
 }, "studentId_id">
 
@@ -251,6 +254,7 @@ export type TaskCreateInput = {
   payload: Prisma.JsonNullValueInput | runtime.InputJsonValue
   student: Prisma.StudentCreateNestedOneWithoutTasksInput
   adjustments?: Prisma.TaskAdjustmentCreateNestedManyWithoutTaskInput
+  exerciseSets?: Prisma.ExerciseSetCreateNestedManyWithoutTaskInput
   sessions?: Prisma.SessionCreateNestedManyWithoutTaskInput
 }
 
@@ -262,6 +266,7 @@ export type TaskUncheckedCreateInput = {
   dueAt?: Date | string | null
   payload: Prisma.JsonNullValueInput | runtime.InputJsonValue
   adjustments?: Prisma.TaskAdjustmentUncheckedCreateNestedManyWithoutTaskInput
+  exerciseSets?: Prisma.ExerciseSetUncheckedCreateNestedManyWithoutTaskInput
   sessions?: Prisma.SessionUncheckedCreateNestedManyWithoutTaskInput
 }
 
@@ -273,6 +278,7 @@ export type TaskUpdateInput = {
   payload?: Prisma.JsonNullValueInput | runtime.InputJsonValue
   student?: Prisma.StudentUpdateOneRequiredWithoutTasksNestedInput
   adjustments?: Prisma.TaskAdjustmentUpdateManyWithoutTaskNestedInput
+  exerciseSets?: Prisma.ExerciseSetUpdateManyWithoutTaskNestedInput
   sessions?: Prisma.SessionUpdateManyWithoutTaskNestedInput
 }
 
@@ -284,6 +290,7 @@ export type TaskUncheckedUpdateInput = {
   dueAt?: Prisma.NullableDateTimeFieldUpdateOperationsInput | Date | string | null
   payload?: Prisma.JsonNullValueInput | runtime.InputJsonValue
   adjustments?: Prisma.TaskAdjustmentUncheckedUpdateManyWithoutTaskNestedInput
+  exerciseSets?: Prisma.ExerciseSetUncheckedUpdateManyWithoutTaskNestedInput
   sessions?: Prisma.SessionUncheckedUpdateManyWithoutTaskNestedInput
 }
 
@@ -358,6 +365,11 @@ export type TaskScalarRelationFilter = {
   isNot?: Prisma.TaskWhereInput
 }
 
+export type TaskNullableScalarRelationFilter = {
+  is?: Prisma.TaskWhereInput | null
+  isNot?: Prisma.TaskWhereInput | null
+}
+
 export type TaskCreateNestedManyWithoutStudentInput = {
   create?: Prisma.XOR<Prisma.TaskCreateWithoutStudentInput, Prisma.TaskUncheckedCreateWithoutStudentInput> | Prisma.TaskCreateWithoutStudentInput[] | Prisma.TaskUncheckedCreateWithoutStudentInput[]
   connectOrCreate?: Prisma.TaskCreateOrConnectWithoutStudentInput | Prisma.TaskCreateOrConnectWithoutStudentInput[]
@@ -418,6 +430,22 @@ export type TaskUpdateOneRequiredWithoutAdjustmentsNestedInput = {
   update?: Prisma.XOR<Prisma.XOR<Prisma.TaskUpdateToOneWithWhereWithoutAdjustmentsInput, Prisma.TaskUpdateWithoutAdjustmentsInput>, Prisma.TaskUncheckedUpdateWithoutAdjustmentsInput>
 }
 
+export type TaskCreateNestedOneWithoutExerciseSetsInput = {
+  create?: Prisma.XOR<Prisma.TaskCreateWithoutExerciseSetsInput, Prisma.TaskUncheckedCreateWithoutExerciseSetsInput>
+  connectOrCreate?: Prisma.TaskCreateOrConnectWithoutExerciseSetsInput
+  connect?: Prisma.TaskWhereUniqueInput
+}
+
+export type TaskUpdateOneWithoutExerciseSetsNestedInput = {
+  create?: Prisma.XOR<Prisma.TaskCreateWithoutExerciseSetsInput, Prisma.TaskUncheckedCreateWithoutExerciseSetsInput>
+  connectOrCreate?: Prisma.TaskCreateOrConnectWithoutExerciseSetsInput
+  upsert?: Prisma.TaskUpsertWithoutExerciseSetsInput
+  disconnect?: Prisma.TaskWhereInput | boolean
+  delete?: Prisma.TaskWhereInput | boolean
+  connect?: Prisma.TaskWhereUniqueInput
+  update?: Prisma.XOR<Prisma.XOR<Prisma.TaskUpdateToOneWithWhereWithoutExerciseSetsInput, Prisma.TaskUpdateWithoutExerciseSetsInput>, Prisma.TaskUncheckedUpdateWithoutExerciseSetsInput>
+}
+
 export type TaskCreateNestedOneWithoutSessionsInput = {
   create?: Prisma.XOR<Prisma.TaskCreateWithoutSessionsInput, Prisma.TaskUncheckedCreateWithoutSessionsInput>
   connectOrCreate?: Prisma.TaskCreateOrConnectWithoutSessionsInput
@@ -439,6 +467,7 @@ export type TaskCreateWithoutStudentInput = {
   dueAt?: Date | string | null
   payload: Prisma.JsonNullValueInput | runtime.InputJsonValue
   adjustments?: Prisma.TaskAdjustmentCreateNestedManyWithoutTaskInput
+  exerciseSets?: Prisma.ExerciseSetCreateNestedManyWithoutTaskInput
   sessions?: Prisma.SessionCreateNestedManyWithoutTaskInput
 }
 
@@ -449,6 +478,7 @@ export type TaskUncheckedCreateWithoutStudentInput = {
   dueAt?: Date | string | null
   payload: Prisma.JsonNullValueInput | runtime.InputJsonValue
   adjustments?: Prisma.TaskAdjustmentUncheckedCreateNestedManyWithoutTaskInput
+  exerciseSets?: Prisma.ExerciseSetUncheckedCreateNestedManyWithoutTaskInput
   sessions?: Prisma.SessionUncheckedCreateNestedManyWithoutTaskInput
 }
 
@@ -496,6 +526,7 @@ export type TaskCreateWithoutAdjustmentsInput = {
   dueAt?: Date | string | null
   payload: Prisma.JsonNullValueInput | runtime.InputJsonValue
   student: Prisma.StudentCreateNestedOneWithoutTasksInput
+  exerciseSets?: Prisma.ExerciseSetCreateNestedManyWithoutTaskInput
   sessions?: Prisma.SessionCreateNestedManyWithoutTaskInput
 }
 
@@ -506,6 +537,7 @@ export type TaskUncheckedCreateWithoutAdjustmentsInput = {
   status: string
   dueAt?: Date | string | null
   payload: Prisma.JsonNullValueInput | runtime.InputJsonValue
+  exerciseSets?: Prisma.ExerciseSetUncheckedCreateNestedManyWithoutTaskInput
   sessions?: Prisma.SessionUncheckedCreateNestedManyWithoutTaskInput
 }
 
@@ -532,6 +564,7 @@ export type TaskUpdateWithoutAdjustmentsInput = {
   dueAt?: Prisma.NullableDateTimeFieldUpdateOperationsInput | Date | string | null
   payload?: Prisma.JsonNullValueInput | runtime.InputJsonValue
   student?: Prisma.StudentUpdateOneRequiredWithoutTasksNestedInput
+  exerciseSets?: Prisma.ExerciseSetUpdateManyWithoutTaskNestedInput
   sessions?: Prisma.SessionUpdateManyWithoutTaskNestedInput
 }
 
@@ -542,6 +575,67 @@ export type TaskUncheckedUpdateWithoutAdjustmentsInput = {
   status?: Prisma.StringFieldUpdateOperationsInput | string
   dueAt?: Prisma.NullableDateTimeFieldUpdateOperationsInput | Date | string | null
   payload?: Prisma.JsonNullValueInput | runtime.InputJsonValue
+  exerciseSets?: Prisma.ExerciseSetUncheckedUpdateManyWithoutTaskNestedInput
+  sessions?: Prisma.SessionUncheckedUpdateManyWithoutTaskNestedInput
+}
+
+export type TaskCreateWithoutExerciseSetsInput = {
+  id: string
+  type: string
+  status: string
+  dueAt?: Date | string | null
+  payload: Prisma.JsonNullValueInput | runtime.InputJsonValue
+  student: Prisma.StudentCreateNestedOneWithoutTasksInput
+  adjustments?: Prisma.TaskAdjustmentCreateNestedManyWithoutTaskInput
+  sessions?: Prisma.SessionCreateNestedManyWithoutTaskInput
+}
+
+export type TaskUncheckedCreateWithoutExerciseSetsInput = {
+  id: string
+  studentId: string
+  type: string
+  status: string
+  dueAt?: Date | string | null
+  payload: Prisma.JsonNullValueInput | runtime.InputJsonValue
+  adjustments?: Prisma.TaskAdjustmentUncheckedCreateNestedManyWithoutTaskInput
+  sessions?: Prisma.SessionUncheckedCreateNestedManyWithoutTaskInput
+}
+
+export type TaskCreateOrConnectWithoutExerciseSetsInput = {
+  where: Prisma.TaskWhereUniqueInput
+  create: Prisma.XOR<Prisma.TaskCreateWithoutExerciseSetsInput, Prisma.TaskUncheckedCreateWithoutExerciseSetsInput>
+}
+
+export type TaskUpsertWithoutExerciseSetsInput = {
+  update: Prisma.XOR<Prisma.TaskUpdateWithoutExerciseSetsInput, Prisma.TaskUncheckedUpdateWithoutExerciseSetsInput>
+  create: Prisma.XOR<Prisma.TaskCreateWithoutExerciseSetsInput, Prisma.TaskUncheckedCreateWithoutExerciseSetsInput>
+  where?: Prisma.TaskWhereInput
+}
+
+export type TaskUpdateToOneWithWhereWithoutExerciseSetsInput = {
+  where?: Prisma.TaskWhereInput
+  data: Prisma.XOR<Prisma.TaskUpdateWithoutExerciseSetsInput, Prisma.TaskUncheckedUpdateWithoutExerciseSetsInput>
+}
+
+export type TaskUpdateWithoutExerciseSetsInput = {
+  id?: Prisma.StringFieldUpdateOperationsInput | string
+  type?: Prisma.StringFieldUpdateOperationsInput | string
+  status?: Prisma.StringFieldUpdateOperationsInput | string
+  dueAt?: Prisma.NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+  payload?: Prisma.JsonNullValueInput | runtime.InputJsonValue
+  student?: Prisma.StudentUpdateOneRequiredWithoutTasksNestedInput
+  adjustments?: Prisma.TaskAdjustmentUpdateManyWithoutTaskNestedInput
+  sessions?: Prisma.SessionUpdateManyWithoutTaskNestedInput
+}
+
+export type TaskUncheckedUpdateWithoutExerciseSetsInput = {
+  id?: Prisma.StringFieldUpdateOperationsInput | string
+  studentId?: Prisma.StringFieldUpdateOperationsInput | string
+  type?: Prisma.StringFieldUpdateOperationsInput | string
+  status?: Prisma.StringFieldUpdateOperationsInput | string
+  dueAt?: Prisma.NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+  payload?: Prisma.JsonNullValueInput | runtime.InputJsonValue
+  adjustments?: Prisma.TaskAdjustmentUncheckedUpdateManyWithoutTaskNestedInput
   sessions?: Prisma.SessionUncheckedUpdateManyWithoutTaskNestedInput
 }
 
@@ -553,6 +647,7 @@ export type TaskCreateWithoutSessionsInput = {
   payload: Prisma.JsonNullValueInput | runtime.InputJsonValue
   student: Prisma.StudentCreateNestedOneWithoutTasksInput
   adjustments?: Prisma.TaskAdjustmentCreateNestedManyWithoutTaskInput
+  exerciseSets?: Prisma.ExerciseSetCreateNestedManyWithoutTaskInput
 }
 
 export type TaskUncheckedCreateWithoutSessionsInput = {
@@ -563,6 +658,7 @@ export type TaskUncheckedCreateWithoutSessionsInput = {
   dueAt?: Date | string | null
   payload: Prisma.JsonNullValueInput | runtime.InputJsonValue
   adjustments?: Prisma.TaskAdjustmentUncheckedCreateNestedManyWithoutTaskInput
+  exerciseSets?: Prisma.ExerciseSetUncheckedCreateNestedManyWithoutTaskInput
 }
 
 export type TaskCreateOrConnectWithoutSessionsInput = {
@@ -589,6 +685,7 @@ export type TaskUpdateWithoutSessionsInput = {
   payload?: Prisma.JsonNullValueInput | runtime.InputJsonValue
   student?: Prisma.StudentUpdateOneRequiredWithoutTasksNestedInput
   adjustments?: Prisma.TaskAdjustmentUpdateManyWithoutTaskNestedInput
+  exerciseSets?: Prisma.ExerciseSetUpdateManyWithoutTaskNestedInput
 }
 
 export type TaskUncheckedUpdateWithoutSessionsInput = {
@@ -599,6 +696,7 @@ export type TaskUncheckedUpdateWithoutSessionsInput = {
   dueAt?: Prisma.NullableDateTimeFieldUpdateOperationsInput | Date | string | null
   payload?: Prisma.JsonNullValueInput | runtime.InputJsonValue
   adjustments?: Prisma.TaskAdjustmentUncheckedUpdateManyWithoutTaskNestedInput
+  exerciseSets?: Prisma.ExerciseSetUncheckedUpdateManyWithoutTaskNestedInput
 }
 
 export type TaskCreateManyStudentInput = {
@@ -616,6 +714,7 @@ export type TaskUpdateWithoutStudentInput = {
   dueAt?: Prisma.NullableDateTimeFieldUpdateOperationsInput | Date | string | null
   payload?: Prisma.JsonNullValueInput | runtime.InputJsonValue
   adjustments?: Prisma.TaskAdjustmentUpdateManyWithoutTaskNestedInput
+  exerciseSets?: Prisma.ExerciseSetUpdateManyWithoutTaskNestedInput
   sessions?: Prisma.SessionUpdateManyWithoutTaskNestedInput
 }
 
@@ -626,6 +725,7 @@ export type TaskUncheckedUpdateWithoutStudentInput = {
   dueAt?: Prisma.NullableDateTimeFieldUpdateOperationsInput | Date | string | null
   payload?: Prisma.JsonNullValueInput | runtime.InputJsonValue
   adjustments?: Prisma.TaskAdjustmentUncheckedUpdateManyWithoutTaskNestedInput
+  exerciseSets?: Prisma.ExerciseSetUncheckedUpdateManyWithoutTaskNestedInput
   sessions?: Prisma.SessionUncheckedUpdateManyWithoutTaskNestedInput
 }
 
@@ -644,11 +744,13 @@ export type TaskUncheckedUpdateManyWithoutStudentInput = {
 
 export type TaskCountOutputType = {
   adjustments: number
+  exerciseSets: number
   sessions: number
 }
 
 export type TaskCountOutputTypeSelect<ExtArgs extends runtime.Types.Extensions.InternalArgs = runtime.Types.Extensions.DefaultArgs> = {
   adjustments?: boolean | TaskCountOutputTypeCountAdjustmentsArgs
+  exerciseSets?: boolean | TaskCountOutputTypeCountExerciseSetsArgs
   sessions?: boolean | TaskCountOutputTypeCountSessionsArgs
 }
 
@@ -672,6 +774,13 @@ export type TaskCountOutputTypeCountAdjustmentsArgs<ExtArgs extends runtime.Type
 /**
  * TaskCountOutputType without action
  */
+export type TaskCountOutputTypeCountExerciseSetsArgs<ExtArgs extends runtime.Types.Extensions.InternalArgs = runtime.Types.Extensions.DefaultArgs> = {
+  where?: Prisma.ExerciseSetWhereInput
+}
+
+/**
+ * TaskCountOutputType without action
+ */
 export type TaskCountOutputTypeCountSessionsArgs<ExtArgs extends runtime.Types.Extensions.InternalArgs = runtime.Types.Extensions.DefaultArgs> = {
   where?: Prisma.SessionWhereInput
 }
@@ -686,6 +795,7 @@ export type TaskSelect<ExtArgs extends runtime.Types.Extensions.InternalArgs = r
   payload?: boolean
   student?: boolean | Prisma.StudentDefaultArgs<ExtArgs>
   adjustments?: boolean | Prisma.Task$adjustmentsArgs<ExtArgs>
+  exerciseSets?: boolean | Prisma.Task$exerciseSetsArgs<ExtArgs>
   sessions?: boolean | Prisma.Task$sessionsArgs<ExtArgs>
   _count?: boolean | Prisma.TaskCountOutputTypeDefaultArgs<ExtArgs>
 }, ExtArgs["result"]["task"]>
@@ -723,6 +833,7 @@ export type TaskOmit<ExtArgs extends runtime.Types.Extensions.InternalArgs = run
 export type TaskInclude<ExtArgs extends runtime.Types.Extensions.InternalArgs = runtime.Types.Extensions.DefaultArgs> = {
   student?: boolean | Prisma.StudentDefaultArgs<ExtArgs>
   adjustments?: boolean | Prisma.Task$adjustmentsArgs<ExtArgs>
+  exerciseSets?: boolean | Prisma.Task$exerciseSetsArgs<ExtArgs>
   sessions?: boolean | Prisma.Task$sessionsArgs<ExtArgs>
   _count?: boolean | Prisma.TaskCountOutputTypeDefaultArgs<ExtArgs>
 }
@@ -738,6 +849,7 @@ export type $TaskPayload<ExtArgs extends runtime.Types.Extensions.InternalArgs =
   objects: {
     student: Prisma.$StudentPayload<ExtArgs>
     adjustments: Prisma.$TaskAdjustmentPayload<ExtArgs>[]
+    exerciseSets: Prisma.$ExerciseSetPayload<ExtArgs>[]
     sessions: Prisma.$SessionPayload<ExtArgs>[]
   }
   scalars: runtime.Types.Extensions.GetPayloadResult<{
@@ -1143,6 +1255,7 @@ export interface Prisma__TaskClient<T, Null = never, ExtArgs extends runtime.Typ
   readonly [Symbol.toStringTag]: "PrismaPromise"
   student<T extends Prisma.StudentDefaultArgs<ExtArgs> = {}>(args?: Prisma.Subset<T, Prisma.StudentDefaultArgs<ExtArgs>>): Prisma.Prisma__StudentClient<runtime.Types.Result.GetResult<Prisma.$StudentPayload<ExtArgs>, T, "findUniqueOrThrow", GlobalOmitOptions> | Null, Null, ExtArgs, GlobalOmitOptions>
   adjustments<T extends Prisma.Task$adjustmentsArgs<ExtArgs> = {}>(args?: Prisma.Subset<T, Prisma.Task$adjustmentsArgs<ExtArgs>>): Prisma.PrismaPromise<runtime.Types.Result.GetResult<Prisma.$TaskAdjustmentPayload<ExtArgs>, T, "findMany", GlobalOmitOptions> | Null>
+  exerciseSets<T extends Prisma.Task$exerciseSetsArgs<ExtArgs> = {}>(args?: Prisma.Subset<T, Prisma.Task$exerciseSetsArgs<ExtArgs>>): Prisma.PrismaPromise<runtime.Types.Result.GetResult<Prisma.$ExerciseSetPayload<ExtArgs>, T, "findMany", GlobalOmitOptions> | Null>
   sessions<T extends Prisma.Task$sessionsArgs<ExtArgs> = {}>(args?: Prisma.Subset<T, Prisma.Task$sessionsArgs<ExtArgs>>): Prisma.PrismaPromise<runtime.Types.Result.GetResult<Prisma.$SessionPayload<ExtArgs>, T, "findMany", GlobalOmitOptions> | Null>
   /**
    * Attaches callbacks for the resolution and/or rejection of the Promise.
@@ -1599,6 +1712,30 @@ export type Task$adjustmentsArgs<ExtArgs extends runtime.Types.Extensions.Intern
   take?: number
   skip?: number
   distinct?: Prisma.TaskAdjustmentScalarFieldEnum | Prisma.TaskAdjustmentScalarFieldEnum[]
+}
+
+/**
+ * Task.exerciseSets
+ */
+export type Task$exerciseSetsArgs<ExtArgs extends runtime.Types.Extensions.InternalArgs = runtime.Types.Extensions.DefaultArgs> = {
+  /**
+   * Select specific fields to fetch from the ExerciseSet
+   */
+  select?: Prisma.ExerciseSetSelect<ExtArgs> | null
+  /**
+   * Omit specific fields from the ExerciseSet
+   */
+  omit?: Prisma.ExerciseSetOmit<ExtArgs> | null
+  /**
+   * Choose, which related nodes to fetch as well
+   */
+  include?: Prisma.ExerciseSetInclude<ExtArgs> | null
+  where?: Prisma.ExerciseSetWhereInput
+  orderBy?: Prisma.ExerciseSetOrderByWithRelationInput | Prisma.ExerciseSetOrderByWithRelationInput[]
+  cursor?: Prisma.ExerciseSetWhereUniqueInput
+  take?: number
+  skip?: number
+  distinct?: Prisma.ExerciseSetScalarFieldEnum | Prisma.ExerciseSetScalarFieldEnum[]
 }
 
 /**

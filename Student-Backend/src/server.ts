@@ -15,23 +15,149 @@ interface DisconnectablePrisma {
   $disconnect(): Promise<unknown>
 }
 
+interface ServerApp extends CloseableApp {
+  listen(options: { host: string; port: number }): Promise<unknown>
+  log: {
+    error(bindings: { err: unknown }, message: string): unknown
+  }
+}
+
+interface ServerPrisma extends DisconnectablePrisma {
+  $connect(): Promise<unknown>
+}
+
+type ShutdownSignal = 'SIGINT' | 'SIGTERM'
+
+interface SignalTarget {
+  once(signal: ShutdownSignal, listener: () => void): unknown
+  removeListener(signal: ShutdownSignal, listener: () => void): unknown
+}
+
+function throwCleanupErrors(errors: unknown[]): void {
+  if (errors.length === 1) {
+    throw errors[0]
+  }
+  if (errors.length > 1) {
+    throw new AggregateError(errors, 'Student Backend cleanup failed')
+  }
+}
+
+function startupCleanupError(startupError: unknown, cleanupError: unknown): AggregateError {
+  const cleanupErrors =
+    cleanupError instanceof AggregateError ? cleanupError.errors : [cleanupError]
+  return new AggregateError(
+    [startupError, ...cleanupErrors],
+    'Student Backend startup and cleanup failed',
+    { cause: startupError },
+  )
+}
+
 export function createShutdown(
   app: CloseableApp,
   prisma: DisconnectablePrisma,
+  disposeSignals: () => void = () => undefined,
 ): () => Promise<void> {
   let shutdownPromise: Promise<void> | undefined
 
   return () => {
     shutdownPromise ??= (async () => {
+      const errors: unknown[] = []
+
+      try {
+        disposeSignals()
+      } catch (error) {
+        errors.push(error)
+      }
+
       try {
         await app.close()
-      } finally {
-        await prisma.$disconnect()
+      } catch (error) {
+        errors.push(error)
       }
+
+      try {
+        await prisma.$disconnect()
+      } catch (error) {
+        errors.push(error)
+      }
+
+      throwCleanupErrors(errors)
     })()
 
     return shutdownPromise
   }
+}
+
+export function registerShutdownSignals(
+  signalTarget: SignalTarget,
+  shutdown: () => Promise<void>,
+  onError: (error: unknown) => void,
+): () => void {
+  let disposed = false
+  const handleSignal = () => {
+    void shutdown().catch(onError)
+  }
+
+  signalTarget.once('SIGINT', handleSignal)
+  try {
+    signalTarget.once('SIGTERM', handleSignal)
+  } catch (error) {
+    signalTarget.removeListener('SIGINT', handleSignal)
+    throw error
+  }
+
+  return () => {
+    if (disposed) {
+      return
+    }
+    disposed = true
+
+    const errors: unknown[] = []
+    for (const signal of ['SIGINT', 'SIGTERM'] as const) {
+      try {
+        signalTarget.removeListener(signal, handleSignal)
+      } catch (error) {
+        errors.push(error)
+      }
+    }
+    throwCleanupErrors(errors)
+  }
+}
+
+interface StartServerOptions {
+  app: ServerApp
+  host: string
+  onShutdownError: (error: unknown) => void
+  port: number
+  prisma: ServerPrisma
+  signalTarget: SignalTarget
+}
+
+export async function startServer({
+  app,
+  host,
+  onShutdownError,
+  port,
+  prisma,
+  signalTarget,
+}: StartServerOptions): Promise<{ shutdown: () => Promise<void> }> {
+  let disposeSignals: () => void = () => undefined
+  const shutdown = createShutdown(app, prisma, () => disposeSignals())
+
+  try {
+    disposeSignals = registerShutdownSignals(signalTarget, shutdown, onShutdownError)
+    await prisma.$connect()
+    await app.listen({ host, port })
+  } catch (startupError) {
+    try {
+      await shutdown()
+    } catch (cleanupError) {
+      throw startupCleanupError(startupError, cleanupError)
+    }
+    throw startupError
+  }
+
+  return { shutdown }
 }
 
 export async function runServer(): Promise<{
@@ -41,28 +167,44 @@ export async function runServer(): Promise<{
 }> {
   const env = parseEnv(process.env)
   const prisma = createPrisma(env.DATABASE_URL)
-  const app = buildApp({ env, prisma })
-  const shutdown = createShutdown(app, prisma)
-
-  const handleSignal = () => {
-    void shutdown().catch((error: unknown) => {
-      app.log.error({ err: error }, 'Failed to shut down cleanly')
-      process.exitCode = 1
-    })
+  let app: ReturnType<typeof buildApp>
+  try {
+    app = buildApp({ env, prisma })
+  } catch (startupError) {
+    try {
+      await prisma.$disconnect()
+    } catch (cleanupError) {
+      throw startupCleanupError(startupError, cleanupError)
+    }
+    throw startupError
   }
 
-  process.once('SIGINT', handleSignal)
-  process.once('SIGTERM', handleSignal)
+  const reportShutdownError = (error: unknown) => {
+    try {
+      app.log.error({ err: error }, 'Failed to shut down cleanly')
+    } finally {
+      process.exitCode = 1
+    }
+  }
 
   try {
-    await app.listen({ host: env.HOST, port: env.PORT })
+    const { shutdown } = await startServer({
+      app,
+      host: env.HOST,
+      onShutdownError: reportShutdownError,
+      port: env.PORT,
+      prisma,
+      signalTarget: process,
+    })
+    return { app, prisma, shutdown }
   } catch (error) {
-    app.log.error({ err: error }, 'Failed to start Student Backend')
-    await shutdown()
+    try {
+      app.log.error({ err: error }, 'Failed to start Student Backend')
+    } catch {
+      // Preserve the startup error if logging itself is unavailable.
+    }
     throw error
   }
-
-  return { app, prisma, shutdown }
 }
 
 const entrypoint = process.argv[1]

@@ -179,6 +179,7 @@ export type ExerciseSetWhereInput = {
   kind?: Prisma.StringFilter<"ExerciseSet"> | string
   payload?: Prisma.JsonFilter<"ExerciseSet">
   student?: Prisma.XOR<Prisma.StudentScalarRelationFilter, Prisma.StudentWhereInput>
+  task?: Prisma.XOR<Prisma.TaskNullableScalarRelationFilter, Prisma.TaskWhereInput> | null
 }
 
 export type ExerciseSetOrderByWithRelationInput = {
@@ -188,6 +189,7 @@ export type ExerciseSetOrderByWithRelationInput = {
   kind?: Prisma.SortOrder
   payload?: Prisma.SortOrder
   student?: Prisma.StudentOrderByWithRelationInput
+  task?: Prisma.TaskOrderByWithRelationInput
 }
 
 export type ExerciseSetWhereUniqueInput = Prisma.AtLeast<{
@@ -201,6 +203,7 @@ export type ExerciseSetWhereUniqueInput = Prisma.AtLeast<{
   kind?: Prisma.StringFilter<"ExerciseSet"> | string
   payload?: Prisma.JsonFilter<"ExerciseSet">
   student?: Prisma.XOR<Prisma.StudentScalarRelationFilter, Prisma.StudentWhereInput>
+  task?: Prisma.XOR<Prisma.TaskNullableScalarRelationFilter, Prisma.TaskWhereInput> | null
 }, "studentId_id">
 
 export type ExerciseSetOrderByWithAggregationInput = {
@@ -227,10 +230,10 @@ export type ExerciseSetScalarWhereWithAggregatesInput = {
 
 export type ExerciseSetCreateInput = {
   id: string
-  taskId?: string | null
   kind: string
   payload: Prisma.JsonNullValueInput | runtime.InputJsonValue
   student: Prisma.StudentCreateNestedOneWithoutExerciseSetsInput
+  task?: Prisma.TaskCreateNestedOneWithoutExerciseSetsInput
 }
 
 export type ExerciseSetUncheckedCreateInput = {
@@ -243,10 +246,10 @@ export type ExerciseSetUncheckedCreateInput = {
 
 export type ExerciseSetUpdateInput = {
   id?: Prisma.StringFieldUpdateOperationsInput | string
-  taskId?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   kind?: Prisma.StringFieldUpdateOperationsInput | string
   payload?: Prisma.JsonNullValueInput | runtime.InputJsonValue
   student?: Prisma.StudentUpdateOneRequiredWithoutExerciseSetsNestedInput
+  task?: Prisma.TaskUpdateOneWithoutExerciseSetsNestedInput
 }
 
 export type ExerciseSetUncheckedUpdateInput = {
@@ -267,7 +270,6 @@ export type ExerciseSetCreateManyInput = {
 
 export type ExerciseSetUpdateManyMutationInput = {
   id?: Prisma.StringFieldUpdateOperationsInput | string
-  taskId?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   kind?: Prisma.StringFieldUpdateOperationsInput | string
   payload?: Prisma.JsonNullValueInput | runtime.InputJsonValue
 }
@@ -359,11 +361,53 @@ export type ExerciseSetUncheckedUpdateManyWithoutStudentNestedInput = {
   deleteMany?: Prisma.ExerciseSetScalarWhereInput | Prisma.ExerciseSetScalarWhereInput[]
 }
 
+export type ExerciseSetCreateNestedManyWithoutTaskInput = {
+  create?: Prisma.XOR<Prisma.ExerciseSetCreateWithoutTaskInput, Prisma.ExerciseSetUncheckedCreateWithoutTaskInput> | Prisma.ExerciseSetCreateWithoutTaskInput[] | Prisma.ExerciseSetUncheckedCreateWithoutTaskInput[]
+  connectOrCreate?: Prisma.ExerciseSetCreateOrConnectWithoutTaskInput | Prisma.ExerciseSetCreateOrConnectWithoutTaskInput[]
+  createMany?: Prisma.ExerciseSetCreateManyTaskInputEnvelope
+  connect?: Prisma.ExerciseSetWhereUniqueInput | Prisma.ExerciseSetWhereUniqueInput[]
+}
+
+export type ExerciseSetUncheckedCreateNestedManyWithoutTaskInput = {
+  create?: Prisma.XOR<Prisma.ExerciseSetCreateWithoutTaskInput, Prisma.ExerciseSetUncheckedCreateWithoutTaskInput> | Prisma.ExerciseSetCreateWithoutTaskInput[] | Prisma.ExerciseSetUncheckedCreateWithoutTaskInput[]
+  connectOrCreate?: Prisma.ExerciseSetCreateOrConnectWithoutTaskInput | Prisma.ExerciseSetCreateOrConnectWithoutTaskInput[]
+  createMany?: Prisma.ExerciseSetCreateManyTaskInputEnvelope
+  connect?: Prisma.ExerciseSetWhereUniqueInput | Prisma.ExerciseSetWhereUniqueInput[]
+}
+
+export type ExerciseSetUpdateManyWithoutTaskNestedInput = {
+  create?: Prisma.XOR<Prisma.ExerciseSetCreateWithoutTaskInput, Prisma.ExerciseSetUncheckedCreateWithoutTaskInput> | Prisma.ExerciseSetCreateWithoutTaskInput[] | Prisma.ExerciseSetUncheckedCreateWithoutTaskInput[]
+  connectOrCreate?: Prisma.ExerciseSetCreateOrConnectWithoutTaskInput | Prisma.ExerciseSetCreateOrConnectWithoutTaskInput[]
+  upsert?: Prisma.ExerciseSetUpsertWithWhereUniqueWithoutTaskInput | Prisma.ExerciseSetUpsertWithWhereUniqueWithoutTaskInput[]
+  createMany?: Prisma.ExerciseSetCreateManyTaskInputEnvelope
+  set?: Prisma.ExerciseSetWhereUniqueInput | Prisma.ExerciseSetWhereUniqueInput[]
+  disconnect?: Prisma.ExerciseSetWhereUniqueInput | Prisma.ExerciseSetWhereUniqueInput[]
+  delete?: Prisma.ExerciseSetWhereUniqueInput | Prisma.ExerciseSetWhereUniqueInput[]
+  connect?: Prisma.ExerciseSetWhereUniqueInput | Prisma.ExerciseSetWhereUniqueInput[]
+  update?: Prisma.ExerciseSetUpdateWithWhereUniqueWithoutTaskInput | Prisma.ExerciseSetUpdateWithWhereUniqueWithoutTaskInput[]
+  updateMany?: Prisma.ExerciseSetUpdateManyWithWhereWithoutTaskInput | Prisma.ExerciseSetUpdateManyWithWhereWithoutTaskInput[]
+  deleteMany?: Prisma.ExerciseSetScalarWhereInput | Prisma.ExerciseSetScalarWhereInput[]
+}
+
+export type ExerciseSetUncheckedUpdateManyWithoutTaskNestedInput = {
+  create?: Prisma.XOR<Prisma.ExerciseSetCreateWithoutTaskInput, Prisma.ExerciseSetUncheckedCreateWithoutTaskInput> | Prisma.ExerciseSetCreateWithoutTaskInput[] | Prisma.ExerciseSetUncheckedCreateWithoutTaskInput[]
+  connectOrCreate?: Prisma.ExerciseSetCreateOrConnectWithoutTaskInput | Prisma.ExerciseSetCreateOrConnectWithoutTaskInput[]
+  upsert?: Prisma.ExerciseSetUpsertWithWhereUniqueWithoutTaskInput | Prisma.ExerciseSetUpsertWithWhereUniqueWithoutTaskInput[]
+  createMany?: Prisma.ExerciseSetCreateManyTaskInputEnvelope
+  set?: Prisma.ExerciseSetWhereUniqueInput | Prisma.ExerciseSetWhereUniqueInput[]
+  disconnect?: Prisma.ExerciseSetWhereUniqueInput | Prisma.ExerciseSetWhereUniqueInput[]
+  delete?: Prisma.ExerciseSetWhereUniqueInput | Prisma.ExerciseSetWhereUniqueInput[]
+  connect?: Prisma.ExerciseSetWhereUniqueInput | Prisma.ExerciseSetWhereUniqueInput[]
+  update?: Prisma.ExerciseSetUpdateWithWhereUniqueWithoutTaskInput | Prisma.ExerciseSetUpdateWithWhereUniqueWithoutTaskInput[]
+  updateMany?: Prisma.ExerciseSetUpdateManyWithWhereWithoutTaskInput | Prisma.ExerciseSetUpdateManyWithWhereWithoutTaskInput[]
+  deleteMany?: Prisma.ExerciseSetScalarWhereInput | Prisma.ExerciseSetScalarWhereInput[]
+}
+
 export type ExerciseSetCreateWithoutStudentInput = {
   id: string
-  taskId?: string | null
   kind: string
   payload: Prisma.JsonNullValueInput | runtime.InputJsonValue
+  task?: Prisma.TaskCreateNestedOneWithoutExerciseSetsInput
 }
 
 export type ExerciseSetUncheckedCreateWithoutStudentInput = {
@@ -409,6 +453,44 @@ export type ExerciseSetScalarWhereInput = {
   payload?: Prisma.JsonFilter<"ExerciseSet">
 }
 
+export type ExerciseSetCreateWithoutTaskInput = {
+  id: string
+  kind: string
+  payload: Prisma.JsonNullValueInput | runtime.InputJsonValue
+  student: Prisma.StudentCreateNestedOneWithoutExerciseSetsInput
+}
+
+export type ExerciseSetUncheckedCreateWithoutTaskInput = {
+  id: string
+  kind: string
+  payload: Prisma.JsonNullValueInput | runtime.InputJsonValue
+}
+
+export type ExerciseSetCreateOrConnectWithoutTaskInput = {
+  where: Prisma.ExerciseSetWhereUniqueInput
+  create: Prisma.XOR<Prisma.ExerciseSetCreateWithoutTaskInput, Prisma.ExerciseSetUncheckedCreateWithoutTaskInput>
+}
+
+export type ExerciseSetCreateManyTaskInputEnvelope = {
+  data: Prisma.ExerciseSetCreateManyTaskInput | Prisma.ExerciseSetCreateManyTaskInput[]
+}
+
+export type ExerciseSetUpsertWithWhereUniqueWithoutTaskInput = {
+  where: Prisma.ExerciseSetWhereUniqueInput
+  update: Prisma.XOR<Prisma.ExerciseSetUpdateWithoutTaskInput, Prisma.ExerciseSetUncheckedUpdateWithoutTaskInput>
+  create: Prisma.XOR<Prisma.ExerciseSetCreateWithoutTaskInput, Prisma.ExerciseSetUncheckedCreateWithoutTaskInput>
+}
+
+export type ExerciseSetUpdateWithWhereUniqueWithoutTaskInput = {
+  where: Prisma.ExerciseSetWhereUniqueInput
+  data: Prisma.XOR<Prisma.ExerciseSetUpdateWithoutTaskInput, Prisma.ExerciseSetUncheckedUpdateWithoutTaskInput>
+}
+
+export type ExerciseSetUpdateManyWithWhereWithoutTaskInput = {
+  where: Prisma.ExerciseSetScalarWhereInput
+  data: Prisma.XOR<Prisma.ExerciseSetUpdateManyMutationInput, Prisma.ExerciseSetUncheckedUpdateManyWithoutTaskInput>
+}
+
 export type ExerciseSetCreateManyStudentInput = {
   id: string
   taskId?: string | null
@@ -418,9 +500,9 @@ export type ExerciseSetCreateManyStudentInput = {
 
 export type ExerciseSetUpdateWithoutStudentInput = {
   id?: Prisma.StringFieldUpdateOperationsInput | string
-  taskId?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   kind?: Prisma.StringFieldUpdateOperationsInput | string
   payload?: Prisma.JsonNullValueInput | runtime.InputJsonValue
+  task?: Prisma.TaskUpdateOneWithoutExerciseSetsNestedInput
 }
 
 export type ExerciseSetUncheckedUpdateWithoutStudentInput = {
@@ -437,6 +519,31 @@ export type ExerciseSetUncheckedUpdateManyWithoutStudentInput = {
   payload?: Prisma.JsonNullValueInput | runtime.InputJsonValue
 }
 
+export type ExerciseSetCreateManyTaskInput = {
+  id: string
+  kind: string
+  payload: Prisma.JsonNullValueInput | runtime.InputJsonValue
+}
+
+export type ExerciseSetUpdateWithoutTaskInput = {
+  id?: Prisma.StringFieldUpdateOperationsInput | string
+  kind?: Prisma.StringFieldUpdateOperationsInput | string
+  payload?: Prisma.JsonNullValueInput | runtime.InputJsonValue
+  student?: Prisma.StudentUpdateOneRequiredWithoutExerciseSetsNestedInput
+}
+
+export type ExerciseSetUncheckedUpdateWithoutTaskInput = {
+  id?: Prisma.StringFieldUpdateOperationsInput | string
+  kind?: Prisma.StringFieldUpdateOperationsInput | string
+  payload?: Prisma.JsonNullValueInput | runtime.InputJsonValue
+}
+
+export type ExerciseSetUncheckedUpdateManyWithoutTaskInput = {
+  id?: Prisma.StringFieldUpdateOperationsInput | string
+  kind?: Prisma.StringFieldUpdateOperationsInput | string
+  payload?: Prisma.JsonNullValueInput | runtime.InputJsonValue
+}
+
 
 
 export type ExerciseSetSelect<ExtArgs extends runtime.Types.Extensions.InternalArgs = runtime.Types.Extensions.DefaultArgs> = runtime.Types.Extensions.GetSelect<{
@@ -446,6 +553,7 @@ export type ExerciseSetSelect<ExtArgs extends runtime.Types.Extensions.InternalA
   kind?: boolean
   payload?: boolean
   student?: boolean | Prisma.StudentDefaultArgs<ExtArgs>
+  task?: boolean | Prisma.ExerciseSet$taskArgs<ExtArgs>
 }, ExtArgs["result"]["exerciseSet"]>
 
 export type ExerciseSetSelectCreateManyAndReturn<ExtArgs extends runtime.Types.Extensions.InternalArgs = runtime.Types.Extensions.DefaultArgs> = runtime.Types.Extensions.GetSelect<{
@@ -455,6 +563,7 @@ export type ExerciseSetSelectCreateManyAndReturn<ExtArgs extends runtime.Types.E
   kind?: boolean
   payload?: boolean
   student?: boolean | Prisma.StudentDefaultArgs<ExtArgs>
+  task?: boolean | Prisma.ExerciseSet$taskArgs<ExtArgs>
 }, ExtArgs["result"]["exerciseSet"]>
 
 export type ExerciseSetSelectUpdateManyAndReturn<ExtArgs extends runtime.Types.Extensions.InternalArgs = runtime.Types.Extensions.DefaultArgs> = runtime.Types.Extensions.GetSelect<{
@@ -464,6 +573,7 @@ export type ExerciseSetSelectUpdateManyAndReturn<ExtArgs extends runtime.Types.E
   kind?: boolean
   payload?: boolean
   student?: boolean | Prisma.StudentDefaultArgs<ExtArgs>
+  task?: boolean | Prisma.ExerciseSet$taskArgs<ExtArgs>
 }, ExtArgs["result"]["exerciseSet"]>
 
 export type ExerciseSetSelectScalar = {
@@ -477,18 +587,22 @@ export type ExerciseSetSelectScalar = {
 export type ExerciseSetOmit<ExtArgs extends runtime.Types.Extensions.InternalArgs = runtime.Types.Extensions.DefaultArgs> = runtime.Types.Extensions.GetOmit<"id" | "studentId" | "taskId" | "kind" | "payload", ExtArgs["result"]["exerciseSet"]>
 export type ExerciseSetInclude<ExtArgs extends runtime.Types.Extensions.InternalArgs = runtime.Types.Extensions.DefaultArgs> = {
   student?: boolean | Prisma.StudentDefaultArgs<ExtArgs>
+  task?: boolean | Prisma.ExerciseSet$taskArgs<ExtArgs>
 }
 export type ExerciseSetIncludeCreateManyAndReturn<ExtArgs extends runtime.Types.Extensions.InternalArgs = runtime.Types.Extensions.DefaultArgs> = {
   student?: boolean | Prisma.StudentDefaultArgs<ExtArgs>
+  task?: boolean | Prisma.ExerciseSet$taskArgs<ExtArgs>
 }
 export type ExerciseSetIncludeUpdateManyAndReturn<ExtArgs extends runtime.Types.Extensions.InternalArgs = runtime.Types.Extensions.DefaultArgs> = {
   student?: boolean | Prisma.StudentDefaultArgs<ExtArgs>
+  task?: boolean | Prisma.ExerciseSet$taskArgs<ExtArgs>
 }
 
 export type $ExerciseSetPayload<ExtArgs extends runtime.Types.Extensions.InternalArgs = runtime.Types.Extensions.DefaultArgs> = {
   name: "ExerciseSet"
   objects: {
     student: Prisma.$StudentPayload<ExtArgs>
+    task: Prisma.$TaskPayload<ExtArgs> | null
   }
   scalars: runtime.Types.Extensions.GetPayloadResult<{
     id: string
@@ -891,6 +1005,7 @@ readonly fields: ExerciseSetFieldRefs;
 export interface Prisma__ExerciseSetClient<T, Null = never, ExtArgs extends runtime.Types.Extensions.InternalArgs = runtime.Types.Extensions.DefaultArgs, GlobalOmitOptions = {}> extends Prisma.PrismaPromise<T> {
   readonly [Symbol.toStringTag]: "PrismaPromise"
   student<T extends Prisma.StudentDefaultArgs<ExtArgs> = {}>(args?: Prisma.Subset<T, Prisma.StudentDefaultArgs<ExtArgs>>): Prisma.Prisma__StudentClient<runtime.Types.Result.GetResult<Prisma.$StudentPayload<ExtArgs>, T, "findUniqueOrThrow", GlobalOmitOptions> | Null, Null, ExtArgs, GlobalOmitOptions>
+  task<T extends Prisma.ExerciseSet$taskArgs<ExtArgs> = {}>(args?: Prisma.Subset<T, Prisma.ExerciseSet$taskArgs<ExtArgs>>): Prisma.Prisma__TaskClient<runtime.Types.Result.GetResult<Prisma.$TaskPayload<ExtArgs>, T, "findUniqueOrThrow", GlobalOmitOptions> | null, null, ExtArgs, GlobalOmitOptions>
   /**
    * Attaches callbacks for the resolution and/or rejection of the Promise.
    * @param onfulfilled The callback to execute when the Promise is resolved.
@@ -1321,6 +1436,25 @@ export type ExerciseSetDeleteManyArgs<ExtArgs extends runtime.Types.Extensions.I
    * Limit how many ExerciseSets to delete.
    */
   limit?: number
+}
+
+/**
+ * ExerciseSet.task
+ */
+export type ExerciseSet$taskArgs<ExtArgs extends runtime.Types.Extensions.InternalArgs = runtime.Types.Extensions.DefaultArgs> = {
+  /**
+   * Select specific fields to fetch from the Task
+   */
+  select?: Prisma.TaskSelect<ExtArgs> | null
+  /**
+   * Omit specific fields from the Task
+   */
+  omit?: Prisma.TaskOmit<ExtArgs> | null
+  /**
+   * Choose, which related nodes to fetch as well
+   */
+  include?: Prisma.TaskInclude<ExtArgs> | null
+  where?: Prisma.TaskWhereInput
 }
 
 /**

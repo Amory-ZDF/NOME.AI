@@ -37,6 +37,7 @@ model Task {
   payload     Json
   student     Student          @relation(fields: [studentId], references: [id], onDelete: Cascade)
   adjustments TaskAdjustment[]
+  exerciseSets ExerciseSet[]
   sessions    Session[]
 
   @@id([studentId, id])
@@ -66,6 +67,7 @@ model ExerciseSet {
   kind      String
   payload   Json
   student   Student @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  task      Task?   @relation(fields: [studentId, taskId], references: [studentId, id], onDelete: Cascade)
 
   @@id([studentId, id])
   @@index([studentId, kind], map: "Student_Exercise_kind_idx")
@@ -116,7 +118,9 @@ model NoteFolder {
   studentId String
   parentId  String?
   payload   Json
-  student   Student @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  student   Student      @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  parent    NoteFolder?  @relation("NoteFolderHierarchy", fields: [studentId, parentId], references: [studentId, id], onDelete: NoAction)
+  children  NoteFolder[] @relation("NoteFolderHierarchy")
 
   @@id([studentId, id])
   @@index([studentId, parentId], map: "Student_NoteFolder_parent_idx")

@@ -1,7 +1,21 @@
 import { z } from 'zod'
 
+import { normalizeSqliteDatabaseUrl } from '../db/database-url.js'
+
 const DEFAULT_CORS_ORIGIN = 'http://localhost:5173'
 const DEFAULT_STUDENT_ID = 'stu-001'
+
+const sqliteDatabaseUrlSchema = z.string().transform((value, context) => {
+  try {
+    return normalizeSqliteDatabaseUrl(value)
+  } catch {
+    context.addIssue({
+      code: 'custom',
+      message: 'must be a supported SQLite file: URL',
+    })
+    return z.NEVER
+  }
+})
 
 const httpOriginSchema = z.string().trim().min(1, 'must not be empty').transform((value, context) => {
   try {
@@ -33,7 +47,7 @@ const envSchema = z
     NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
     HOST: z.string().trim().min(1, 'must not be empty').default('127.0.0.1'),
     PORT: z.coerce.number().int().min(1).max(65_535).default(3001),
-    DATABASE_URL: z.string().trim().min(1, 'is required'),
+    DATABASE_URL: sqliteDatabaseUrlSchema,
     STUDENT_ID: z.string().trim().min(1, 'must not be empty').optional(),
     CORS_ORIGINS: z
       .string()
