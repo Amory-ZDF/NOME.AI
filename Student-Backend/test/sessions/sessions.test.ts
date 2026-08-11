@@ -2,7 +2,10 @@ import { afterAll, beforeEach, describe, expect, it } from 'vitest'
 
 import { buildApp } from '../../src/app.js'
 import { parseEnv } from '../../src/config/env.js'
-import type { SessionQuestion } from '../../src/contracts/student-contracts.js'
+import {
+  sessionResultSchema,
+  type SessionQuestion,
+} from '../../src/contracts/student-contracts.js'
 import { toInputJson } from '../../src/db/json.js'
 import { summarizeSession } from '../../src/modules/sessions/session-summary.js'
 import {
@@ -344,6 +347,101 @@ describe('summarizeSession', () => {
   })
 })
 
+describe('session result state contract', () => {
+  it.each([
+    [
+      'a correct result whose solve level differs from hints used',
+      makeResult({ hintsUsed: 5, solvedAtHintLevel: 0 }),
+    ],
+    [
+      'a wrong result with no unlocked hint',
+      makeResult({
+        status: 'wrong',
+        attempts: [
+          {
+            answer: 'wrong',
+            submittedAt: '2026-08-11T10:09:00.000Z',
+            isCorrect: false,
+          },
+        ],
+        hintsUsed: 0,
+        solvedAtHintLevel: null,
+      }),
+    ],
+  ])('rejects impossible frontend state: %s', (_case, result) => {
+    expect(sessionResultSchema.safeParse(result).success).toBe(false)
+  })
+
+  it.each([
+    ['first-try correct at 0/0', makeResult()],
+    [
+      'hint-assisted correct at 5/5 with a later wrong attempt',
+      makeResult({
+        attempts: [
+          {
+            answer: 'first wrong',
+            submittedAt: '2026-08-11T10:07:00.000Z',
+            isCorrect: false,
+          },
+          {
+            answer: 'stationary',
+            submittedAt: '2026-08-11T10:08:00.000Z',
+            isCorrect: true,
+          },
+          {
+            answer: 'later slip',
+            submittedAt: '2026-08-11T10:09:00.000Z',
+            isCorrect: false,
+          },
+        ],
+        hintsUsed: 5,
+        solvedAtHintLevel: 5,
+      }),
+    ],
+    [
+      'first wrong at hint level 1',
+      makeResult({
+        status: 'wrong',
+        attempts: [
+          {
+            answer: 'wrong',
+            submittedAt: '2026-08-11T10:09:00.000Z',
+            isCorrect: false,
+          },
+        ],
+        hintsUsed: 1,
+        solvedAtHintLevel: null,
+      }),
+    ],
+    [
+      'wrong after all five hints',
+      makeResult({
+        status: 'wrong',
+        attempts: [
+          {
+            answer: 'wrong',
+            submittedAt: '2026-08-11T10:09:00.000Z',
+            isCorrect: false,
+          },
+        ],
+        hintsUsed: 5,
+        solvedAtHintLevel: null,
+      }),
+    ],
+    [
+      'unanswered at 0/null',
+      makeResult({
+        status: 'unanswered',
+        attempts: [],
+        hintsUsed: 0,
+        solvedAtHintLevel: null,
+      }),
+    ],
+  ])('accepts the reachable boundary: %s', (_case, result) => {
+    expect(sessionResultSchema.safeParse(result).success).toBe(true)
+  })
+})
+
 describe('POST /api/sessions', () => {
   it('persists a complete task-linked session and returns its exact client id', async () => {
     await insertStudent()
@@ -597,6 +695,45 @@ describe('POST /api/sessions', () => {
 
     expect(response.statusCode).toBe(400)
     expect(response.json()).toMatchObject({ code: 'INVALID_INPUT', data: null })
+    await expect(prisma.session.count()).resolves.toBe(0)
+  })
+
+  it.each([
+    [
+      'a correct result whose solve level differs from hints used',
+      makeResult({ hintsUsed: 5, solvedAtHintLevel: 0 }),
+    ],
+    [
+      'a wrong result with no unlocked hint',
+      makeResult({
+        status: 'wrong',
+        attempts: [
+          {
+            answer: 'wrong',
+            submittedAt: '2026-08-11T10:09:00.000Z',
+            isCorrect: false,
+          },
+        ],
+        hintsUsed: 0,
+        solvedAtHintLevel: null,
+      }),
+    ],
+  ])('rejects impossible frontend state atomically: %s', async (_case, result) => {
+    await insertStudent()
+    await insertTaskAndSet()
+    const session = makeSession({
+      sessionId: `impossible-${String(result.status)}-${String(result.hintsUsed)}`,
+      questions: [makeSessionQuestion(makeQuestion(), result)],
+    })
+
+    const response = await postSession(session)
+
+    expect(response.statusCode).toBe(400)
+    expect(response.json()).toEqual({
+      code: 'INVALID_INPUT',
+      message: 'Invalid request',
+      data: null,
+    })
     await expect(prisma.session.count()).resolves.toBe(0)
   })
 

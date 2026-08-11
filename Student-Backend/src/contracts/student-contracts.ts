@@ -875,7 +875,7 @@ export const sessionResultSchema = safeStrictObject({
       if (
         !hasCorrectAttempt ||
         value.solvedAtHintLevel === null ||
-        value.solvedAtHintLevel > value.hintsUsed
+        value.solvedAtHintLevel !== value.hintsUsed
       ) {
         context.addIssue({
           code: 'custom',
@@ -894,11 +894,15 @@ export const sessionResultSchema = safeStrictObject({
     }
 
     if (value.status === 'wrong') {
-      if (value.attempts.length === 0 || hasCorrectAttempt) {
+      if (
+        value.attempts.length === 0 ||
+        hasCorrectAttempt ||
+        value.hintsUsed === 0
+      ) {
         context.addIssue({
           code: 'custom',
           path: ['attempts'],
-          message: 'Wrong results require only incorrect attempt evidence',
+          message: 'Wrong results require incorrect attempts and an unlocked hint',
         })
       }
       return
