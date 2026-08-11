@@ -15,6 +15,8 @@ import { ok } from './common/http/envelope.js'
 import { serializeError } from './common/logging/error-serializer.js'
 import type { Env } from './config/env.js'
 import type { StudentPrisma } from './db/client.js'
+import { bootstrapRoutes } from './modules/bootstrap/bootstrap.routes.js'
+import { settingsRoutes } from './modules/settings/settings.routes.js'
 
 interface BuildAppOptions {
   env: Env
@@ -107,6 +109,9 @@ export function buildApp({ env, loggerStream, prisma }: BuildAppOptions) {
       async () => ok({ status: 'ok' as const }),
     )
   })
+
+  app.register(bootstrapRoutes, { studentId: env.STUDENT_ID })
+  app.register(settingsRoutes, { studentId: env.STUDENT_ID })
 
   return app
 }
