@@ -1,11 +1,16 @@
 import { afterAll, beforeEach, describe, expect, it, vi } from 'vitest'
+import { ZodError } from 'zod'
 
 import { buildApp } from '../../src/app.js'
 import { parseEnv } from '../../src/config/env.js'
 import { toInputJson } from '../../src/db/json.js'
 import { parseMaterialMetadata } from '../../src/modules/materials/material-rules.js'
+import { MaterialService } from '../../src/modules/materials/material.service.js'
+import { AppError } from '../../src/common/errors/app-error.js'
+import { Prisma } from '../../src/generated/prisma/client.js'
 import {
   createTestPrisma,
+  holdStudentWriteLock,
   resetDatabase,
   TEST_DATABASE_URL,
 } from '../helpers/database.js'
@@ -53,10 +58,10 @@ async function insertStudent(id = studentId) {
   })
 }
 
-function appFor(id = studentId, now: () => Date = () => injectedAt, createId = () => 'generated-material-id') {
+function appFor(id = studentId, now: () => Date = () => injectedAt, createId = () => 'generated-material-id', prismaClient = prisma) {
   return buildApp({
     env: parseEnv({ NODE_ENV: 'test', DATABASE_URL: TEST_DATABASE_URL, STUDENT_ID: id, LOG_LEVEL: 'silent' }),
-    prisma,
+    prisma: prismaClient,
     now,
     createId,
   })
@@ -69,6 +74,32 @@ afterAll(async () => {
 })
 
 describe('POST /api/material-uploads', () => {
+  it.each([
+    ['P1008', new Prisma.PrismaClientKnownRequestError('locked', { code: 'P1008', clientVersion: 'test' }), 5],
+    ['P2034', new Prisma.PrismaClientKnownRequestError('conflict', { code: 'P2034', clientVersion: 'test' }), 5],
+    ['P2028', new Prisma.PrismaClientKnownRequestError('no retry', { code: 'P2028', clientVersion: 'test' }), 1],
+    ['domain', new AppError('domain', 400, 'INVALID_INPUT'), 1],
+    ['zod', new ZodError([]), 1],
+    ['unknown', new Error('unknown'), 1],
+  ] as const)('retries only real Prisma contention errors: %s', async (_name, cause, calls) => {
+    const transaction = vi.fn(async () => { throw cause })
+    const service = new MaterialService({ $transaction: transaction } as never, studentId, () => injectedAt, () => 'generated-id')
+    await expect(service.create(metadata())).rejects.toBe(cause)
+    expect(transaction).toHaveBeenCalledTimes(calls)
+  })
+
+  it('keeps invalid generated raw identifiers out of responses and logs', async () => {
+    await insertStudent()
+    const logs: string[] = []
+    const app = buildApp({
+      env: parseEnv({ NODE_ENV: 'test', DATABASE_URL: TEST_DATABASE_URL, STUDENT_ID: studentId, LOG_LEVEL: 'error' }),
+      prisma, now: () => injectedAt, createId: () => 'raw:server-secret', loggerStream: { write: (line) => logs.push(line) },
+    })
+    const response = await app.inject({ method: 'POST', url: '/api/material-uploads', payload: metadata({ id: undefined, createdAt: undefined }) })
+    await app.close()
+    expect(response.body).not.toContain('raw:server-secret')
+    expect(logs.join('')).not.toContain('raw:server-secret')
+  })
   it('persists every material type and allowed MIME as a metadata-only queued job', async () => {
     await insertStudent()
     const app = appFor()
@@ -95,7 +126,7 @@ describe('POST /api/material-uploads', () => {
     for (const [index, size] of [20 * 1024 * 1024 + 1, -1, '1', null, Number.NaN, Infinity].entries()) {
       const response = await app.inject({ method: 'POST', url: '/api/material-uploads', payload: metadata({ id: `bad-size-${index}`, size }) })
       expect(response.statusCode).toBe(400)
-      expect(response.json()).toMatchObject({ code: index === 0 ? 'FILE_TOO_LARGE' : 'INVALID_UPLOAD_METADATA' })
+      expect(response.json()).toMatchObject({ code: 'FILE_TOO_LARGE' })
     }
     await app.close()
   })
@@ -112,6 +143,31 @@ describe('POST /api/material-uploads', () => {
     expect(injected.json().data.job).toMatchObject({ id: 'injected-id', createdAt: injectedAt.toISOString(), updatedAt: injectedAt.toISOString(), status: 'queued', progress: 0 })
     expect(createId).toHaveBeenCalledTimes(1)
     expect(now).toHaveBeenCalledTimes(1)
+  })
+
+  it.each(['base64:AA==', 'data:text/plain;base64,AA==', 'raw:AA==', 'x;base64,AA=='])(
+    'rejects a raw caller id %s with no durable write', async (id) => {
+      await insertStudent()
+      const app = appFor()
+      const response = await app.inject({ method: 'POST', url: '/api/material-uploads', payload: metadata({ id }) })
+      await app.close()
+      expect(response.json()).toEqual({ code: 'INVALID_UPLOAD_METADATA', message: 'Upload metadata contains invalid fields', data: null })
+      await expect(prisma.materialUploadJob.count()).resolves.toBe(0)
+    },
+  )
+
+  it.each([
+    ['id', () => 'raw:server-id', () => injectedAt],
+    ['id', () => 'bad\u0000server-id', () => injectedAt],
+    ['time', () => 'generated-id', () => new Date('invalid')],
+  ])('fails safely when injected %s dependency is invalid', async (_case, createId, now) => {
+    await insertStudent()
+    const app = appFor(studentId, now, createId)
+    const response = await app.inject({ method: 'POST', url: '/api/material-uploads', payload: metadata({ id: undefined, createdAt: undefined }) })
+    await app.close()
+    expect(response.statusCode).toBe(500)
+    expect(response.json()).toEqual({ code: 'INTERNAL_ERROR', message: 'Internal server error', data: null })
+    await expect(prisma.materialUploadJob.count()).resolves.toBe(0)
   })
 
   it('rejects malformed metadata carriers before persistence with documented domain codes', async () => {
@@ -174,6 +230,24 @@ describe('POST /api/material-uploads', () => {
     await expect(prisma.materialUploadJob.count({ where: { id: 'same-id' } })).resolves.toBe(2)
   })
 
+  it('retries a real SQLite write lock, then resolves a same-id create to one row and one duplicate', { timeout: 15_000 }, async () => {
+    await insertStudent()
+    const firstClient = createTestPrisma(); const secondClient = createTestPrisma(); const blocker = createTestPrisma()
+    const firstApp = appFor(studentId, () => injectedAt, () => 'lock-id', firstClient)
+    const secondApp = appFor(studentId, () => injectedAt, () => 'lock-id', secondClient)
+    const release = await holdStudentWriteLock(blocker, studentId, 125)
+    try {
+      const [first, second] = await Promise.all([
+        firstApp.inject({ method: 'POST', url: '/api/material-uploads', payload: metadata({ id: 'lock-id' }) }),
+        secondApp.inject({ method: 'POST', url: '/api/material-uploads', payload: metadata({ id: 'lock-id' }) }),
+      ])
+      expect([first.statusCode, second.statusCode].sort()).toEqual([200, 409])
+      await expect(prisma.materialUploadJob.count({ where: { studentId, id: 'lock-id' } })).resolves.toBe(1)
+    } finally {
+      await release(); await firstApp.close(); await secondApp.close(); await firstClient.$disconnect(); await secondClient.$disconnect(); await blocker.$disconnect()
+    }
+  })
+
   it('uses documented 413/415 envelopes and OpenAPI response documentation', async () => {
     const app = appFor()
     const unsupported = await app.inject({ method: 'POST', url: '/api/material-uploads', headers: { 'content-type': 'application/xml' }, payload: '<upload />' })
@@ -187,5 +261,6 @@ describe('POST /api/material-uploads', () => {
     expect(body.required).toEqual(['fileName', 'mimeType', 'size', 'materialType'])
     expect(body.properties.mimeType.enum).toEqual(['application/pdf', 'image/jpeg', 'image/png', 'image/webp', 'image/heic'])
     expect(body.properties.size).toMatchObject({ minimum: 0, maximum: 20 * 1024 * 1024 })
+    expect(body.properties.createdAt).toMatchObject({ format: 'date-time' })
   })
 })

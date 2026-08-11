@@ -1,4 +1,5 @@
 import { AppError } from '../../common/errors/app-error.js'
+import { ZodError } from 'zod'
 import {
   materialUploadJobSchema,
   type MaterialUploadJob,
@@ -6,6 +7,8 @@ import {
 import type { StudentPrisma } from '../../db/client.js'
 import { toInputJson } from '../../db/json.js'
 import { parseMaterialMetadata } from './material-rules.js'
+import { sessionIdSchema } from '../../contracts/student-contracts.js'
+import { Prisma } from '../../generated/prisma/client.js'
 
 type Clock = () => Date
 type IdFactory = () => string
@@ -29,9 +32,16 @@ function isPrismaCode(cause: unknown, ...codes: string[]): boolean {
   return typeof cause === 'object' && cause !== null && 'code' in cause && typeof cause.code === 'string' && codes.includes(cause.code)
 }
 
-function transientSqliteError(cause: unknown): boolean {
-  if (isPrismaCode(cause, 'P2028', 'P2034')) return true
-  return cause instanceof Error && /SQLITE_BUSY|database is locked|transaction/i.test(cause.message)
+const transactionRetryDelaysMs = [25, 50, 100, 200] as const
+
+function isTransientTransactionContention(cause: unknown): boolean {
+  if (cause instanceof AppError || cause instanceof ZodError) return false
+  return cause instanceof Prisma.PrismaClientKnownRequestError &&
+    (cause.code === 'P1008' || cause.code === 'P2034')
+}
+
+function waitForRetry(milliseconds: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, milliseconds))
 }
 
 function readClock(clock: Clock): string {
@@ -47,9 +57,12 @@ function readClock(clock: Clock): string {
 
 function readId(factory: IdFactory): string {
   try {
-    return parseMaterialMetadata({ id: factory(), fileName: 'x', mimeType: 'application/pdf', size: 0, materialType: 'class_note' }).id!
+    const id = factory()
+    if (typeof id !== 'string' || /^(?:data|base64|raw):/iu.test(id.trim()) || /;base64,/iu.test(id) || !sessionIdSchema.safeParse(id).success) {
+      throw new TypeError('Invalid generated id')
+    }
+    return id
   } catch (cause) {
-    if (cause instanceof AppError) throw cause
     throw new AppError('Internal server error', 500, 'INTERNAL_ERROR', null, { cause })
   }
 }
@@ -76,14 +89,13 @@ export class MaterialService {
   ) {}
 
   private async retry<T>(operation: () => Promise<T>): Promise<T> {
-    let last: unknown
-    for (let attempt = 0; attempt < 3; attempt += 1) {
+    for (let attempt = 0; ; attempt += 1) {
       try { return await operation() } catch (cause) {
-        last = cause
-        if (!transientSqliteError(cause) || attempt === 2) throw cause
+        const delay = transactionRetryDelaysMs[attempt]
+        if (!isTransientTransactionContention(cause) || delay === undefined) throw cause
+        await waitForRetry(delay)
       }
     }
-    throw last
   }
 
   async create(input: unknown): Promise<MaterialUploadJob> {

@@ -3,7 +3,7 @@ import { afterAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import { buildApp } from '../../src/app.js'
 import { parseEnv } from '../../src/config/env.js'
 import { toInputJson } from '../../src/db/json.js'
-import { createTestPrisma, resetDatabase, TEST_DATABASE_URL } from '../helpers/database.js'
+import { createTestPrisma, holdStudentWriteLock, resetDatabase, TEST_DATABASE_URL } from '../helpers/database.js'
 
 const prisma = createTestPrisma()
 const studentId = 'material-cancel-student'
@@ -27,8 +27,8 @@ async function insertStudent(id = studentId) {
 async function insertJob(id = studentId, input = job()) {
   await prisma.materialUploadJob.create({ data: { id: String(input.id), studentId: id, status: String(input.status), createdAtValue: new Date(String(input.createdAt)), payload: toInputJson(input) } })
 }
-function appFor(id = studentId, now: () => Date = () => new Date(updatedAt)) {
-  return buildApp({ env: parseEnv({ NODE_ENV: 'test', DATABASE_URL: TEST_DATABASE_URL, STUDENT_ID: id, LOG_LEVEL: 'silent' }), prisma, now })
+function appFor(id = studentId, now: () => Date = () => new Date(updatedAt), prismaClient = prisma) {
+  return buildApp({ env: parseEnv({ NODE_ENV: 'test', DATABASE_URL: TEST_DATABASE_URL, STUDENT_ID: id, LOG_LEVEL: 'silent' }), prisma: prismaClient, now })
 }
 async function stored(id = studentId, materialId = 'material-cancel-1') { return prisma.materialUploadJob.findUnique({ where: { studentId_id: { studentId: id, id: materialId } } }) }
 
@@ -64,6 +64,16 @@ describe('POST /api/material-uploads/:id/cancel', () => {
     expect(response.statusCode).toBe(200)
     expect(response.json().data.job).toEqual(job({ status: 'cancelled', updatedAt: createdAt }))
     expect(now).not.toHaveBeenCalled()
+  })
+
+  it.each([null, 'unexpected', { reason: 'unexpected' }])('rejects a cancel body %j without mutating the job', async (payload) => {
+    await insertStudent(); await insertJob()
+    const app = appFor()
+    const response = await app.inject({ method: 'POST', url: '/api/material-uploads/material-cancel-1/cancel', headers: { 'content-type': 'application/json' }, payload: payload as never })
+    await app.close()
+    expect(response.statusCode).toBe(400)
+    expect(response.json()).toEqual({ code: 'INVALID_INPUT', message: 'Invalid request', data: null })
+    expect(await stored()).toMatchObject({ status: 'queued', payload: job() })
   })
 
   it('rejects completed cancellation, missing ids, and cross-student ids without mutation', async () => {
@@ -105,6 +115,24 @@ describe('POST /api/material-uploads/:id/cancel', () => {
     expect(responses.map((response) => response.statusCode)).toEqual([200, 200])
     expect(responses.every((response) => response.json().data.job.status === 'cancelled')).toBe(true)
     expect(await stored()).toMatchObject({ status: 'cancelled', payload: expect.not.objectContaining({ failure: expect.anything() }) })
+  })
+
+  it('retries a real SQLite lock and makes concurrent cancellation idempotent', { timeout: 15_000 }, async () => {
+    await insertStudent(); await insertJob()
+    const firstClient = createTestPrisma(); const secondClient = createTestPrisma(); const blocker = createTestPrisma()
+    const firstApp = appFor(studentId, () => new Date(updatedAt), firstClient)
+    const secondApp = appFor(studentId, () => new Date(updatedAt), secondClient)
+    const release = await holdStudentWriteLock(blocker, studentId, 125)
+    try {
+      const [first, second] = await Promise.all([
+        firstApp.inject({ method: 'POST', url: '/api/material-uploads/material-cancel-1/cancel' }),
+        secondApp.inject({ method: 'POST', url: '/api/material-uploads/material-cancel-1/cancel' }),
+      ])
+      expect([first.statusCode, second.statusCode]).toEqual([200, 200])
+      expect(await stored()).toMatchObject({ status: 'cancelled' })
+    } finally {
+      await release(); await firstApp.close(); await secondApp.close(); await firstClient.$disconnect(); await secondClient.$disconnect(); await blocker.$disconnect()
+    }
   })
 
   it('validates identifier limits and documents cancellation responses', async () => {

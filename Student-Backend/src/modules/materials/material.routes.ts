@@ -4,7 +4,7 @@ import { z } from 'zod'
 
 import { AppError } from '../../common/errors/app-error.js'
 import { errorEnvelopeSchema, ok } from '../../common/http/envelope.js'
-import { materialTypeSchema, materialUploadJobSchema, sessionIdSchema } from '../../contracts/student-contracts.js'
+import { isoDateTimeSchema, materialTypeSchema, materialUploadJobSchema, sessionIdSchema } from '../../contracts/student-contracts.js'
 import { ALLOWED_MIME_TYPES, MAX_FILE_BYTES } from './material-rules.js'
 import { MaterialService } from './material.service.js'
 
@@ -23,7 +23,7 @@ const uploadBodySchema = z.strictObject({
   examBoard: z.string().min(1).optional(),
   subject: z.string().min(1).optional(),
   chapter: z.string().min(1).optional(),
-  createdAt: z.string().min(1).optional(),
+  createdAt: isoDateTimeSchema.meta({ format: 'date-time' }).optional(),
 })
 const materialParamsSchema = z.strictObject({ id: sessionIdSchema })
 const materialEnvelopeSchema = z.strictObject({
@@ -49,6 +49,9 @@ export async function materialRoutes(app: FastifyInstance, options: MaterialRout
   routes.post('/api/material-uploads/:id/cancel', {
     validatorCompiler: bypassAutomaticValidation,
     schema: { tags: ['materials'], summary: 'Cancel a material job before completion', params: materialParamsSchema, response: responseSchemas },
+    preValidation: async (request) => {
+      if (request.body !== undefined) throw new AppError('Invalid request', 400, 'INVALID_INPUT')
+    },
   }, async (request) => {
     const params = request.params as unknown
     const parsed = materialParamsSchema.safeParse(params)

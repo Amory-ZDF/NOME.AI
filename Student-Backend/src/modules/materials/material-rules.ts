@@ -53,8 +53,19 @@ function nonBlankString(value: JsonValue | undefined): value is string {
 }
 
 function validateId(value: JsonValue | undefined): string {
-  if (typeof value !== 'string' || !sessionIdSchema.safeParse(value).success) invalidMetadata()
+  if (typeof value !== 'string' || isRawCarrier(value) || !sessionIdSchema.safeParse(value).success) invalidMetadata()
   return value
+}
+
+function hasNonFiniteOwnSize(value: unknown): boolean {
+  try {
+    if (value === null || typeof value !== 'object' || Array.isArray(value)) return false
+    const descriptor = Object.getOwnPropertyDescriptor(value, 'size')
+    return descriptor !== undefined && 'value' in descriptor &&
+      typeof descriptor.value === 'number' && !Number.isFinite(descriptor.value)
+  } catch {
+    return false
+  }
 }
 
 function validateTimestamp(value: JsonValue | undefined): string {
@@ -64,6 +75,7 @@ function validateTimestamp(value: JsonValue | undefined): string {
 
 /** Takes a descriptor-safe clone before selecting metadata fields. */
 export function parseMaterialMetadata(input: unknown): MaterialMetadata {
+  if (hasNonFiniteOwnSize(input)) tooLarge()
   let source: JsonValue
   try {
     source = cloneSafeJson(input)
@@ -79,7 +91,7 @@ export function parseMaterialMetadata(input: unknown): MaterialMetadata {
   if (typeof record.mimeType !== 'string') invalidMime()
   if (isRawCarrier(record.mimeType)) invalidMetadata()
   if (!allowedMimeTypes.has(record.mimeType)) invalidMime()
-  if (typeof record.size !== 'number' || !Number.isFinite(record.size) || record.size < 0) invalidMetadata()
+  if (typeof record.size !== 'number' || !Number.isFinite(record.size) || record.size < 0) tooLarge()
   if (record.size > MAX_FILE_BYTES) tooLarge()
   if (typeof record.materialType !== 'string') invalidMaterialType()
   if (isRawCarrier(record.materialType)) invalidMetadata()
