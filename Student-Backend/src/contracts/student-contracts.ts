@@ -467,7 +467,7 @@ export const errorItemSchema = safeStrictObject({
 
     if (
       value.variantVerifiedAt === null ||
-      Date.parse(value.variantVerifiedAt) !== auditTime
+      value.variantVerifiedAt !== value.variantVerification.verifiedAt
     ) {
       context.addIssue({
         code: 'custom',

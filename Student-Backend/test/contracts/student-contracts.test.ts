@@ -305,6 +305,33 @@ describe('student shared contracts', () => {
     }
   })
 
+  it('requires the accepted verification timestamp to preserve exact identity', () => {
+    const audit = {
+      variantId: 'variant-set-identity',
+      isCorrect: true,
+      verifiedAt: '2026-08-10T10:06:00.000Z',
+    }
+    const verifiedState = completeErrorFixture({
+      status: 'verification_due',
+      redoHistory: [correctRedo],
+      verificationVariantId: audit.variantId,
+      variantVerification: audit,
+    })
+
+    expect(
+      errorItemSchema.safeParse({
+        ...verifiedState,
+        variantVerifiedAt: audit.verifiedAt,
+      }).success,
+    ).toBe(true)
+    expect(
+      errorItemSchema.safeParse({
+        ...verifiedState,
+        variantVerifiedAt: '2026-08-10T11:06:00.000+01:00',
+      }).success,
+    ).toBe(false)
+  })
+
   it.each([
     [
       'audit without variant provenance',
