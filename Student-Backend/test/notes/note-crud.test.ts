@@ -4,6 +4,7 @@ import { buildApp } from '../../src/app.js'
 import { parseEnv } from '../../src/config/env.js'
 import { toInputJson } from '../../src/db/json.js'
 import { sanitizeCreatedNote } from '../../src/modules/notes/note-versions.js'
+import { noteCreateSchema } from '../../src/contracts/student-contracts.js'
 import { createTestPrisma, resetDatabase, TEST_DATABASE_URL } from '../helpers/database.js'
 
 const prisma = createTestPrisma()
@@ -187,7 +188,14 @@ describe('notes create and list', () => {
     expect(JSON.stringify({ schemas, post, patch })).toContain('changedAt')
     expect(JSON.stringify({ schemas, post, patch })).toContain('class_note')
     expect(JSON.stringify({ schemas, post, patch })).toContain('maxLength')
+    expect(patch.anyOf).toHaveLength(2)
+    expect(patch.anyOf.every((branch: { additionalProperties?: boolean; required?: string[] }) => branch.additionalProperties === false && (branch.required?.includes('changedAt') || branch.required?.includes('updatedAt')))).toBe(true)
   })
+
+  it.each([
+    ['version mismatch', { ...note('schema-version'), version: 2, versions: [] }],
+    ['missing answer question', { ...note('schema-answer'), questionBlocks: [], answerBlocks: [{ id: 'a', questionId: 'missing', text: 'answer' }] }],
+  ])('direct noteCreateSchema rejects %s', (_label, invalid) => expect(noteCreateSchema.safeParse(invalid).success).toBe(false))
 
   it('migrates a valid legacy note once during GET without touching a different student', async () => {
     await insertStudent(); await insertStudent(otherStudentId)
