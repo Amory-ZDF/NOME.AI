@@ -43,6 +43,16 @@ function assertStored(condition: boolean, label: string): asserts condition {
   if (!condition) storedDataInvalid(new Error(`Stored ${label} metadata mismatch`))
 }
 
+function isSameInstant(value: string, stored: Date): boolean {
+  const parsed = Date.parse(value)
+  return Number.isFinite(parsed) && parsed === stored.getTime()
+}
+
+function isSameNullableInstant(value: string | null, stored: Date | null): boolean {
+  if (value === null || stored === null) return value === null && stored === null
+  return isSameInstant(value, stored)
+}
+
 function keyedRecord<T>(
   entries: Array<{ rowId: string; value: T }>,
 ): Record<string, T> {
@@ -126,7 +136,10 @@ export class BootstrapService {
       const tasks = taskRows.map((row) => {
         const value = parseStored(taskSchema, row.payload, `task ${row.id}`)
         assertStored(
-          value.id === row.id && value.type === row.type && value.status === row.status,
+          value.id === row.id &&
+            value.type === row.type &&
+            value.status === row.status &&
+            isSameNullableInstant(value.dueAt, row.dueAt),
           `task ${row.id}`,
         )
         return value
@@ -141,7 +154,8 @@ export class BootstrapService {
         assertStored(
           value.id === row.id &&
             value.taskId === row.taskId &&
-            value.status === row.status,
+            value.status === row.status &&
+            isSameInstant(value.createdAt, row.createdAt),
           `task adjustment ${row.id}`,
         )
         return value
@@ -160,7 +174,9 @@ export class BootstrapService {
       const parsedSessions = sessionRows.map((row) => {
         const value = parseStored(sessionSchema, row.payload, `session ${row.id}`)
         assertStored(
-          value.sessionId === row.id && value.taskId === row.taskId,
+          value.sessionId === row.id &&
+            value.taskId === row.taskId &&
+            isSameInstant(value.completedAt, row.submittedAt),
           `session ${row.id}`,
         )
         return { rowId: row.id, value }
@@ -171,7 +187,8 @@ export class BootstrapService {
         assertStored(
           value.id === row.id &&
             value.questionId === row.questionId &&
-            value.status === row.status,
+            value.status === row.status &&
+            isSameInstant(value.lastOccurredAt, row.lastOccurredAt),
           `error item ${row.id}`,
         )
         return value
@@ -179,7 +196,12 @@ export class BootstrapService {
 
       const notes = noteRows.map((row) => {
         const value = parseStored(noteSchema, row.payload, `note ${row.id}`)
-        assertStored(value.id === row.id && value.version === row.version, `note ${row.id}`)
+        assertStored(
+          value.id === row.id &&
+            value.version === row.version &&
+            isSameInstant(value.updatedAt, row.updatedAtValue),
+          `note ${row.id}`,
+        )
         return value
       })
 
@@ -199,7 +221,9 @@ export class BootstrapService {
           `material upload job ${row.id}`,
         )
         assertStored(
-          value.id === row.id && value.status === row.status,
+          value.id === row.id &&
+            value.status === row.status &&
+            isSameInstant(value.createdAt, row.createdAtValue),
           `material upload job ${row.id}`,
         )
         return value

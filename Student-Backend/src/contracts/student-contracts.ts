@@ -1,6 +1,20 @@
 import { z } from 'zod'
 
-import { toInputJson, type JsonValue } from '../db/json.js'
+import { cloneSafeJson, type JsonValue } from '../common/json/safe-json.js'
+
+const invalidContractInput = Symbol('invalid contract input')
+
+function normalizeContractInput(value: unknown): JsonValue | typeof invalidContractInput {
+  try {
+    return cloneSafeJson(value)
+  } catch {
+    return invalidContractInput
+  }
+}
+
+function safeStrictObject<const Shape extends z.ZodRawShape>(shape: Shape) {
+  return z.preprocess(normalizeContractInput, z.strictObject(shape))
+}
 
 const nonEmptyString = z.string().min(1).refine((value) => value.trim().length > 0, {
   message: 'Must not be blank',
@@ -56,22 +70,23 @@ export const evidenceTimeSchema = z.string().refine(
   { message: 'Expected an ISO calendar date or datetime' },
 )
 
-function isSafeJsonValue(value: unknown): value is JsonValue {
-  try {
-    toInputJson(value)
-    return true
-  } catch {
-    return false
-  }
-}
+export const jsonValueSchema = z.preprocess(
+  normalizeContractInput,
+  z.custom<JsonValue>((value): value is JsonValue => value !== invalidContractInput, {
+    message: 'Expected bounded, safe JSON',
+  }),
+)
 
-export const jsonValueSchema = z.custom<JsonValue>(isSafeJsonValue, {
-  message: 'Expected bounded, safe JSON',
-})
-
-export const jsonObjectSchema = z.custom<Record<string, JsonValue>>(
-  (value) => isSafeJsonValue(value) && value !== null && !Array.isArray(value) && typeof value === 'object',
-  { message: 'Expected a bounded, safe JSON object' },
+export const jsonObjectSchema = z.preprocess(
+  normalizeContractInput,
+  z.custom<Record<string, JsonValue>>(
+    (value): value is Record<string, JsonValue> =>
+      value !== invalidContractInput &&
+      value !== null &&
+      !Array.isArray(value) &&
+      typeof value === 'object',
+    { message: 'Expected a bounded, safe JSON object' },
+  ),
 )
 
 export const taskTypeSchema = z.enum([
@@ -137,7 +152,7 @@ export const materialStatusSchema = z.enum([
   'cancelled',
 ])
 
-export const studentSchema = z.strictObject({
+export const studentSchema = safeStrictObject({
   id: nonEmptyString,
   name: nonEmptyString,
   avatar: z.string().url().nullable(),
@@ -145,7 +160,7 @@ export const studentSchema = z.strictObject({
   gradeInfo: nonEmptyString,
 })
 
-export const taskSchema = z.strictObject({
+export const taskSchema = safeStrictObject({
   id: nonEmptyString,
   title: nonEmptyString,
   type: taskTypeSchema,
@@ -167,7 +182,7 @@ export const taskSchema = z.strictObject({
   createdAt: isoDateTimeSchema.optional(),
 })
 
-export const taskAdjustmentSchema = z.strictObject({
+export const taskAdjustmentSchema = safeStrictObject({
   id: nonEmptyString,
   taskId: nonEmptyString,
   reason: taskAdjustmentReasonSchema,
@@ -178,7 +193,7 @@ export const taskAdjustmentSchema = z.strictObject({
   status: z.literal('submitted'),
 })
 
-export const hintSchema = z.strictObject({
+export const hintSchema = safeStrictObject({
   level: z.union([
     z.literal(1),
     z.literal(2),
@@ -251,9 +266,9 @@ function refineQuestion(
   }
 }
 
-export const questionSchema = z.strictObject(questionShape).superRefine(refineQuestion)
+export const questionSchema = safeStrictObject(questionShape).superRefine(refineQuestion)
 
-export const exerciseSetSchema = z.strictObject({
+export const exerciseSetSchema = safeStrictObject({
   id: optionalNonEmptyString,
   taskId: nullableNonEmptyString,
   title: nonEmptyString,
@@ -263,26 +278,25 @@ export const exerciseSetSchema = z.strictObject({
   createdAt: isoDateTimeSchema.optional(),
 })
 
-export const redoAttemptSchema = z.strictObject({
+export const redoAttemptSchema = safeStrictObject({
   attemptedAt: evidenceTimeSchema,
   answer: z.string(),
   isCorrect: z.boolean(),
   timeSpent: z.number().nonnegative(),
 })
 
-export const variantVerificationSchema = z.strictObject({
+export const variantVerificationSchema = safeStrictObject({
   variantId: nonEmptyString,
   isCorrect: z.boolean(),
   verifiedAt: evidenceTimeSchema,
 })
 
-export const occurrenceRecordSchema = z.strictObject({
+export const occurrenceRecordSchema = safeStrictObject({
   key: nonEmptyString,
   occurredAt: evidenceTimeSchema,
 })
 
-export const errorItemSchema = z
-  .strictObject({
+export const errorItemSchema = safeStrictObject({
     id: nonEmptyString,
     questionId: nonEmptyString,
     sessionId: nullableNonEmptyString,
@@ -367,28 +381,105 @@ export const errorItemSchema = z
       }
     }
 
-    const verificationFields = [
-      value.verificationVariantId,
-      value.variantVerifiedAt,
-      value.variantVerification,
-    ]
-    const populated = verificationFields.filter((entry) => entry !== null).length
-    if (populated !== 0 && populated !== verificationFields.length) {
+    if (value.verificationVariantId === null) {
+      if (value.variantVerifiedAt !== null || value.variantVerification !== null) {
+        context.addIssue({
+          code: 'custom',
+          path: ['variantVerification'],
+          message: 'Verification evidence requires variant provenance',
+        })
+      }
+      if (value.status === 'mastered') {
+        context.addIssue({
+          code: 'custom',
+          path: ['status'],
+          message: 'Mastery requires an accepted variant verification',
+        })
+      }
+      return
+    }
+
+    const correctRedoTimes = value.redoHistory
+      .filter(({ isCorrect }) => isCorrect)
+      .map(({ attemptedAt }) => Date.parse(attemptedAt))
+    const latestCorrectRedoAt =
+      correctRedoTimes.length === 0 ? undefined : Math.max(...correctRedoTimes)
+    if (latestCorrectRedoAt === undefined) {
       context.addIssue({
         code: 'custom',
-        path: ['variantVerification'],
-        message: 'Verification evidence must be complete',
+        path: ['verificationVariantId'],
+        message: 'A verification variant requires a correct redo',
       })
     }
-    if (
-      value.variantVerification !== null &&
-      (value.verificationVariantId !== value.variantVerification.variantId ||
-        value.variantVerifiedAt !== value.variantVerification.verifiedAt)
-    ) {
+
+    if (value.variantVerification === null) {
+      if (value.variantVerifiedAt !== null) {
+        context.addIssue({
+          code: 'custom',
+          path: ['variantVerifiedAt'],
+          message: 'Accepted verification time requires a correct audit',
+        })
+      }
+      if (value.status !== 'verification_due') {
+        context.addIssue({
+          code: 'custom',
+          path: ['status'],
+          message: 'An unaudited variant must remain due for verification',
+        })
+      }
+      return
+    }
+
+    if (value.verificationVariantId !== value.variantVerification.variantId) {
       context.addIssue({
         code: 'custom',
         path: ['variantVerification', 'variantId'],
         message: 'Verification variant ids must match',
+      })
+    }
+
+    const auditTime = Date.parse(value.variantVerification.verifiedAt)
+    if (latestCorrectRedoAt !== undefined && auditTime < latestCorrectRedoAt) {
+      context.addIssue({
+        code: 'custom',
+        path: ['variantVerification', 'verifiedAt'],
+        message: 'Variant verification cannot predate the latest correct redo',
+      })
+    }
+
+    if (!value.variantVerification.isCorrect) {
+      if (value.variantVerifiedAt !== null) {
+        context.addIssue({
+          code: 'custom',
+          path: ['variantVerifiedAt'],
+          message: 'An incorrect verification cannot set an accepted time',
+        })
+      }
+      if (value.status !== 'reviewing') {
+        context.addIssue({
+          code: 'custom',
+          path: ['status'],
+          message: 'An incorrect verification must return to reviewing',
+        })
+      }
+      return
+    }
+
+    if (
+      value.variantVerifiedAt === null ||
+      Date.parse(value.variantVerifiedAt) !== auditTime
+    ) {
+      context.addIssue({
+        code: 'custom',
+        path: ['variantVerifiedAt'],
+        message: 'A correct audit must match the accepted verification time',
+      })
+    }
+    if (value.status !== 'verification_due' && value.status !== 'mastered') {
+      context.addIssue({
+        code: 'custom',
+        path: ['status'],
+        message: 'A correct verification must be due or mastered',
       })
     }
   })
@@ -407,28 +498,41 @@ function isRawCarrier(value: string): boolean {
   return /^(?:data|base64|raw):/i.test(normalized) || /;base64,/i.test(normalized)
 }
 
-export const noteBlockSchema = z
-  .strictObject({
-    t: noteBlockTypeSchema,
-    v: z.string(),
-    reference: optionalNonEmptyString,
-    alt: optionalNonEmptyString,
-  })
+const plainNoteBlockSchema = safeStrictObject({
+  t: z.enum(['p', 'h', 'formula']),
+  v: z.string(),
+})
+
+const annotatedNoteBlockSchema = safeStrictObject({
+  t: z.enum(['list', 'highlight']),
+  v: z.string(),
+  reference: z.string().optional(),
+  alt: z.string().optional(),
+}).superRefine((value, context) => {
+  if (value.reference !== undefined && isRawCarrier(value.reference)) {
+    context.addIssue({
+      code: 'custom',
+      path: ['reference'],
+      message: 'Inline raw/base64 references are not allowed',
+    })
+  }
+})
+
+const imageNoteBlockSchema = safeStrictObject({
+  t: z.literal('image'),
+  v: z.string(),
+  reference: nonEmptyString,
+  alt: nonEmptyString,
+})
   .superRefine((value, context) => {
-    if (value.t === 'image' && (value.reference === undefined || value.alt === undefined)) {
-      context.addIssue({
-        code: 'custom',
-        message: 'Image blocks require a durable reference and alt text',
-      })
-    }
-    if (value.reference !== undefined && isRawCarrier(value.reference)) {
+    if (isRawCarrier(value.reference)) {
       context.addIssue({
         code: 'custom',
         path: ['reference'],
         message: 'Inline raw/base64 references are not allowed',
       })
     }
-    if (value.t === 'image' && isRawCarrier(value.v)) {
+    if (isRawCarrier(value.v)) {
       context.addIssue({
         code: 'custom',
         path: ['v'],
@@ -437,24 +541,30 @@ export const noteBlockSchema = z
     }
   })
 
-export const aiSuggestionSchema = z.strictObject({
+export const noteBlockSchema = z.union([
+  plainNoteBlockSchema,
+  annotatedNoteBlockSchema,
+  imageNoteBlockSchema,
+])
+
+export const aiSuggestionSchema = safeStrictObject({
   type: z.enum(['split_note', 'link_topic', 'related_content']),
   message: nonEmptyString,
 })
 
-export const questionBlockSchema = z.strictObject({
+export const questionBlockSchema = safeStrictObject({
   id: nonEmptyString,
   label: nonEmptyString,
   text: nonEmptyString,
 })
 
-export const answerBlockSchema = z.strictObject({
+export const answerBlockSchema = safeStrictObject({
   id: nonEmptyString,
   questionId: nonEmptyString,
   text: nonEmptyString,
 })
 
-export const noteVersionSnapshotSchema = z.strictObject({
+export const noteVersionSnapshotSchema = safeStrictObject({
   version: z.number().int().positive(),
   title: nonEmptyString,
   folderId: nullableNonEmptyString,
@@ -468,8 +578,7 @@ export const noteVersionSnapshotSchema = z.strictObject({
   reason: nonEmptyString,
 })
 
-export const noteSchema = z
-  .strictObject({
+export const noteSchema = safeStrictObject({
     id: nonEmptyString,
     title: nonEmptyString,
     materialType: materialTypeSchema.optional(),
@@ -537,13 +646,7 @@ export const noteSchema = z
     })
   })
 
-const classificationContentSchema = z.strictObject({
-  t: z.enum(['h', 'p', 'formula']),
-  v: nonEmptyString,
-})
-
-export const materialClassificationResultSchema = z
-  .strictObject({
+export const materialClassificationResultSchema = safeStrictObject({
     suggestedTitle: nonEmptyString,
     materialType: materialTypeSchema,
     examBoard: nonEmptyString,
@@ -553,7 +656,7 @@ export const materialClassificationResultSchema = z
     folderPath: nonEmptyString,
     questionBlocks: z.array(questionBlockSchema),
     answerBlocks: z.array(answerBlockSchema),
-    content: z.array(classificationContentSchema).min(1),
+    content: z.array(noteBlockSchema).min(1),
     linkedTopics: z.array(nonEmptyString),
     linkedErrors: z.array(nonEmptyString),
     confidence: z.number().min(0).max(1),
@@ -586,13 +689,12 @@ export const materialClassificationResultSchema = z
     })
   })
 
-export const materialFailureSchema = z.strictObject({
+export const materialFailureSchema = safeStrictObject({
   code: nonEmptyString,
   message: nonEmptyString,
 })
 
-export const materialUploadJobSchema = z
-  .strictObject({
+export const materialUploadJobSchema = safeStrictObject({
     id: nonEmptyString,
     fileName: nonEmptyString,
     mimeType: z.enum([
@@ -607,8 +709,6 @@ export const materialUploadJobSchema = z
     examBoard: optionalNonEmptyString,
     subject: optionalNonEmptyString,
     chapter: optionalNonEmptyString,
-    folderId: optionalNonEmptyString,
-    folderPath: optionalNonEmptyString,
     createdAt: isoDateTimeSchema,
     updatedAt: isoDateTimeSchema,
     progress: z.number().min(0).max(100),
@@ -622,8 +722,6 @@ export const materialUploadJobSchema = z
       'examBoard',
       'subject',
       'chapter',
-      'folderId',
-      'folderPath',
     ] as const) {
       const metadata = value[field]
       if (metadata !== undefined && isRawCarrier(metadata)) {
@@ -678,7 +776,7 @@ export interface NoteFolderContract {
 }
 
 export const noteFolderSchema: z.ZodType<NoteFolderContract> = z.lazy(() =>
-  z.strictObject({
+  safeStrictObject({
     id: nonEmptyString,
     name: nonEmptyString,
     noteCount: z.number().int().nonnegative(),
@@ -688,7 +786,7 @@ export const noteFolderSchema: z.ZodType<NoteFolderContract> = z.lazy(() =>
   }),
 )
 
-export const settingsSchema = z.strictObject({
+export const settingsSchema = safeStrictObject({
   tone: z.number().min(0).max(100),
   dailyGoalHours: z.number().min(1).max(12),
   reminderTask: z.boolean(),
@@ -704,8 +802,7 @@ export const defaultSettings = settingsSchema.parse({
   reminderStudyTime: false,
 })
 
-export const settingsPatchSchema = z
-  .strictObject({
+export const settingsPatchSchema = safeStrictObject({
     dailyGoalHours: z.number().min(1).max(12).optional(),
     reminderErrorReview: z.boolean().optional(),
     reminderStudyTime: z.boolean().optional(),
@@ -714,25 +811,25 @@ export const settingsPatchSchema = z
     message: 'At least one setting is required',
   })
 
-export const greetingSchema = z.strictObject({
+export const greetingSchema = safeStrictObject({
   message: nonEmptyString,
   fallback: nonEmptyString,
 })
 
-export const moduleStatsSchema = z.strictObject({
+export const moduleStatsSchema = safeStrictObject({
   notesCount: z.number().int().nonnegative(),
   weeklyExercises: z.number().int().nonnegative(),
   latestAccuracy: z.number().min(0).max(100),
   pendingErrorReview: z.number().int().nonnegative(),
 })
 
-export const knowledgeHeatmapItemSchema = z.strictObject({
+export const knowledgeHeatmapItemSchema = safeStrictObject({
   topicId: nonEmptyString,
   topicName: nonEmptyString,
   mastery: z.number().min(0).max(100),
 })
 
-export const learningSummarySchema = z.strictObject({
+export const learningSummarySchema = safeStrictObject({
   overallMastery: z.number().min(0).max(100),
   weeklyCompleted: z.number().int().nonnegative(),
   weeklyTotal: z.number().int().nonnegative(),
@@ -741,13 +838,13 @@ export const learningSummarySchema = z.strictObject({
   knowledgeHeatmap: z.array(knowledgeHeatmapItemSchema),
 })
 
-export const sessionAttemptSchema = z.strictObject({
+export const sessionAttemptSchema = safeStrictObject({
   answer: z.string(),
   submittedAt: evidenceTimeSchema,
   isCorrect: z.boolean(),
 })
 
-export const sessionResultSchema = z.strictObject({
+export const sessionResultSchema = safeStrictObject({
   status: z.enum(['correct', 'wrong', 'unanswered']),
   attempts: z.array(sessionAttemptSchema),
   hintsUsed: z.number().int().min(0).max(5),
@@ -755,14 +852,13 @@ export const sessionResultSchema = z.strictObject({
   handwritingUsed: z.boolean().optional(),
 })
 
-export const sessionQuestionSchema = z
-  .strictObject({
+export const sessionQuestionSchema = safeStrictObject({
     ...questionShape,
     result: sessionResultSchema,
   })
   .superRefine((value, context) => refineQuestion(value, context))
 
-export const sessionSchema = z.strictObject({
+export const sessionSchema = safeStrictObject({
   sessionId: nonEmptyString,
   taskId: nullableNonEmptyString,
   taskTitle: nonEmptyString,
@@ -773,7 +869,7 @@ export const sessionSchema = z.strictObject({
   questions: z.array(sessionQuestionSchema).min(1),
 })
 
-export const bootstrapDataSchema = z.strictObject({
+export const bootstrapDataSchema = safeStrictObject({
   student: studentSchema,
   tasks: z.array(taskSchema),
   taskAdjustments: z.array(taskAdjustmentSchema),

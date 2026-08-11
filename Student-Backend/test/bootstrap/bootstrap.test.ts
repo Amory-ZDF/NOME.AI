@@ -459,6 +459,106 @@ describe('GET /api/student/bootstrap', () => {
     expect(response.body).not.toMatch(/Zod|payload|expected|stack/i)
   })
 
+  it.each([
+    [
+      'Task.dueAt',
+      async () =>
+        prisma.task.update({
+          where: { studentId_id: { studentId: primaryStudentId, id: 'task-a' } },
+          data: { dueAt: new Date('2026-08-22T12:00:00.000Z') },
+        }),
+    ],
+    [
+      'Task.dueAt null presence',
+      async () =>
+        prisma.task.update({
+          where: { studentId_id: { studentId: primaryStudentId, id: 'task-a' } },
+          data: { dueAt: null },
+        }),
+    ],
+    [
+      'TaskAdjustment.createdAt',
+      async () =>
+        prisma.taskAdjustment.update({
+          where: {
+            studentId_id: {
+              studentId: primaryStudentId,
+              id: 'adjustment-a',
+            },
+          },
+          data: { createdAt: new Date('2026-08-12T09:00:00.000Z') },
+        }),
+    ],
+    [
+      'Session.submittedAt',
+      async () =>
+        prisma.session.update({
+          where: { studentId_id: { studentId: primaryStudentId, id: 'session-a' } },
+          data: { submittedAt: new Date('2026-08-12T12:00:00.000Z') },
+        }),
+    ],
+    [
+      'ErrorItem.lastOccurredAt',
+      async () =>
+        prisma.errorItem.update({
+          where: { studentId_id: { studentId: primaryStudentId, id: 'error-a' } },
+          data: { lastOccurredAt: new Date('2026-08-12T12:00:00.000Z') },
+        }),
+    ],
+    [
+      'Note.updatedAtValue',
+      async () =>
+        prisma.note.update({
+          where: { studentId_id: { studentId: primaryStudentId, id: 'note-a' } },
+          data: { updatedAtValue: new Date('2026-08-12T00:00:00.000Z') },
+        }),
+    ],
+    [
+      'MaterialUploadJob.createdAtValue',
+      async () =>
+        prisma.materialUploadJob.update({
+          where: { studentId_id: { studentId: primaryStudentId, id: 'upload-a' } },
+          data: { createdAtValue: new Date('2026-08-12T10:00:00.000Z') },
+        }),
+    ],
+  ])('rejects %s scalar/payload corruption without filtering', async (_field, corrupt) => {
+    await insertStudentFixture(primaryStudentId, 'Primary')
+    await corrupt()
+    const app = createApp()
+
+    const response = await app.inject({ method: 'GET', url: '/api/student/bootstrap' })
+    await app.close()
+
+    expect(response.statusCode).toBe(500)
+    expect(response.json()).toEqual({
+      code: 'STORED_DATA_INVALID',
+      message: 'Stored student data is invalid',
+      data: null,
+    })
+    expect(response.body).not.toMatch(/payload|Prisma|stack|expected/i)
+  })
+
+  it('accepts equivalent scalar and payload datetimes expressed with offsets', async () => {
+    await insertStudentFixture(primaryStudentId, 'Primary')
+    await prisma.task.update({
+      where: { studentId_id: { studentId: primaryStudentId, id: 'task-z' } },
+      data: {
+        payload: toInputJson({
+          ...task('task-z', 'Primary Z task', 'pending'),
+          dueAt: '2026-08-20T13:00:00.000+01:00',
+        }),
+      },
+    })
+    const app = createApp()
+
+    const response = await app.inject({ method: 'GET', url: '/api/student/bootstrap' })
+    await app.close()
+
+    expect(response.statusCode).toBe(200)
+    expect(response.json().data.tasks.find(({ id }: { id: string }) => id === 'task-z'))
+      .toMatchObject({ dueAt: '2026-08-20T13:00:00.000+01:00' })
+  })
+
   it('publishes the bootstrap route in OpenAPI', async () => {
     const app = createApp()
 
