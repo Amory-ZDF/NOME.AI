@@ -18,14 +18,21 @@ function contractError(cause: NoteContractError): never {
         : 'Change metadata is invalid'
   throw new AppError(message, 400, cause.code)
 }
-function staleChange(): never { throw new AppError('Change timestamp must be later than the current note', 409, 'STALE_CHANGE') }
+function staleChange(): never { throw new AppError('Change timestamp is stale', 400, 'STALE_CHANGE') }
 function noVersion(): never { throw new AppError('There is no previous note version to restore', 409, 'NO_NOTE_VERSION') }
 function sameInstant(value: string, stored: Date): boolean {
   return Date.parse(value) === stored.getTime()
 }
-function isStrictlyLater(value: string, current: string): boolean {
-  return Date.parse(value) > Date.parse(current)
+function isStrictlyLater(value: string, note: Note): boolean {
+  const latest = Math.max(
+    Date.parse(note.createdAt),
+    Date.parse(note.updatedAt),
+    ...note.versions.map((snapshot) => Date.parse(snapshot.changedAt)),
+  )
+  return Date.parse(value) > latest
 }
+class NoteWriteConflict extends Error {}
+const mutationRetries = 3
 function parseStored(row: StoredNoteRow): Note {
   try {
     const note = normalizePersistedNote(row.payload)
@@ -90,18 +97,31 @@ export class NoteService {
       if (cause instanceof NoteContractError) return contractError(cause)
       throw cause
     }
-    return this.prisma.$transaction(async (transaction) => {
-      const row = await transaction.note.findUnique({ where: { studentId_id: { studentId: this.studentId, id: noteId } } })
-      if (row === null) noteNotFound()
-      const note = parseStored(row)
-      const updated = applyNotePatch(note, command)
-      if (updated === note) return note
-      await transaction.note.update({
-        where: { studentId_id: { studentId: this.studentId, id: noteId } },
-        data: { version: updated.version, updatedAtValue: new Date(updated.updatedAt), payload: toInputJson(updated) },
-      })
-      return updated
-    })
+    for (let attempt = 0; attempt < mutationRetries; attempt += 1) {
+      try {
+        return await this.prisma.$transaction(async (transaction) => {
+          const row = await transaction.note.findUnique({ where: { studentId_id: { studentId: this.studentId, id: noteId } } })
+          if (row === null) noteNotFound()
+          const note = parseStored(row)
+          const updated = applyNotePatch(note, command)
+          if (updated === note) return note
+          if (!isStrictlyLater(command.changedAt, note)) staleChange()
+          const write = await transaction.note.updateMany({
+            where: { studentId: this.studentId, id: noteId, version: note.version },
+            data: { version: updated.version, updatedAtValue: new Date(updated.updatedAt), payload: toInputJson(updated) },
+          })
+          if (write.count !== 1) throw new NoteWriteConflict()
+          return updated
+        })
+      } catch (cause) {
+        if (cause instanceof NoteWriteConflict) {
+          if (attempt + 1 < mutationRetries) continue
+          return staleChange()
+        }
+        throw cause
+      }
+    }
+    return staleChange()
   }
 
   async organize(noteId: string, rawCommand: unknown): Promise<Note> {
@@ -110,24 +130,35 @@ export class NoteService {
       if (cause instanceof NoteContractError) return contractError(cause)
       throw cause
     }
-    return this.prisma.$transaction(async (transaction) => {
-      const row = await transaction.note.findUnique({ where: { studentId_id: { studentId: this.studentId, id: noteId } } })
-      if (row === null) noteNotFound()
-      const note = parseStored(row)
-      if (!isStrictlyLater(command.changedAt, note.updatedAt)) staleChange()
-      let organized: Note
-      try { organized = applyNoteOrganization(note, command) } catch (cause) {
-        if (cause instanceof NoteContractError) return contractError(cause)
+    for (let attempt = 0; attempt < mutationRetries; attempt += 1) {
+      try {
+        return await this.prisma.$transaction(async (transaction) => {
+          const row = await transaction.note.findUnique({ where: { studentId_id: { studentId: this.studentId, id: noteId } } })
+          if (row === null) noteNotFound()
+          const note = parseStored(row)
+          let organized: Note
+          try { organized = applyNoteOrganization(note, command) } catch (cause) {
+            if (cause instanceof NoteContractError) return contractError(cause)
+            throw cause
+          }
+          if (organized === note) return note
+          if (!isStrictlyLater(command.changedAt, note)) staleChange()
+          const write = await transaction.note.updateMany({
+            where: { studentId: this.studentId, id: noteId, version: note.version },
+            data: { version: organized.version, updatedAtValue: new Date(organized.updatedAt), payload: toInputJson(organized) },
+          })
+          if (write.count !== 1) throw new NoteWriteConflict()
+          return organized
+        })
+      } catch (cause) {
+        if (cause instanceof NoteWriteConflict) {
+          if (attempt + 1 < mutationRetries) continue
+          return staleChange()
+        }
         throw cause
       }
-      if (organized === note) return note
-      const write = await transaction.note.updateMany({
-        where: { studentId: this.studentId, id: noteId, version: note.version },
-        data: { version: organized.version, updatedAtValue: new Date(organized.updatedAt), payload: toInputJson(organized) },
-      })
-      if (write.count !== 1) staleChange()
-      return organized
-    })
+    }
+    return staleChange()
   }
 
   async undo(noteId: string, rawCommand: unknown): Promise<Note> {
@@ -139,23 +170,34 @@ export class NoteService {
       if (cause instanceof NoteContractError) return contractError(cause)
       throw cause
     }
-    return this.prisma.$transaction(async (transaction) => {
-      const row = await transaction.note.findUnique({ where: { studentId_id: { studentId: this.studentId, id: noteId } } })
-      if (row === null) noteNotFound()
-      const note = parseStored(row)
-      if (!isStrictlyLater(changedAt, note.updatedAt)) staleChange()
-      let undone: Note | null
-      try { undone = undoLastNoteVersion(note, changedAt) } catch (cause) {
-        if (cause instanceof NoteContractError) return contractError(cause)
+    for (let attempt = 0; attempt < mutationRetries; attempt += 1) {
+      try {
+        return await this.prisma.$transaction(async (transaction) => {
+          const row = await transaction.note.findUnique({ where: { studentId_id: { studentId: this.studentId, id: noteId } } })
+          if (row === null) noteNotFound()
+          const note = parseStored(row)
+          let undone: Note | null
+          try { undone = undoLastNoteVersion(note, changedAt) } catch (cause) {
+            if (cause instanceof NoteContractError) return contractError(cause)
+            throw cause
+          }
+          if (undone === null) noVersion()
+          if (!isStrictlyLater(changedAt, note)) staleChange()
+          const write = await transaction.note.updateMany({
+            where: { studentId: this.studentId, id: noteId, version: note.version },
+            data: { version: undone.version, updatedAtValue: new Date(undone.updatedAt), payload: toInputJson(undone) },
+          })
+          if (write.count !== 1) throw new NoteWriteConflict()
+          return undone
+        })
+      } catch (cause) {
+        if (cause instanceof NoteWriteConflict) {
+          if (attempt + 1 < mutationRetries) continue
+          return staleChange()
+        }
         throw cause
       }
-      if (undone === null) noVersion()
-      const write = await transaction.note.updateMany({
-        where: { studentId: this.studentId, id: noteId, version: note.version },
-        data: { version: undone.version, updatedAtValue: new Date(undone.updatedAt), payload: toInputJson(undone) },
-      })
-      if (write.count !== 1) staleChange()
-      return undone
-    })
+    }
+    return staleChange()
   }
 }

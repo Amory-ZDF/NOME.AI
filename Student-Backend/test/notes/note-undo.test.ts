@@ -2,6 +2,7 @@ import { afterAll, beforeEach, describe, expect, it } from 'vitest'
 
 import { buildApp } from '../../src/app.js'
 import { parseEnv } from '../../src/config/env.js'
+import { noteSchema } from '../../src/contracts/student-contracts.js'
 import { toInputJson } from '../../src/db/json.js'
 import { createTestPrisma, resetDatabase, TEST_DATABASE_URL } from '../helpers/database.js'
 
@@ -18,7 +19,7 @@ const current = {
 async function insertStudent(id = studentId) {
   await prisma.student.create({ data: { id, name: id, avatar: null, joinedDays: 1, gradeInfo: 'Year 12', greeting: toInputJson({ message: 'Hello', fallback: 'Hello' }), moduleStats: toInputJson({ notesCount: 0, weeklyExercises: 0, latestAccuracy: 0, pendingErrorReview: 0 }), learningSummary: toInputJson({ overallMastery: 0, weeklyCompleted: 0, weeklyTotal: 0, overdueTasks: [], weakTopics: [], knowledgeHeatmap: [] }) } })
 }
-async function insertNote(note: { id: string; version: number; updatedAt: string } = current, id = studentId) { await prisma.note.create({ data: { id: note.id, studentId: id, version: note.version, updatedAtValue: new Date(note.updatedAt), payload: toInputJson(note) } }) }
+async function insertNote(note: { id: string; version: number; updatedAt: string } & Record<string, unknown> = current, id = studentId) { await prisma.note.create({ data: { id: note.id, studentId: id, version: note.version, updatedAtValue: new Date(note.updatedAt), payload: toInputJson(note) } }) }
 function createApp(id = studentId) { return buildApp({ env: parseEnv({ NODE_ENV: 'test', DATABASE_URL: TEST_DATABASE_URL, STUDENT_ID: id, LOG_LEVEL: 'silent' }), prisma }) }
 
 beforeEach(async () => resetDatabase(prisma))
@@ -40,6 +41,22 @@ describe('POST /api/notes/{id}/undo', () => {
     expect(response.statusCode).toBe(200); expect(response.json().data.note.source).toBe('ai_organized')
   })
 
+  it('accepts a legacy snapshot with no source and preserves the current legal source through a deep undo trace', async () => {
+    const { source: _source, ...sourceLessSnapshot } = current.versions[0]!
+    const legacy = { ...current, versions: [sourceLessSnapshot] }
+    expect(noteSchema.safeParse(legacy).success).toBe(true)
+    await insertStudent(); await insertNote(legacy); const app = createApp()
+    const changedAt = '2026-08-10T11:00:00.000Z'
+    const response = await app.inject({ method: 'POST', url: `/api/notes/${current.id}/undo`, payload: { changedAt } }); await app.close()
+    expect(response.statusCode).toBe(200)
+    expect(response.json().data.note).toMatchObject({
+      title: prior.title, folderId: prior.folderId, folderPath: prior.folderPath, tags: prior.tags,
+      content: prior.content, linkedTopics: prior.linkedTopics, linkedErrors: prior.linkedErrors,
+      source: current.source, updatedAt: changedAt, version: 3,
+      versions: [sourceLessSnapshot, { version: 2, source: current.source, changedAt, reason: 'undo' }],
+    })
+  })
+
   it('rejects missing history, stale timestamps, replays, and out-of-order timestamps without mutation', async () => {
     await insertStudent(); await insertNote(prior); const before = await prisma.note.findUnique({ where: { studentId_id: { studentId, id: prior.id } } }); const app = createApp()
     const noHistory = await app.inject({ method: 'POST', url: `/api/notes/${prior.id}/undo`, payload: { changedAt: '2026-08-10T11:00:00.000Z' } }); await app.close()
@@ -51,8 +68,10 @@ describe('POST /api/notes/{id}/undo', () => {
     const fresh = await app2.inject({ method: 'POST', url: `/api/notes/${current.id}/undo`, payload: { changedAt: '2026-08-10T11:00:00.000Z' } })
     const replay = await app2.inject({ method: 'POST', url: `/api/notes/${current.id}/undo`, payload: { changedAt: '2026-08-10T11:00:00.000Z' } })
     const outOfOrder = await app2.inject({ method: 'POST', url: `/api/notes/${current.id}/undo`, payload: { changedAt: '2026-08-10T10:30:00.000Z' } }); await app2.close()
-    expect(stale.statusCode).toBe(409); expect(fresh.statusCode).toBe(200); expect(replay.statusCode).toBe(409); expect(outOfOrder.statusCode).toBe(409)
-    expect(stale.json().code).toBe('STALE_CHANGE'); expect(replay.json().code).toBe('STALE_CHANGE'); expect(outOfOrder.json().code).toBe('STALE_CHANGE')
+    expect(stale.statusCode).toBe(400); expect(fresh.statusCode).toBe(200); expect(replay.statusCode).toBe(400); expect(outOfOrder.statusCode).toBe(400)
+    expect(stale.json()).toEqual({ code: 'STALE_CHANGE', message: 'Change timestamp is stale', data: null })
+    expect(replay.json()).toEqual({ code: 'STALE_CHANGE', message: 'Change timestamp is stale', data: null })
+    expect(outOfOrder.json()).toEqual({ code: 'STALE_CHANGE', message: 'Change timestamp is stale', data: null })
     await expect(prisma.note.findUnique({ where: { studentId_id: { studentId, id: current.id } } })).resolves.toMatchObject({ version: 3 })
   })
 
@@ -62,5 +81,69 @@ describe('POST /api/notes/{id}/undo', () => {
     const response = await app.inject({ method: 'POST', url: `/api/notes/${current.id}/undo`, payload: { changedAt: '2026-08-10T11:00:00.000Z' } }); await app.close()
     expect(response.statusCode).toBe(404); expect(response.json()).toEqual({ code: 'NOT_FOUND', message: 'Note not found', data: null })
     await expect(prisma.note.findUnique({ where: { studentId_id: { studentId: other, id: current.id } } })).resolves.toEqual(before)
+  })
+
+  it('uses the latest lifecycle evidence across clients so stale edits and undos cannot roll history backward', async () => {
+    await insertStudent(); await insertNote({ ...current, version: 1, versions: [], source: 'typed', updatedAt: prior.updatedAt, title: prior.title, tags: prior.tags, linkedTopics: prior.linkedTopics, aiSuggestions: [{ id: 'tag', type: 'tag', value: 'organized' }] })
+    const first = createApp(); const second = createApp()
+    const organized = await first.inject({ method: 'POST', url: `/api/notes/${current.id}/organize`, payload: { suggestionIds: ['tag'], changedAt: '2026-08-10T11:00:01.000Z' } })
+    const stalePatch = await second.inject({ method: 'PATCH', url: `/api/notes/${current.id}`, payload: { title: 'stale edit', changedAt: '2026-08-10T11:00:00.000Z' } })
+    const staleUndo = await second.inject({ method: 'POST', url: `/api/notes/${current.id}/undo`, payload: { changedAt: '2026-08-10T11:00:00.500Z' } })
+    const noOp = await second.inject({ method: 'PATCH', url: `/api/notes/${current.id}`, payload: { title: prior.title, changedAt: '2026-08-10T11:00:00.000Z' } })
+    await first.close(); await second.close()
+    expect(organized.statusCode).toBe(200)
+    expect(stalePatch.statusCode).toBe(400); expect(stalePatch.json()).toEqual({ code: 'STALE_CHANGE', message: 'Change timestamp is stale', data: null })
+    expect(staleUndo.statusCode).toBe(400); expect(staleUndo.json()).toEqual({ code: 'STALE_CHANGE', message: 'Change timestamp is stale', data: null })
+    expect(noOp.statusCode).toBe(200); expect(noOp.json().data.note).toMatchObject({ version: 2, updatedAt: '2026-08-10T11:00:01.000Z' })
+    const stored = await prisma.note.findUniqueOrThrow({ where: { studentId_id: { studentId, id: current.id } } })
+    expect(stored).toMatchObject({ version: 2, updatedAtValue: new Date('2026-08-10T11:00:01.000Z') })
+  })
+
+  it('uses snapshot evidence as well as top-level updatedAt when rejecting a retrograde PATCH', async () => {
+    const futureHistory = {
+      ...current,
+      updatedAt: '2026-08-10T11:00:00.000Z',
+      versions: [{ ...current.versions[0]!, changedAt: '2026-08-10T11:00:01.000Z' }],
+    }
+    await insertStudent(); await insertNote(futureHistory)
+    const before = await prisma.note.findUnique({ where: { studentId_id: { studentId, id: current.id } } }); const app = createApp()
+    const response = await app.inject({ method: 'PATCH', url: `/api/notes/${current.id}`, payload: { title: 'retrograde', changedAt: '2026-08-10T11:00:00.500Z' } }); await app.close()
+    expect(response.statusCode).toBe(400)
+    expect(response.json()).toEqual({ code: 'STALE_CHANGE', message: 'Change timestamp is stale', data: null })
+    await expect(prisma.note.findUnique({ where: { studentId_id: { studentId, id: current.id } } })).resolves.toEqual(before)
+  })
+
+  it('publishes legacy snapshot source as optional in OpenAPI while retaining the strict undo body', async () => {
+    const app = createApp(); const docs = await app.inject({ method: 'GET', url: '/documentation/json' }); await app.close()
+    const document = docs.json()
+    const findSnapshot = (value: unknown): { required?: string[] } | undefined => {
+      if (value === null || typeof value !== 'object') return undefined
+      const schema = value as { properties?: Record<string, unknown>; required?: string[] }
+      if (schema.properties?.changedAt !== undefined && schema.properties.reason !== undefined && schema.properties.linkedTopics !== undefined) return schema
+      return Object.values(value).map(findSnapshot).find((candidate) => candidate !== undefined)
+    }
+    const snapshot = findSnapshot(document.paths['/api/notes/{id}/undo'].post.responses['200'])
+    expect(snapshot).toBeDefined()
+    expect(snapshot?.required).not.toContain('source')
+    const body = document.paths['/api/notes/{id}/undo'].post.requestBody.content['application/json'].schema
+    expect(body.required).toEqual(['changedAt'])
+    expect(body.additionalProperties).toBe(false)
+  })
+
+  it('keeps two independent clients’ later organize commands continuous and monotonic without a lost update', async () => {
+    const seeded = { ...current, version: 1, versions: [], source: 'typed', updatedAt: prior.updatedAt, title: prior.title, tags: prior.tags, linkedTopics: prior.linkedTopics, aiSuggestions: [{ id: 'tag-a', type: 'tag', value: 'first' }, { id: 'tag-b', type: 'tag', value: 'second' }] }
+    await insertStudent(); await insertNote(seeded)
+    const first = createApp(); const second = createApp()
+    const responses = [
+      await first.inject({ method: 'POST', url: `/api/notes/${current.id}/organize`, payload: { suggestionIds: ['tag-a'], changedAt: '2026-08-10T11:00:01.000Z' } }),
+      await second.inject({ method: 'POST', url: `/api/notes/${current.id}/organize`, payload: { suggestionIds: ['tag-b'], changedAt: '2026-08-10T11:00:02.000Z' } }),
+    ]
+    await first.close(); await second.close()
+    expect(responses.map((response) => response.statusCode).sort()).toEqual([200, 200])
+    const stored = await prisma.note.findUniqueOrThrow({ where: { studentId_id: { studentId, id: current.id } } })
+    const payload = stored.payload as typeof current
+    expect(stored.version).toBe(3)
+    expect(payload.versions.map(({ changedAt }) => changedAt)).toEqual(['2026-08-10T11:00:01.000Z', '2026-08-10T11:00:02.000Z'])
+    expect(payload.updatedAt).toBe('2026-08-10T11:00:02.000Z')
   })
 })

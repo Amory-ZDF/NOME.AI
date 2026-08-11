@@ -619,7 +619,7 @@ export const noteVersionSnapshotSchema = safeStrictObject({
   content: z.array(noteBlockSchema),
   linkedTopics: z.array(nonEmptyString),
   linkedErrors: z.array(nonEmptyString),
-  source: noteSourceSchema.nullable(),
+  source: noteSourceSchema.nullable().optional(),
   changedAt: evidenceTimeSchema,
   reason: nonEmptyString,
 })

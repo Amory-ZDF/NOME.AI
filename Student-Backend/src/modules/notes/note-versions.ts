@@ -321,7 +321,7 @@ export function undoLastNoteVersion(note: Note, changedAt: string): Note | null 
     content: target.content,
     linkedTopics: target.linkedTopics,
     linkedErrors: target.linkedErrors,
-    ...(target.source === null ? {} : { source: target.source }),
+    ...(target.source === null || target.source === undefined ? {} : { source: target.source }),
     updatedAt: changedAt,
     version: note.version + 1,
     versions: [...note.versions, snapshot(note, changedAt, 'undo')],
