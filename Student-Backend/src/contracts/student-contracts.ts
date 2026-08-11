@@ -611,7 +611,7 @@ export const noteVersionSnapshotSchema = safeStrictObject({
   reason: nonEmptyString,
 })
 
-export const noteSchema = safeStrictObject({
+const noteShape = {
     id: noteIdSchema,
     title: nonEmptyString,
     materialType: materialTypeSchema.optional(),
@@ -633,7 +633,13 @@ export const noteSchema = safeStrictObject({
     sourceJobId: optionalNonEmptyString,
     version: z.number().int().positive(),
     versions: z.array(noteVersionSnapshotSchema),
-  })
+  }
+
+export const noteCreateCurrentSchema = z.strictObject(noteShape)
+export const noteCreateLegacySchema = z.strictObject((( { version, versions, ...legacy }) => legacy)(noteShape))
+export const noteCreateSchema = z.union([noteCreateCurrentSchema, noteCreateLegacySchema])
+
+export const noteSchema = safeStrictObject(noteShape)
   .superRefine((value, context) => {
     if (value.versions.length !== value.version - 1) {
       context.addIssue({

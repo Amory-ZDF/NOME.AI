@@ -3,22 +3,16 @@ import { validatorCompiler as zodValidatorCompiler, type ZodTypeProvider } from 
 import { z } from 'zod'
 
 import { errorEnvelopeSchema, ok } from '../../common/http/envelope.js'
-import { evidenceTimeSchema, noteIdSchema, noteSchema } from '../../contracts/student-contracts.js'
+import { evidenceTimeSchema, noteBlockSchema, noteCreateSchema, noteIdSchema, noteSchema } from '../../contracts/student-contracts.js'
 import { NoteService } from './note.service.js'
 
 interface NoteRoutesOptions { studentId: string }
 const noteParamsSchema = z.strictObject({ id: noteIdSchema })
 const nonBlank = z.string().min(1).refine((value) => value.trim().length > 0)
-const createNoteBodySchema = z.strictObject({
-  id: noteIdSchema, title: nonBlank, materialType: z.string().optional(), examBoard: nonBlank.optional(), subject: nonBlank.optional(), chapter: nonBlank.optional(),
-  folderId: nonBlank.nullable(), folderPath: nonBlank.nullable(), tags: z.array(nonBlank), linkedTopics: z.array(nonBlank), linkedErrors: z.array(nonBlank),
-  source: z.enum(['typed', 'handwritten', 'photo', 'ai_organized']), createdAt: evidenceTimeSchema, updatedAt: evidenceTimeSchema,
-  content: z.array(z.unknown()), aiSuggestions: z.array(z.unknown()), questionBlocks: z.array(z.unknown()).optional(), answerBlocks: z.array(z.unknown()).optional(), sourceJobId: nonBlank.optional(),
-  version: z.number().int().positive().optional(), versions: z.array(z.unknown()).optional(),
-}).refine((value) => (value.version === undefined) === (value.versions === undefined), { message: 'version and versions must be supplied together' })
+const createNoteBodySchema = noteCreateSchema
 const notePatchBodySchema = z.strictObject({
   title: nonBlank.optional(), folderId: nonBlank.nullable().optional(), folderPath: nonBlank.nullable().optional(),
-  tags: z.array(nonBlank).optional(), content: z.array(z.unknown()).optional(), linkedTopics: z.array(nonBlank).optional(), linkedErrors: z.array(nonBlank).optional(),
+  tags: z.array(nonBlank).optional(), content: z.array(noteBlockSchema).optional(), linkedTopics: z.array(nonBlank).optional(), linkedErrors: z.array(nonBlank).optional(),
   changedAt: evidenceTimeSchema.optional(), updatedAt: evidenceTimeSchema.optional(), reason: nonBlank.optional(),
 }).refine((value) => value.changedAt !== undefined || value.updatedAt !== undefined, { message: 'changedAt or updatedAt is required' })
 const noteRouteValidatorCompiler: FastifySchemaCompiler<any> = (routeSchema) => (

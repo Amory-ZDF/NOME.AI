@@ -182,7 +182,10 @@ describe('notes create and list', () => {
     const patch = docs.json().paths['/api/notes/{id}'].patch.requestBody.content['application/json'].schema
     expect(post).not.toEqual({})
     expect(patch).not.toEqual({})
+    expect(post.anyOf).toHaveLength(2)
+    expect(post.anyOf.every((branch: { additionalProperties?: boolean }) => branch.additionalProperties === false)).toBe(true)
     expect(JSON.stringify({ schemas, post, patch })).toContain('changedAt')
+    expect(JSON.stringify({ schemas, post, patch })).toContain('class_note')
     expect(JSON.stringify({ schemas, post, patch })).toContain('maxLength')
   })
 
