@@ -161,4 +161,49 @@ describe('notes create and list', () => {
     expect(Object.keys(docs.json().paths['/api/notes'].post.responses).sort()).toEqual(['200', '400', '404', '409', '413', '415', '500'])
     expect(Object.keys(docs.json().paths['/api/notes/{id}'].patch.responses).sort()).toEqual(['200', '400', '404', '409', '413', '415', '500'])
   })
+
+  it('enforces the same 100-character safe id boundary on create and patch', async () => {
+    await insertStudent(); const app = createApp()
+    const exact = `a${'你'.repeat(99)}`
+    const created = await app.inject({ method: 'POST', url: '/api/notes', payload: note(exact) })
+    const patched = await app.inject({ method: 'PATCH', url: `/api/notes/${encodeURIComponent(exact)}`, payload: { title: 'patched', changedAt: '2026-08-10T11:00:00.000Z' } })
+    const tooLong = await app.inject({ method: 'POST', url: '/api/notes', payload: note('x'.repeat(101)) })
+    const control = await app.inject({ method: 'POST', url: '/api/notes', payload: note('bad\u0000id') })
+    await app.close()
+    expect(created.statusCode).toBe(200); expect(patched.statusCode).toBe(200)
+    expect(tooLong.statusCode).toBe(400); expect(control.statusCode).toBe(400)
+    await expect(prisma.note.count({ where: { studentId } })).resolves.toBe(1)
+  })
+
+  it('publishes strict public note ingress schemas rather than anonymous bodies', async () => {
+    const app = createApp(); const docs = await app.inject({ method: 'GET', url: '/documentation/json' }); await app.close()
+    const schemas = docs.json().components.schemas
+    const post = docs.json().paths['/api/notes'].post.requestBody.content['application/json'].schema
+    const patch = docs.json().paths['/api/notes/{id}'].patch.requestBody.content['application/json'].schema
+    expect(post).not.toEqual({})
+    expect(patch).not.toEqual({})
+    expect(JSON.stringify({ schemas, post, patch })).toContain('changedAt')
+    expect(JSON.stringify({ schemas, post, patch })).toContain('maxLength')
+  })
+
+  it('migrates a valid legacy note once during GET without touching a different student', async () => {
+    await insertStudent(); await insertStudent(otherStudentId)
+    const legacy = note('legacy-note')
+    const otherLegacy = note('other-legacy')
+    await prisma.note.createMany({ data: [
+      { id: legacy.id, studentId, version: 1, updatedAtValue: new Date(legacy.updatedAt), payload: toInputJson(legacy) },
+      { id: otherLegacy.id, studentId: otherStudentId, version: 1, updatedAtValue: new Date(otherLegacy.updatedAt), payload: toInputJson(otherLegacy) },
+    ] })
+    const app = createApp()
+    const first = await app.inject({ method: 'GET', url: '/api/notes' })
+    const afterFirst = await prisma.note.findUnique({ where: { studentId_id: { studentId, id: legacy.id } } })
+    const second = await app.inject({ method: 'GET', url: '/api/notes' })
+    const afterSecond = await prisma.note.findUnique({ where: { studentId_id: { studentId, id: legacy.id } } })
+    const other = await prisma.note.findUnique({ where: { studentId_id: { studentId: otherStudentId, id: otherLegacy.id } } })
+    await app.close()
+    expect(first.statusCode).toBe(200); expect(second.statusCode).toBe(200)
+    expect(afterFirst?.payload).toEqual({ ...legacy, version: 1, versions: [] })
+    expect(afterSecond).toEqual(afterFirst)
+    expect(other?.payload).toEqual(otherLegacy)
+  })
 })

@@ -35,6 +35,7 @@ export const sessionIdSchema = z
 // Error ids are public route parameters as well as persisted client ids. Keep
 // their ingress boundary identical to the router's reachable parameter limit.
 export const errorIdSchema = sessionIdSchema
+export const noteIdSchema = sessionIdSchema
 
 function isCalendarDate(value: string): boolean {
   const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value)
@@ -611,7 +612,7 @@ export const noteVersionSnapshotSchema = safeStrictObject({
 })
 
 export const noteSchema = safeStrictObject({
-    id: nonEmptyString,
+    id: noteIdSchema,
     title: nonEmptyString,
     materialType: materialTypeSchema.optional(),
     examBoard: optionalNonEmptyString,

@@ -2,7 +2,7 @@ import { AppError } from '../../common/errors/app-error.js'
 import type { Note } from '../../contracts/student-contracts.js'
 import type { StudentPrisma } from '../../db/client.js'
 import { toInputJson } from '../../db/json.js'
-import { applyNotePatch, normalizePersistedNote, sanitizeCreatedNote, sanitizeNotePatchCommand, NoteContractError } from './note-versions.js'
+import { applyNotePatch, hasLegacyVersionFields, normalizePersistedNote, sanitizeCreatedNote, sanitizeNotePatchCommand, NoteContractError } from './note-versions.js'
 
 interface StoredNoteRow { id: string; studentId: string; version: number; updatedAtValue: Date; payload: unknown }
 
@@ -39,10 +39,21 @@ export class NoteService {
   constructor(private readonly prisma: StudentPrisma, private readonly studentId: string) {}
 
   async list(): Promise<Note[]> {
-    const rows = await this.prisma.note.findMany({
-      where: { studentId: this.studentId }, orderBy: [{ updatedAtValue: 'desc' }, { id: 'asc' }],
+    return this.prisma.$transaction(async (transaction) => {
+      const rows = await transaction.note.findMany({
+        where: { studentId: this.studentId }, orderBy: [{ updatedAtValue: 'desc' }, { id: 'asc' }],
+      })
+      return Promise.all(rows.map(async (row) => {
+        const note = parseStored(row)
+        if (hasLegacyVersionFields(row.payload)) {
+          await transaction.note.update({
+            where: { studentId_id: { studentId: this.studentId, id: row.id } },
+            data: { version: note.version, updatedAtValue: new Date(note.updatedAt), payload: toInputJson(note) },
+          })
+        }
+        return note
+      }))
     })
-    return rows.map(parseStored)
   }
 
   async create(rawNote: unknown): Promise<Note> {

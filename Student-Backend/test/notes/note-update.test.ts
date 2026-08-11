@@ -69,6 +69,15 @@ describe('PATCH /api/notes/{id}', () => {
     expect(empty.json().data.note.version).toBe(3)
   })
 
+  it('treats a key-reordered but JSON-equivalent content patch as a no-op', async () => {
+    await insertStudent(); await insertNote(); const app = createApp()
+    await prisma.note.update({ where: { studentId_id: { studentId, id: original.id } }, data: { payload: toInputJson({ ...original, content: [{ t: 'list', v: 'one', reference: 'object://one', alt: 'one' }] }) } })
+    const response = await app.inject({ method: 'PATCH', url: `/api/notes/${original.id}`, payload: { content: [{ alt: 'one', reference: 'object://one', v: 'one', t: 'list' }], changedAt: '2026-08-10T11:00:00.000Z' } })
+    await app.close()
+    expect(response.statusCode).toBe(200)
+    expect(response.json().data.note).toMatchObject({ version: 1, updatedAt: original.updatedAt, versions: [] })
+  })
+
   it('returns a safe not-found response and never creates or changes a note', async () => {
     await insertStudent(); const app = createApp()
     const response = await app.inject({ method: 'PATCH', url: '/api/notes/missing', payload: { title: 'No note', changedAt: '2026-08-10T11:00:00.000Z' } })
