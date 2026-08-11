@@ -11,11 +11,12 @@ import {
 import { z } from 'zod'
 
 import { installErrorHandlers } from './common/http/error-handler.js'
-import { ok } from './common/http/envelope.js'
+import { fail, ok } from './common/http/envelope.js'
 import { serializeError } from './common/logging/error-serializer.js'
 import type { Env } from './config/env.js'
 import type { StudentPrisma } from './db/client.js'
 import { bootstrapRoutes } from './modules/bootstrap/bootstrap.routes.js'
+import { exerciseRoutes } from './modules/exercises/exercise.routes.js'
 import { settingsRoutes } from './modules/settings/settings.routes.js'
 import { taskRoutes } from './modules/tasks/task.routes.js'
 
@@ -38,6 +39,13 @@ const healthEnvelopeSchema = z.object({
 
 export function buildApp({ env, loggerStream, prisma, now = () => new Date() }: BuildAppOptions) {
   const app = Fastify({
+    routerOptions: {
+      onBadUrl: (_path, _request, response) => {
+        response.statusCode = 400
+        response.setHeader('content-type', 'application/json; charset=utf-8')
+        response.end(JSON.stringify(fail('INVALID_INPUT', 'Invalid request')))
+      },
+    },
     logger: {
       level: env.LOG_LEVEL,
       serializers: {
@@ -113,6 +121,7 @@ export function buildApp({ env, loggerStream, prisma, now = () => new Date() }: 
   })
 
   app.register(bootstrapRoutes, { studentId: env.STUDENT_ID })
+  app.register(exerciseRoutes, { studentId: env.STUDENT_ID })
   app.register(settingsRoutes, { studentId: env.STUDENT_ID })
   app.register(taskRoutes, { studentId: env.STUDENT_ID, now })
 
