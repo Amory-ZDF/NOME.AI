@@ -23,3 +23,34 @@ export async function resetDatabase(prisma: TestPrisma): Promise<void> {
     prisma.student.deleteMany(),
   ])
 }
+
+export async function holdStudentWriteLock(
+  prisma: TestPrisma,
+  studentId: string,
+  holdMilliseconds: number,
+): Promise<() => Promise<void>> {
+  let signalLocked!: () => void
+  let releaseLock!: () => void
+  const locked = new Promise<void>((resolve) => {
+    signalLocked = resolve
+  })
+  const released = new Promise<void>((resolve) => {
+    releaseLock = resolve
+  })
+  const finished = prisma.$transaction(async (transaction) => {
+    await transaction.student.update({
+      where: { id: studentId },
+      data: { joinedDays: { increment: 0 } },
+    })
+    signalLocked()
+    await released
+  }, { timeout: holdMilliseconds + 5_000 })
+  await locked
+  const timer = setTimeout(releaseLock, holdMilliseconds)
+
+  return async () => {
+    clearTimeout(timer)
+    releaseLock()
+    await finished
+  }
+}

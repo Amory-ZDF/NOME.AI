@@ -1,3 +1,5 @@
+import { ZodError } from 'zod'
+
 import { AppError } from '../../common/errors/app-error.js'
 import {
   redoAttemptSchema,
@@ -6,7 +8,7 @@ import {
 } from '../../contracts/student-contracts.js'
 import type { StudentPrisma } from '../../db/client.js'
 import { toInputJson } from '../../db/json.js'
-import type { Prisma } from '../../generated/prisma/client.js'
+import { Prisma } from '../../generated/prisma/client.js'
 import {
   DuplicateErrorIdError,
   assertBatchIdentities,
@@ -37,6 +39,8 @@ class ErrorItemCreateRaceError extends Error {
     this.name = 'ErrorItemCreateRaceError'
   }
 }
+
+const TRANSACTION_RETRY_DELAYS_MS = [25, 50, 100, 200] as const
 
 function studentNotFound(): never {
   throw new AppError('Student not found', 404, 'NOT_FOUND')
@@ -96,6 +100,33 @@ function isErrorItemCreateUniqueViolation(cause: unknown): boolean {
     target.has('studentId') &&
     (target.has('id') || target.has('questionId'))
   )
+}
+
+function isTransientTransactionContention(cause: unknown): boolean {
+  if (cause instanceof AppError || cause instanceof ZodError) return false
+  return cause instanceof Prisma.PrismaClientKnownRequestError &&
+    (cause.code === 'P1008' || cause.code === 'P2034')
+}
+
+function waitForRetry(milliseconds: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, milliseconds))
+}
+
+async function runWithTransactionRetry<T>(operation: () => Promise<T>): Promise<T> {
+  for (let attempt = 0; ; attempt += 1) {
+    try {
+      return await operation()
+    } catch (cause) {
+      const retryDelay = TRANSACTION_RETRY_DELAYS_MS[attempt]
+      const retryable = cause instanceof ErrorItemCreateRaceError ||
+        isTransientTransactionContention(cause)
+      if (!retryable || retryDelay === undefined) {
+        if (cause instanceof ErrorItemCreateRaceError) occurrenceConflict()
+        throw cause
+      }
+      await waitForRetry(retryDelay)
+    }
+  }
 }
 
 function parseStoredError(row: StoredErrorRow, studentId: string): StoredErrorAggregate {
@@ -161,16 +192,7 @@ export class ErrorService {
 
   async upsertBatch(rawItems: readonly ErrorItem[]): Promise<{ errors: ErrorItem[] }> {
     const { items } = errorBatchBodySchema.parse({ items: rawItems })
-
-    for (let attempt = 0; attempt < 2; attempt += 1) {
-      try {
-        return await this.upsertBatchTransaction(items)
-      } catch (cause) {
-        if (!(cause instanceof ErrorItemCreateRaceError)) throw cause
-        if (attempt === 1) occurrenceConflict()
-      }
-    }
-    return occurrenceConflict()
+    return runWithTransactionRetry(() => this.upsertBatchTransaction(items))
   }
 
   private async upsertBatchTransaction(items: readonly ErrorItem[]): Promise<{
@@ -240,6 +262,13 @@ export class ErrorService {
   async addRedo(errorId: string, rawAttempt: RedoAttempt): Promise<{ error: ErrorItem }> {
     const attempt = redoAttemptSchema.parse(rawAttempt)
 
+    return runWithTransactionRetry(() => this.addRedoTransaction(errorId, attempt))
+  }
+
+  private async addRedoTransaction(
+    errorId: string,
+    attempt: RedoAttempt,
+  ): Promise<{ error: ErrorItem }> {
     return this.prisma.$transaction(async (transaction) => {
       const row = await transaction.errorItem.findUnique({
         where: {

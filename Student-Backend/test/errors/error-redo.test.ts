@@ -11,8 +11,10 @@ import { toInputJson } from '../../src/db/json.js'
 import { parseStoredErrorAggregate } from '../../src/modules/errors/error-cards.js'
 import {
   createTestPrisma,
+  holdStudentWriteLock,
   resetDatabase,
   TEST_DATABASE_URL,
+  type TestPrisma,
 } from '../helpers/database.js'
 
 const prisma = createTestPrisma()
@@ -119,7 +121,10 @@ async function insertError(error: ErrorItem, studentId = primaryStudentId): Prom
   })
 }
 
-function createApp(studentId = primaryStudentId) {
+function createApp(
+  studentId = primaryStudentId,
+  client: TestPrisma = prisma,
+) {
   return buildApp({
     env: parseEnv({
       NODE_ENV: 'test',
@@ -127,7 +132,7 @@ function createApp(studentId = primaryStudentId) {
       STUDENT_ID: studentId,
       LOG_LEVEL: 'silent',
     }),
-    prisma,
+    prisma: client,
   })
 }
 
@@ -426,6 +431,63 @@ describe('POST /api/errors/{id}/redo', () => {
       (await prisma.errorItem.findFirstOrThrow()).payload,
     ).error
     expect(stored.redoHistory).toEqual([attempt])
+  })
+
+  it('serializes the same redo through two independent SQLite clients', {
+    timeout: 15_000,
+  }, async () => {
+    await insertStudent()
+    const existing = makeError({ id: 'error-independent-redo' })
+    await insertError(existing)
+    const firstClient = createTestPrisma()
+    const secondClient = createTestPrisma()
+    const blockerClient = createTestPrisma()
+    const firstApp = createApp(primaryStudentId, firstClient)
+    const secondApp = createApp(primaryStudentId, secondClient)
+    const releaseLock = await holdStudentWriteLock(
+      blockerClient,
+      primaryStudentId,
+      125,
+    )
+    const attempt = {
+      attemptedAt: '2026-08-11T12:00:00.000Z',
+      answer: 'x=2',
+      isCorrect: true,
+      timeSpent: 10,
+    }
+
+    try {
+      const responses = await Promise.all([
+        firstApp.inject({
+          method: 'POST',
+          url: `/api/errors/${existing.id}/redo`,
+          payload: attempt,
+        }),
+        secondApp.inject({
+          method: 'POST',
+          url: `/api/errors/${existing.id}/redo`,
+          payload: attempt,
+        }),
+      ])
+
+      expect(responses.map(({ statusCode }) => statusCode).sort()).toEqual([200, 400])
+      expect(responses.find(({ statusCode }) => statusCode === 400)?.json()).toMatchObject({
+        code: 'INVALID_INPUT',
+        data: null,
+      })
+      const stored = parseStoredErrorAggregate(
+        (await prisma.errorItem.findFirstOrThrow({ where: { id: existing.id } })).payload,
+      ).error
+      expect(stored.redoHistory).toEqual([attempt])
+    } finally {
+      await releaseLock()
+      await Promise.all([firstApp.close(), secondApp.close()])
+      await Promise.all([
+        firstClient.$disconnect(),
+        secondClient.$disconnect(),
+        blockerClient.$disconnect(),
+      ])
+    }
   })
 })
 

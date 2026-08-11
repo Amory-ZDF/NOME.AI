@@ -8,6 +8,10 @@ import {
   type ErrorItem,
   type RedoAttempt,
 } from '../../contracts/student-contracts.js'
+import {
+  latestOccurrenceEvidenceInstant,
+  latestReviewLifecycleInstant,
+} from './mastery.js'
 
 function evidenceInstant(value: string): number {
   return Date.parse(value)
@@ -408,10 +412,16 @@ export function mergeErrorAggregates(
     const knownKeys = new Set(current.error.occurrenceRecords.map(({ key }) => key))
     const newRecords = nextIncoming.occurrenceRecords.filter(({ key }) => !knownKeys.has(key))
     if (newRecords.length === 0) continue
+    const latestOccurrenceEvidence = latestOccurrenceEvidenceInstant(current.error)
+    const latestReviewLifecycle = latestReviewLifecycleInstant(current.error)
     if (
       newRecords.some(
-        ({ occurredAt }) =>
-          evidenceInstant(occurredAt) < evidenceInstant(current.error.lastOccurredAt),
+        ({ occurredAt }) => {
+          const occurredAtInstant = evidenceInstant(occurredAt)
+          return occurredAtInstant < latestOccurrenceEvidence ||
+            (latestReviewLifecycle !== undefined &&
+              occurredAtInstant <= latestReviewLifecycle)
+        },
       )
     ) {
       throw new OutOfOrderOccurrenceError()

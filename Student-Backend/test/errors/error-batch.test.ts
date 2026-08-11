@@ -7,8 +7,10 @@ import { toInputJson } from '../../src/db/json.js'
 import { parseStoredErrorAggregate } from '../../src/modules/errors/error-cards.js'
 import {
   createTestPrisma,
+  holdStudentWriteLock,
   resetDatabase,
   TEST_DATABASE_URL,
+  type TestPrisma,
 } from '../helpers/database.js'
 
 const prisma = createTestPrisma()
@@ -96,7 +98,10 @@ async function insertStudent(studentId = primaryStudentId): Promise<void> {
   })
 }
 
-function createApp(studentId = primaryStudentId) {
+function createApp(
+  studentId = primaryStudentId,
+  client: TestPrisma = prisma,
+) {
   return buildApp({
     env: parseEnv({
       NODE_ENV: 'test',
@@ -104,7 +109,7 @@ function createApp(studentId = primaryStudentId) {
       STUDENT_ID: studentId,
       LOG_LEVEL: 'silent',
     }),
-    prisma,
+    prisma: client,
   })
 }
 
@@ -721,6 +726,109 @@ describe('POST /api/errors/batch', () => {
     expect(await durableSnapshot()).toEqual(before)
   })
 
+  it.each([
+    ['before a later redo and accepted verification', '2026-08-11T11:00:00.000Z'],
+    ['at the latest accepted verification boundary', '2026-08-11T13:00:00.000Z'],
+  ])('rejects a recurrence %s without clearing later lifecycle evidence', async (
+    _case,
+    occurredAt,
+  ) => {
+    await insertStudent()
+    const existing = makeError({
+      id: 'error-lifecycle-current',
+      questionId: 'question-lifecycle-current',
+      occurredAt: '2026-08-11T10:00:00.000Z',
+      occurrenceKey: 'session:current:question:question-lifecycle-current',
+      status: 'mastered',
+      redoHistory: [{
+        attemptedAt: '2026-08-11T12:00:00.000Z',
+        answer: 'x=2',
+        isCorrect: true,
+        timeSpent: 20,
+      }],
+      verificationVariantId: 'variant-lifecycle-current',
+      variantVerifiedAt: '2026-08-11T13:00:00.000Z',
+      variantVerification: {
+        variantId: 'variant-lifecycle-current',
+        isCorrect: true,
+        verifiedAt: '2026-08-11T13:00:00.000Z',
+      },
+    })
+    await prisma.errorItem.create({
+      data: {
+        id: existing.id,
+        studentId: primaryStudentId,
+        questionId: existing.questionId,
+        status: existing.status,
+        lastOccurredAt: new Date(existing.lastOccurredAt),
+        payload: toInputJson(existing),
+      },
+    })
+    const before = await durableSnapshot()
+
+    const response = await postBatch([makeError({
+      id: 'error-lifecycle-incoming',
+      questionId: existing.questionId,
+      occurredAt,
+      occurrenceKey: `session:incoming:${occurredAt}:question:${existing.questionId}`,
+    })])
+
+    expect(response.statusCode).toBe(400)
+    expect(response.json()).toMatchObject({ code: 'INVALID_INPUT', data: null })
+    expect(await durableSnapshot()).toEqual(before)
+  })
+
+  it('accepts a recurrence strictly later than all lifecycle evidence and reopens review', async () => {
+    await insertStudent()
+    const existing = makeError({
+      id: 'error-lifecycle-fresh',
+      questionId: 'question-lifecycle-fresh',
+      occurredAt: '2026-08-11T10:00:00.000Z',
+      occurrenceKey: 'session:current:question:question-lifecycle-fresh',
+      status: 'mastered',
+      redoHistory: [{
+        attemptedAt: '2026-08-11T12:00:00.000Z',
+        answer: 'x=2',
+        isCorrect: true,
+        timeSpent: 20,
+      }],
+      verificationVariantId: 'variant-lifecycle-fresh',
+      variantVerifiedAt: '2026-08-11T13:00:00.000Z',
+      variantVerification: {
+        variantId: 'variant-lifecycle-fresh',
+        isCorrect: true,
+        verifiedAt: '2026-08-11T13:00:00.000Z',
+      },
+    })
+    await prisma.errorItem.create({
+      data: {
+        id: existing.id,
+        studentId: primaryStudentId,
+        questionId: existing.questionId,
+        status: existing.status,
+        lastOccurredAt: new Date(existing.lastOccurredAt),
+        payload: toInputJson(existing),
+      },
+    })
+
+    const response = await postBatch([makeError({
+      id: 'error-lifecycle-fresh-incoming',
+      questionId: existing.questionId,
+      occurredAt: '2026-08-11T13:00:00.001Z',
+      occurrenceKey: 'session:fresh:question:question-lifecycle-fresh',
+    })])
+
+    expect(response.statusCode).toBe(200)
+    expect(response.json().data.errors[0]).toMatchObject({
+      id: existing.id,
+      status: 'pending_review',
+      repeatCount: 2,
+      verificationVariantId: null,
+      variantVerifiedAt: null,
+      variantVerification: null,
+    })
+  })
+
   it('keeps student scopes independent even when ids and question ids match', async () => {
     await insertStudent(primaryStudentId)
     await insertStudent(otherStudentId)
@@ -750,6 +858,71 @@ describe('POST /api/errors/batch', () => {
       (await prisma.errorItem.findFirstOrThrow()).payload,
     ).error
     expect(stored.repeatCount).toBe(1)
+  })
+
+  it('converges different recurrences through two independent SQLite clients', {
+    timeout: 15_000,
+  }, async () => {
+    await insertStudent()
+    const firstClient = createTestPrisma()
+    const secondClient = createTestPrisma()
+    const blockerClient = createTestPrisma()
+    const firstApp = createApp(primaryStudentId, firstClient)
+    const secondApp = createApp(primaryStudentId, secondClient)
+    const releaseLock = await holdStudentWriteLock(
+      blockerClient,
+      primaryStudentId,
+      125,
+    )
+    const questionId = 'question-independent-clients'
+    const first = makeError({
+      id: 'error-independent-clients',
+      questionId,
+      occurredAt: '2026-08-11T10:00:00.000Z',
+      occurrenceKey: 'session:first-independent:question:question-independent-clients',
+    })
+    const second = makeError({
+      id: 'error-independent-clients-second',
+      questionId,
+      occurredAt: '2026-08-11T10:00:00.000Z',
+      occurrenceKey: 'session:second-independent:question:question-independent-clients',
+    })
+
+    try {
+      const responses = await Promise.all([
+        firstApp.inject({
+          method: 'POST',
+          url: '/api/errors/batch',
+          payload: { items: [first] },
+        }),
+        secondApp.inject({
+          method: 'POST',
+          url: '/api/errors/batch',
+          payload: { items: [second] },
+        }),
+      ])
+
+      expect(responses.map(({ statusCode }) => statusCode)).toEqual([200, 200])
+      const stored = parseStoredErrorAggregate(
+        (await prisma.errorItem.findFirstOrThrow({ where: { questionId } })).payload,
+      )
+      expect(stored.error.repeatCount).toBe(2)
+      expect([first.id, second.id]).toContain(stored.error.id)
+      expect([...stored.error.occurrenceKeys].sort()).toEqual(
+        [first.occurrenceKeys[0], second.occurrenceKeys[0]].sort(),
+      )
+      expect(stored.occurrenceEvidenceBindings.map(({ key }) => key).sort()).toEqual(
+        [...stored.error.occurrenceKeys].sort(),
+      )
+    } finally {
+      await releaseLock()
+      await Promise.all([firstApp.close(), secondApp.close()])
+      await Promise.all([
+        firstClient.$disconnect(),
+        secondClient.$disconnect(),
+        blockerClient.$disconnect(),
+      ])
+    }
   })
 
   it('serializes concurrent conflicting replays without a partial or duplicate aggregate', async () => {

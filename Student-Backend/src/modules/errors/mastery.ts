@@ -8,16 +8,38 @@ function evidenceInstant(value: string): number {
   return Date.parse(value)
 }
 
-function allLifecycleInstants(error: ErrorItem): number[] {
+function occurrenceEvidenceInstants(error: ErrorItem): number[] {
   return [
     error.firstOccurredAt,
     error.lastOccurredAt,
     ...error.occurrences,
     ...error.occurrenceRecords.map(({ occurredAt }) => occurredAt),
+  ].map(evidenceInstant)
+}
+
+function reviewLifecycleInstants(error: ErrorItem): number[] {
+  return [
     ...error.redoHistory.map(({ attemptedAt }) => attemptedAt),
     ...(error.variantVerifiedAt === null ? [] : [error.variantVerifiedAt]),
     ...(error.variantVerification === null ? [] : [error.variantVerification.verifiedAt]),
   ].map(evidenceInstant)
+}
+
+export function latestOccurrenceEvidenceInstant(error: ErrorItem): number {
+  return Math.max(...occurrenceEvidenceInstants(error))
+}
+
+export function latestReviewLifecycleInstant(error: ErrorItem): number | undefined {
+  const instants = reviewLifecycleInstants(error)
+  return instants.length === 0 ? undefined : Math.max(...instants)
+}
+
+export function latestLifecycleEvidenceInstant(error: ErrorItem): number {
+  const reviewLifecycle = latestReviewLifecycleInstant(error)
+  return Math.max(
+    latestOccurrenceEvidenceInstant(error),
+    reviewLifecycle ?? Number.NEGATIVE_INFINITY,
+  )
 }
 
 function occurrenceBounds(records: ErrorItem['occurrenceRecords']): {
@@ -50,7 +72,7 @@ export function applyRedoAttempt(
   error: ErrorItem,
   attempt: RedoAttempt,
 ): ErrorItem {
-  const latestEvidence = Math.max(...allLifecycleInstants(error))
+  const latestEvidence = latestLifecycleEvidenceInstant(error)
   const attemptedAt = evidenceInstant(attempt.attemptedAt)
   if (attemptedAt <= latestEvidence) throw new RedoChronologyError()
 
