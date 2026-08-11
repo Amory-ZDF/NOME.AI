@@ -1,6 +1,7 @@
 import type { z } from 'zod'
 
 import { AppError } from '../../common/errors/app-error.js'
+import { isSafeJsonObjectKey } from '../../common/json/safe-json.js'
 import {
   defaultSettings,
   errorItemSchema,
@@ -55,7 +56,11 @@ function isSameNullableInstant(value: string | null, stored: Date | null): boole
 
 function keyedRecord<T>(
   entries: Array<{ rowId: string; value: T }>,
+  label: string,
 ): Record<string, T> {
+  for (const { rowId } of entries) {
+    assertStored(isSafeJsonObjectKey(rowId), `${label} record key`)
+  }
   return Object.fromEntries(entries.map(({ rowId, value }) => [rowId, value]))
 }
 
@@ -240,11 +245,13 @@ export class BootstrapService {
         taskAdjustments,
         exerciseSets: keyedRecord(
           parsedExerciseRows.filter(({ kind }) => kind === 'task'),
+          'exercise set',
         ),
         bankExerciseSets: keyedRecord(
           parsedExerciseRows.filter(({ kind }) => kind === 'bank'),
+          'bank exercise set',
         ),
-        sessions: keyedRecord(parsedSessions),
+        sessions: keyedRecord(parsedSessions, 'session'),
         errors,
         notes,
         uploadJobs,

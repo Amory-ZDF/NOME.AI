@@ -18,6 +18,10 @@ interface ValidationState {
   nodes: number
 }
 
+export function isSafeJsonObjectKey(key: string): boolean {
+  return !forbiddenObjectKeys.has(key)
+}
+
 function invalidJson(path: string, cause?: unknown): never {
   const message = `Value at ${path} is not valid JSON`
   throw cause === undefined ? new TypeError(message) : new TypeError(message, { cause })
@@ -154,7 +158,7 @@ function validateJson(
 
     const output: Record<string, JsonValue> = {}
     for (const key of keys) {
-      if (typeof key !== 'string' || forbiddenObjectKeys.has(key)) {
+      if (typeof key !== 'string' || !isSafeJsonObjectKey(key)) {
         return invalidJson(`${path}.${String(key)}`)
       }
       const childPath = `${path}.${key}`

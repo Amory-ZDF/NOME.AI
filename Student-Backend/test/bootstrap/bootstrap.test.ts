@@ -207,6 +207,40 @@ function uploadJob(id: string) {
   }
 }
 
+type KeyedBootstrapMap = 'sessions' | 'exerciseSets' | 'bankExerciseSets'
+
+async function insertKeyedMapRow(map: KeyedBootstrapMap, id: string) {
+  if (map === 'sessions') {
+    const value = session(id, 'task-a')
+    await prisma.session.create({
+      data: {
+        id,
+        studentId: primaryStudentId,
+        taskId: value.taskId,
+        submittedAt: new Date(value.completedAt),
+        payload: toInputJson(value),
+      },
+    })
+    return
+  }
+
+  const isTaskSet = map === 'exerciseSets'
+  const value = exerciseSet(
+    id,
+    isTaskSet ? 'task-a' : null,
+    `Keyed map fixture ${id}`,
+  )
+  await prisma.exerciseSet.create({
+    data: {
+      id,
+      studentId: primaryStudentId,
+      taskId: value.taskId,
+      kind: isTaskSet ? 'task' : 'bank',
+      payload: toInputJson(value),
+    },
+  })
+}
+
 async function insertStudentFixture(studentId: string, label: string) {
   await prisma.student.create({
     data: {
@@ -452,6 +486,39 @@ describe('GET /api/student/bootstrap', () => {
     expect(Object.keys(data.sessions).sort()).toEqual(
       sessions.map(({ sessionId }) => sessionId).sort(),
     )
+  })
+
+  it.each(
+    (['sessions', 'exerciseSets', 'bankExerciseSets'] as const).flatMap((map) =>
+      ['__proto__', 'constructor', 'prototype'].map((key) => [map, key] as const),
+    ),
+  )('rejects unsafe %s record key %s without filtering it', async (map, key) => {
+    await insertStudentFixture(primaryStudentId, 'Primary')
+    await insertKeyedMapRow(map, key)
+    const app = createApp()
+
+    const response = await app.inject({ method: 'GET', url: '/api/student/bootstrap' })
+    await app.close()
+
+    expect(response.statusCode).toBe(500)
+    expect(response.json()).toEqual({
+      code: 'STORED_DATA_INVALID',
+      message: 'Stored student data is invalid',
+      data: null,
+    })
+  })
+
+  it('preserves an arbitrary safe record id that shadows an object method', async () => {
+    await insertStudentFixture(primaryStudentId, 'Primary')
+    await insertKeyedMapRow('sessions', 'toString')
+    const app = createApp()
+
+    const response = await app.inject({ method: 'GET', url: '/api/student/bootstrap' })
+    await app.close()
+
+    expect(response.statusCode).toBe(200)
+    expect(Object.hasOwn(response.json().data.sessions, 'toString')).toBe(true)
+    expect(response.json().data.sessions.toString.sessionId).toBe('toString')
   })
 
   it('returns 404 for a missing configured student without creating one', async () => {
