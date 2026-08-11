@@ -106,13 +106,21 @@ function validateAdjustmentTimes(request: TaskAdjustment, clock: Clock): void {
   const now = readClock(clock).getTime()
   const proposedDueAt = Date.parse(request.proposedDueAt)
   const createdAt = Date.parse(request.createdAt)
-  if (proposedDueAt <= now || proposedDueAt <= createdAt) {
+  if (createdAt > now || proposedDueAt <= now || proposedDueAt <= createdAt) {
     throw new AppError(
       'Proposed due time must be in the future',
       400,
       'INVALID_INPUT',
     )
   }
+}
+
+function isNormalizedCompletedTask(task: Task): boolean {
+  return (
+    task.status === 'completed' &&
+    task.completedAt !== undefined &&
+    task.isOverdue === false
+  )
 }
 
 export function isTaskAdjustmentEligible(
@@ -178,7 +186,7 @@ export class TaskService {
     })
     if (initialRow === null) taskNotFound()
     const initialTask = parseStoredTask(initialRow)
-    if (initialTask.status === 'completed') return initialTask
+    if (isNormalizedCompletedTask(initialTask)) return initialTask
 
     return this.prisma.$transaction(async (transaction) => {
       const row = await transaction.task.findUnique({
@@ -186,12 +194,17 @@ export class TaskService {
       })
       if (row === null) taskNotFound()
       const task = parseStoredTask(row)
-      if (task.status === 'completed') return task
+      if (isNormalizedCompletedTask(task)) return task
+
+      const completedAt =
+        task.status === 'completed' && task.completedAt !== undefined
+          ? task.completedAt
+          : readClock(this.now).toISOString()
 
       const completedTask = taskSchema.parse({
         ...task,
         status: 'completed',
-        completedAt: readClock(this.now).toISOString(),
+        completedAt,
         isOverdue: false,
       })
 

@@ -282,6 +282,120 @@ describe('PATCH /api/tasks/{id}', () => {
     await expect(readTask()).resolves.toMatchObject({ payload: original })
   })
 
+  it('repairs completed task overdue state without rewriting its timestamp bytes', async () => {
+    await insertStudent(primaryStudentId)
+    const completedAt = '2026-08-10T16:00:00.000+08:00'
+    const task = makeTask({
+      status: 'completed',
+      completedAt,
+      isOverdue: true,
+    })
+    const now = vi.fn(() => secondClockInstant)
+    const app = createApp(primaryStudentId, now)
+
+    const created = await app.inject({ method: 'POST', url: '/api/tasks', payload: task })
+    const completed = await app.inject({
+      method: 'PATCH',
+      url: '/api/tasks/task-primary',
+      payload: { status: 'completed' },
+    })
+    await app.close()
+
+    expect(created.statusCode).toBe(200)
+    expect(completed.statusCode).toBe(200)
+    expect(completed.json().data.task).toEqual({
+      ...task,
+      completedAt,
+      isOverdue: false,
+    })
+    expect(now).not.toHaveBeenCalled()
+    await expect(readTask()).resolves.toMatchObject({
+      status: 'completed',
+      payload: { ...task, completedAt, isOverdue: false },
+    })
+  })
+
+  it('fills a missing completedAt once and preserves it on later completion calls', async () => {
+    await insertStudent(primaryStudentId)
+    await insertTask(primaryStudentId, {
+      status: 'completed',
+      isOverdue: false,
+    })
+    const now = vi
+      .fn<() => Date>()
+      .mockReturnValueOnce(firstClockInstant)
+      .mockReturnValue(secondClockInstant)
+    const app = createApp(primaryStudentId, now)
+
+    const first = await app.inject({
+      method: 'PATCH',
+      url: '/api/tasks/task-primary',
+      payload: { status: 'completed' },
+    })
+    const second = await app.inject({
+      method: 'PATCH',
+      url: '/api/tasks/task-primary',
+      payload: { status: 'completed' },
+    })
+    await app.close()
+
+    expect(first.statusCode).toBe(200)
+    expect(second.statusCode).toBe(200)
+    expect(first.json().data.task).toMatchObject({
+      status: 'completed',
+      completedAt: firstClockInstant.toISOString(),
+      isOverdue: false,
+    })
+    expect(second.json().data.task).toEqual(first.json().data.task)
+    expect(now).toHaveBeenCalledTimes(1)
+    await expect(readTask()).resolves.toMatchObject({
+      payload: first.json().data.task,
+    })
+  })
+
+  it('serializes concurrent repairs of a missing completedAt to one clock value', async () => {
+    await insertStudent(primaryStudentId)
+    await insertTask(primaryStudentId, {
+      status: 'completed',
+      isOverdue: true,
+    })
+    const now = vi
+      .fn<() => Date>()
+      .mockReturnValueOnce(firstClockInstant)
+      .mockReturnValue(secondClockInstant)
+    const app = createApp(primaryStudentId, now)
+
+    const responses = await Promise.all([
+      app.inject({
+        method: 'PATCH',
+        url: '/api/tasks/task-primary',
+        payload: { status: 'completed' },
+      }),
+      app.inject({
+        method: 'PATCH',
+        url: '/api/tasks/task-primary',
+        payload: { status: 'completed' },
+      }),
+    ])
+    await app.close()
+
+    expect(responses.map(({ statusCode }) => statusCode)).toEqual([200, 200])
+    expect(responses.map((response) => response.json().data.task.completedAt)).toEqual([
+      firstClockInstant.toISOString(),
+      firstClockInstant.toISOString(),
+    ])
+    expect(responses.every((response) => response.json().data.task.isOverdue === false))
+      .toBe(true)
+    expect(now).toHaveBeenCalledTimes(1)
+    await expect(readTask()).resolves.toMatchObject({
+      payload: expect.objectContaining({
+        status: 'completed',
+        completedAt: firstClockInstant.toISOString(),
+        isOverdue: false,
+      }),
+    })
+  })
+
   it('serializes concurrent completion attempts to one stable completedAt', async () => {
     await insertStudent(primaryStudentId)
     await insertTask(primaryStudentId, { isOverdue: true })
@@ -406,6 +520,35 @@ describe('POST /api/tasks/{id}/adjustment-request', () => {
     })
   })
 
+  it('accepts createdAt exactly at server now when offsets represent the same instant', async () => {
+    await insertStudent(primaryStudentId)
+    const original = await insertTask(primaryStudentId)
+    const request = makeAdjustment({
+      createdAt: '2026-08-11T18:00:00.000+08:00',
+      proposedDueAt: '2026-08-13T20:00:00.000+08:00',
+    })
+    const app = createApp()
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/api/tasks/task-primary/adjustment-request',
+      payload: request,
+    })
+    await app.close()
+
+    expect(response.statusCode).toBe(200)
+    expect(response.json().data).toEqual({
+      request,
+      task: { ...original, adjustmentStatus: 'submitted' },
+    })
+    await expect(prisma.taskAdjustment.findUnique({
+      where: { studentId_id: { studentId: primaryStudentId, id: request.id } },
+    })).resolves.toMatchObject({
+      createdAt: firstClockInstant,
+      payload: request,
+    })
+  })
+
   it('returns DUPLICATE_ID without changing an otherwise eligible task', async () => {
     await insertStudent(primaryStudentId)
     await insertTask(primaryStudentId)
@@ -498,6 +641,17 @@ describe('POST /api/tasks/{id}/adjustment-request', () => {
       makeAdjustment({
         proposedDueAt: '2026-08-13T12:00:00.000Z',
         createdAt: '2026-08-14T12:00:00.000Z',
+      }),
+      400,
+      'INVALID_INPUT',
+    ],
+    [
+      'a future creation timestamp expressed with an offset',
+      'task-primary',
+      makeTask(),
+      makeAdjustment({
+        createdAt: '2026-08-12T18:00:00.000+08:00',
+        proposedDueAt: '2026-08-13T20:00:00.000+08:00',
       }),
       400,
       'INVALID_INPUT',
