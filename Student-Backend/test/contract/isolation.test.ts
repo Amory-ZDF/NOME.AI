@@ -43,12 +43,12 @@ async function insertStudent(id: string, name: string) {
 }
 
 async function studentSnapshot(owner: string) {
-  const [student, settings, tasks, sets, errors, notes, jobs] = await Promise.all([
+  const [student, settings, tasks, adjustments, sets, sessions, errors, notes, folders, jobs] = await Promise.all([
     prisma.student.findUnique({ where: { id: owner } }), prisma.studentSettings.findUnique({ where: { studentId: owner } }),
-    prisma.task.findMany({ where: { studentId: owner }, orderBy: { id: 'asc' } }), prisma.exerciseSet.findMany({ where: { studentId: owner }, orderBy: { id: 'asc' } }),
-    prisma.errorItem.findMany({ where: { studentId: owner }, orderBy: { id: 'asc' } }), prisma.note.findMany({ where: { studentId: owner }, orderBy: { id: 'asc' } }), prisma.materialUploadJob.findMany({ where: { studentId: owner }, orderBy: { id: 'asc' } }),
+    prisma.task.findMany({ where: { studentId: owner }, orderBy: { id: 'asc' } }), prisma.taskAdjustment.findMany({ where: { studentId: owner }, orderBy: { id: 'asc' } }), prisma.exerciseSet.findMany({ where: { studentId: owner }, orderBy: { id: 'asc' } }), prisma.session.findMany({ where: { studentId: owner }, orderBy: { id: 'asc' } }),
+    prisma.errorItem.findMany({ where: { studentId: owner }, orderBy: { id: 'asc' } }), prisma.note.findMany({ where: { studentId: owner }, orderBy: { id: 'asc' } }), prisma.noteFolder.findMany({ where: { studentId: owner }, orderBy: { id: 'asc' } }), prisma.materialUploadJob.findMany({ where: { studentId: owner }, orderBy: { id: 'asc' } }),
   ])
-  return JSON.stringify({ student, settings, tasks, sets, errors, notes, jobs })
+  return JSON.stringify({ student, settings, tasks, adjustments, sets, sessions, errors, notes, folders, jobs })
 }
 
 beforeEach(async () => resetDatabase(prisma))
