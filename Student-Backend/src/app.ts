@@ -18,6 +18,7 @@ import type { Env } from './config/env.js'
 import type { StudentPrisma } from './db/client.js'
 import { bootstrapRoutes } from './modules/bootstrap/bootstrap.routes.js'
 import { exerciseRoutes } from './modules/exercises/exercise.routes.js'
+import { sessionRoutes } from './modules/sessions/session.routes.js'
 import { settingsRoutes } from './modules/settings/settings.routes.js'
 import { taskRoutes } from './modules/tasks/task.routes.js'
 
@@ -163,6 +164,7 @@ export function buildApp({ env, loggerStream, prisma, now = () => new Date() }: 
 
   app.register(bootstrapRoutes, { studentId: env.STUDENT_ID })
   app.register(exerciseRoutes, { studentId: env.STUDENT_ID })
+  app.register(sessionRoutes, { studentId: env.STUDENT_ID })
   app.register(settingsRoutes, { studentId: env.STUDENT_ID })
   app.register(taskRoutes, { studentId: env.STUDENT_ID, now })
 

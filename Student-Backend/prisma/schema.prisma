@@ -77,11 +77,11 @@ model ExerciseSet {
 model Session {
   id          String
   studentId   String
-  taskId      String
+  taskId      String?
   submittedAt DateTime
   payload     Json
   student     Student  @relation(fields: [studentId], references: [id], onDelete: Cascade)
-  task        Task     @relation(fields: [studentId, taskId], references: [studentId, id], onDelete: Cascade)
+  task        Task?    @relation(fields: [studentId, taskId], references: [studentId, id], onDelete: Cascade)
 
   @@id([studentId, id])
   @@index([studentId, taskId, submittedAt], map: "Student_Session_task_submitted_idx")

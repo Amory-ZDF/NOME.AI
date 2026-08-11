@@ -146,7 +146,7 @@ export type SessionGroupByArgs<ExtArgs extends runtime.Types.Extensions.Internal
 export type SessionGroupByOutputType = {
   id: string
   studentId: string
-  taskId: string
+  taskId: string | null
   submittedAt: Date
   payload: runtime.JsonValue
   _count: SessionCountAggregateOutputType | null
@@ -175,17 +175,17 @@ export type SessionWhereInput = {
   NOT?: Prisma.SessionWhereInput | Prisma.SessionWhereInput[]
   id?: Prisma.StringFilter<"Session"> | string
   studentId?: Prisma.StringFilter<"Session"> | string
-  taskId?: Prisma.StringFilter<"Session"> | string
+  taskId?: Prisma.StringNullableFilter<"Session"> | string | null
   submittedAt?: Prisma.DateTimeFilter<"Session"> | Date | string
   payload?: Prisma.JsonFilter<"Session">
   student?: Prisma.XOR<Prisma.StudentScalarRelationFilter, Prisma.StudentWhereInput>
-  task?: Prisma.XOR<Prisma.TaskScalarRelationFilter, Prisma.TaskWhereInput>
+  task?: Prisma.XOR<Prisma.TaskNullableScalarRelationFilter, Prisma.TaskWhereInput> | null
 }
 
 export type SessionOrderByWithRelationInput = {
   id?: Prisma.SortOrder
   studentId?: Prisma.SortOrder
-  taskId?: Prisma.SortOrder
+  taskId?: Prisma.SortOrderInput | Prisma.SortOrder
   submittedAt?: Prisma.SortOrder
   payload?: Prisma.SortOrder
   student?: Prisma.StudentOrderByWithRelationInput
@@ -199,17 +199,17 @@ export type SessionWhereUniqueInput = Prisma.AtLeast<{
   NOT?: Prisma.SessionWhereInput | Prisma.SessionWhereInput[]
   id?: Prisma.StringFilter<"Session"> | string
   studentId?: Prisma.StringFilter<"Session"> | string
-  taskId?: Prisma.StringFilter<"Session"> | string
+  taskId?: Prisma.StringNullableFilter<"Session"> | string | null
   submittedAt?: Prisma.DateTimeFilter<"Session"> | Date | string
   payload?: Prisma.JsonFilter<"Session">
   student?: Prisma.XOR<Prisma.StudentScalarRelationFilter, Prisma.StudentWhereInput>
-  task?: Prisma.XOR<Prisma.TaskScalarRelationFilter, Prisma.TaskWhereInput>
+  task?: Prisma.XOR<Prisma.TaskNullableScalarRelationFilter, Prisma.TaskWhereInput> | null
 }, "studentId_id">
 
 export type SessionOrderByWithAggregationInput = {
   id?: Prisma.SortOrder
   studentId?: Prisma.SortOrder
-  taskId?: Prisma.SortOrder
+  taskId?: Prisma.SortOrderInput | Prisma.SortOrder
   submittedAt?: Prisma.SortOrder
   payload?: Prisma.SortOrder
   _count?: Prisma.SessionCountOrderByAggregateInput
@@ -223,7 +223,7 @@ export type SessionScalarWhereWithAggregatesInput = {
   NOT?: Prisma.SessionScalarWhereWithAggregatesInput | Prisma.SessionScalarWhereWithAggregatesInput[]
   id?: Prisma.StringWithAggregatesFilter<"Session"> | string
   studentId?: Prisma.StringWithAggregatesFilter<"Session"> | string
-  taskId?: Prisma.StringWithAggregatesFilter<"Session"> | string
+  taskId?: Prisma.StringNullableWithAggregatesFilter<"Session"> | string | null
   submittedAt?: Prisma.DateTimeWithAggregatesFilter<"Session"> | Date | string
   payload?: Prisma.JsonWithAggregatesFilter<"Session">
 }
@@ -233,13 +233,13 @@ export type SessionCreateInput = {
   submittedAt: Date | string
   payload: Prisma.JsonNullValueInput | runtime.InputJsonValue
   student: Prisma.StudentCreateNestedOneWithoutSessionsInput
-  task: Prisma.TaskCreateNestedOneWithoutSessionsInput
+  task?: Prisma.TaskCreateNestedOneWithoutSessionsInput
 }
 
 export type SessionUncheckedCreateInput = {
   id: string
   studentId: string
-  taskId: string
+  taskId?: string | null
   submittedAt: Date | string
   payload: Prisma.JsonNullValueInput | runtime.InputJsonValue
 }
@@ -249,13 +249,13 @@ export type SessionUpdateInput = {
   submittedAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   payload?: Prisma.JsonNullValueInput | runtime.InputJsonValue
   student?: Prisma.StudentUpdateOneRequiredWithoutSessionsNestedInput
-  task?: Prisma.TaskUpdateOneRequiredWithoutSessionsNestedInput
+  task?: Prisma.TaskUpdateOneWithoutSessionsNestedInput
 }
 
 export type SessionUncheckedUpdateInput = {
   id?: Prisma.StringFieldUpdateOperationsInput | string
   studentId?: Prisma.StringFieldUpdateOperationsInput | string
-  taskId?: Prisma.StringFieldUpdateOperationsInput | string
+  taskId?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   submittedAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   payload?: Prisma.JsonNullValueInput | runtime.InputJsonValue
 }
@@ -263,7 +263,7 @@ export type SessionUncheckedUpdateInput = {
 export type SessionCreateManyInput = {
   id: string
   studentId: string
-  taskId: string
+  taskId?: string | null
   submittedAt: Date | string
   payload: Prisma.JsonNullValueInput | runtime.InputJsonValue
 }
@@ -277,7 +277,7 @@ export type SessionUpdateManyMutationInput = {
 export type SessionUncheckedUpdateManyInput = {
   id?: Prisma.StringFieldUpdateOperationsInput | string
   studentId?: Prisma.StringFieldUpdateOperationsInput | string
-  taskId?: Prisma.StringFieldUpdateOperationsInput | string
+  taskId?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   submittedAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   payload?: Prisma.JsonNullValueInput | runtime.InputJsonValue
 }
@@ -407,12 +407,12 @@ export type SessionCreateWithoutStudentInput = {
   id: string
   submittedAt: Date | string
   payload: Prisma.JsonNullValueInput | runtime.InputJsonValue
-  task: Prisma.TaskCreateNestedOneWithoutSessionsInput
+  task?: Prisma.TaskCreateNestedOneWithoutSessionsInput
 }
 
 export type SessionUncheckedCreateWithoutStudentInput = {
   id: string
-  taskId: string
+  taskId?: string | null
   submittedAt: Date | string
   payload: Prisma.JsonNullValueInput | runtime.InputJsonValue
 }
@@ -448,7 +448,7 @@ export type SessionScalarWhereInput = {
   NOT?: Prisma.SessionScalarWhereInput | Prisma.SessionScalarWhereInput[]
   id?: Prisma.StringFilter<"Session"> | string
   studentId?: Prisma.StringFilter<"Session"> | string
-  taskId?: Prisma.StringFilter<"Session"> | string
+  taskId?: Prisma.StringNullableFilter<"Session"> | string | null
   submittedAt?: Prisma.DateTimeFilter<"Session"> | Date | string
   payload?: Prisma.JsonFilter<"Session">
 }
@@ -493,7 +493,7 @@ export type SessionUpdateManyWithWhereWithoutTaskInput = {
 
 export type SessionCreateManyStudentInput = {
   id: string
-  taskId: string
+  taskId?: string | null
   submittedAt: Date | string
   payload: Prisma.JsonNullValueInput | runtime.InputJsonValue
 }
@@ -502,19 +502,19 @@ export type SessionUpdateWithoutStudentInput = {
   id?: Prisma.StringFieldUpdateOperationsInput | string
   submittedAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   payload?: Prisma.JsonNullValueInput | runtime.InputJsonValue
-  task?: Prisma.TaskUpdateOneRequiredWithoutSessionsNestedInput
+  task?: Prisma.TaskUpdateOneWithoutSessionsNestedInput
 }
 
 export type SessionUncheckedUpdateWithoutStudentInput = {
   id?: Prisma.StringFieldUpdateOperationsInput | string
-  taskId?: Prisma.StringFieldUpdateOperationsInput | string
+  taskId?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   submittedAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   payload?: Prisma.JsonNullValueInput | runtime.InputJsonValue
 }
 
 export type SessionUncheckedUpdateManyWithoutStudentInput = {
   id?: Prisma.StringFieldUpdateOperationsInput | string
-  taskId?: Prisma.StringFieldUpdateOperationsInput | string
+  taskId?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   submittedAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   payload?: Prisma.JsonNullValueInput | runtime.InputJsonValue
 }
@@ -553,7 +553,7 @@ export type SessionSelect<ExtArgs extends runtime.Types.Extensions.InternalArgs 
   submittedAt?: boolean
   payload?: boolean
   student?: boolean | Prisma.StudentDefaultArgs<ExtArgs>
-  task?: boolean | Prisma.TaskDefaultArgs<ExtArgs>
+  task?: boolean | Prisma.Session$taskArgs<ExtArgs>
 }, ExtArgs["result"]["session"]>
 
 export type SessionSelectCreateManyAndReturn<ExtArgs extends runtime.Types.Extensions.InternalArgs = runtime.Types.Extensions.DefaultArgs> = runtime.Types.Extensions.GetSelect<{
@@ -563,7 +563,7 @@ export type SessionSelectCreateManyAndReturn<ExtArgs extends runtime.Types.Exten
   submittedAt?: boolean
   payload?: boolean
   student?: boolean | Prisma.StudentDefaultArgs<ExtArgs>
-  task?: boolean | Prisma.TaskDefaultArgs<ExtArgs>
+  task?: boolean | Prisma.Session$taskArgs<ExtArgs>
 }, ExtArgs["result"]["session"]>
 
 export type SessionSelectUpdateManyAndReturn<ExtArgs extends runtime.Types.Extensions.InternalArgs = runtime.Types.Extensions.DefaultArgs> = runtime.Types.Extensions.GetSelect<{
@@ -573,7 +573,7 @@ export type SessionSelectUpdateManyAndReturn<ExtArgs extends runtime.Types.Exten
   submittedAt?: boolean
   payload?: boolean
   student?: boolean | Prisma.StudentDefaultArgs<ExtArgs>
-  task?: boolean | Prisma.TaskDefaultArgs<ExtArgs>
+  task?: boolean | Prisma.Session$taskArgs<ExtArgs>
 }, ExtArgs["result"]["session"]>
 
 export type SessionSelectScalar = {
@@ -587,27 +587,27 @@ export type SessionSelectScalar = {
 export type SessionOmit<ExtArgs extends runtime.Types.Extensions.InternalArgs = runtime.Types.Extensions.DefaultArgs> = runtime.Types.Extensions.GetOmit<"id" | "studentId" | "taskId" | "submittedAt" | "payload", ExtArgs["result"]["session"]>
 export type SessionInclude<ExtArgs extends runtime.Types.Extensions.InternalArgs = runtime.Types.Extensions.DefaultArgs> = {
   student?: boolean | Prisma.StudentDefaultArgs<ExtArgs>
-  task?: boolean | Prisma.TaskDefaultArgs<ExtArgs>
+  task?: boolean | Prisma.Session$taskArgs<ExtArgs>
 }
 export type SessionIncludeCreateManyAndReturn<ExtArgs extends runtime.Types.Extensions.InternalArgs = runtime.Types.Extensions.DefaultArgs> = {
   student?: boolean | Prisma.StudentDefaultArgs<ExtArgs>
-  task?: boolean | Prisma.TaskDefaultArgs<ExtArgs>
+  task?: boolean | Prisma.Session$taskArgs<ExtArgs>
 }
 export type SessionIncludeUpdateManyAndReturn<ExtArgs extends runtime.Types.Extensions.InternalArgs = runtime.Types.Extensions.DefaultArgs> = {
   student?: boolean | Prisma.StudentDefaultArgs<ExtArgs>
-  task?: boolean | Prisma.TaskDefaultArgs<ExtArgs>
+  task?: boolean | Prisma.Session$taskArgs<ExtArgs>
 }
 
 export type $SessionPayload<ExtArgs extends runtime.Types.Extensions.InternalArgs = runtime.Types.Extensions.DefaultArgs> = {
   name: "Session"
   objects: {
     student: Prisma.$StudentPayload<ExtArgs>
-    task: Prisma.$TaskPayload<ExtArgs>
+    task: Prisma.$TaskPayload<ExtArgs> | null
   }
   scalars: runtime.Types.Extensions.GetPayloadResult<{
     id: string
     studentId: string
-    taskId: string
+    taskId: string | null
     submittedAt: Date
     payload: runtime.JsonValue
   }, ExtArgs["result"]["session"]>
@@ -1005,7 +1005,7 @@ readonly fields: SessionFieldRefs;
 export interface Prisma__SessionClient<T, Null = never, ExtArgs extends runtime.Types.Extensions.InternalArgs = runtime.Types.Extensions.DefaultArgs, GlobalOmitOptions = {}> extends Prisma.PrismaPromise<T> {
   readonly [Symbol.toStringTag]: "PrismaPromise"
   student<T extends Prisma.StudentDefaultArgs<ExtArgs> = {}>(args?: Prisma.Subset<T, Prisma.StudentDefaultArgs<ExtArgs>>): Prisma.Prisma__StudentClient<runtime.Types.Result.GetResult<Prisma.$StudentPayload<ExtArgs>, T, "findUniqueOrThrow", GlobalOmitOptions> | Null, Null, ExtArgs, GlobalOmitOptions>
-  task<T extends Prisma.TaskDefaultArgs<ExtArgs> = {}>(args?: Prisma.Subset<T, Prisma.TaskDefaultArgs<ExtArgs>>): Prisma.Prisma__TaskClient<runtime.Types.Result.GetResult<Prisma.$TaskPayload<ExtArgs>, T, "findUniqueOrThrow", GlobalOmitOptions> | Null, Null, ExtArgs, GlobalOmitOptions>
+  task<T extends Prisma.Session$taskArgs<ExtArgs> = {}>(args?: Prisma.Subset<T, Prisma.Session$taskArgs<ExtArgs>>): Prisma.Prisma__TaskClient<runtime.Types.Result.GetResult<Prisma.$TaskPayload<ExtArgs>, T, "findUniqueOrThrow", GlobalOmitOptions> | null, null, ExtArgs, GlobalOmitOptions>
   /**
    * Attaches callbacks for the resolution and/or rejection of the Promise.
    * @param onfulfilled The callback to execute when the Promise is resolved.
@@ -1436,6 +1436,25 @@ export type SessionDeleteManyArgs<ExtArgs extends runtime.Types.Extensions.Inter
    * Limit how many Sessions to delete.
    */
   limit?: number
+}
+
+/**
+ * Session.task
+ */
+export type Session$taskArgs<ExtArgs extends runtime.Types.Extensions.InternalArgs = runtime.Types.Extensions.DefaultArgs> = {
+  /**
+   * Select specific fields to fetch from the Task
+   */
+  select?: Prisma.TaskSelect<ExtArgs> | null
+  /**
+   * Omit specific fields from the Task
+   */
+  omit?: Prisma.TaskOmit<ExtArgs> | null
+  /**
+   * Choose, which related nodes to fetch as well
+   */
+  include?: Prisma.TaskInclude<ExtArgs> | null
+  where?: Prisma.TaskWhereInput
 }
 
 /**

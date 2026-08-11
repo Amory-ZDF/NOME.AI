@@ -228,6 +228,7 @@ const questionShape = {
   sourceQuestionId: optionalNonEmptyString,
   understandingExplanation: optionalNonEmptyString,
   scoringExplanation: optionalNonEmptyString,
+  markSchemePoints: z.array(jsonObjectSchema).optional(),
   passageEvidence: optionalNonEmptyString,
   errorPattern: optionalNonEmptyString,
 } as const
@@ -275,14 +276,24 @@ function refineQuestion(
 export const questionSchema = safeStrictObject(questionShape).superRefine(refineQuestion)
 
 export const exerciseSetSchema = safeStrictObject({
-  id: optionalNonEmptyString,
-  taskId: nullableNonEmptyString,
-  title: nonEmptyString,
-  subject: nonEmptyString,
-  questions: z.array(questionSchema).min(1),
-  sourceQuestionId: optionalNonEmptyString,
-  createdAt: isoDateTimeSchema.optional(),
-})
+    id: optionalNonEmptyString,
+    taskId: nullableNonEmptyString,
+    title: nonEmptyString,
+    subject: nonEmptyString,
+    questions: z.array(questionSchema).min(1),
+    sourceQuestionId: optionalNonEmptyString,
+    createdAt: isoDateTimeSchema.optional(),
+  })
+  .superRefine((value, context) => {
+    const ids = value.questions.map(({ id }) => id)
+    if (new Set(ids).size !== ids.length) {
+      context.addIssue({
+        code: 'custom',
+        path: ['questions'],
+        message: 'Exercise question ids must be unique',
+      })
+    }
+  })
 
 export const redoAttemptSchema = safeStrictObject({
   attemptedAt: evidenceTimeSchema,
@@ -846,17 +857,60 @@ export const learningSummarySchema = safeStrictObject({
 
 export const sessionAttemptSchema = safeStrictObject({
   answer: z.string(),
-  submittedAt: evidenceTimeSchema,
+  normalizedAnswer: z.string().optional(),
+  submittedAt: isoDateTimeSchema,
   isCorrect: z.boolean(),
 })
 
 export const sessionResultSchema = safeStrictObject({
-  status: z.enum(['correct', 'wrong', 'unanswered']),
-  attempts: z.array(sessionAttemptSchema),
-  hintsUsed: z.number().int().min(0).max(5),
-  solvedAtHintLevel: z.number().int().min(1).max(5).nullable(),
-  handwritingUsed: z.boolean().optional(),
-})
+    status: z.enum(['correct', 'wrong', 'unanswered']),
+    attempts: z.array(sessionAttemptSchema),
+    hintsUsed: z.number().int().min(0).max(5),
+    solvedAtHintLevel: z.number().int().min(0).max(5).nullable(),
+    handwritingUsed: z.boolean().optional(),
+  })
+  .superRefine((value, context) => {
+    const hasCorrectAttempt = value.attempts.some(({ isCorrect }) => isCorrect)
+    if (value.status === 'correct') {
+      if (
+        !hasCorrectAttempt ||
+        value.solvedAtHintLevel === null ||
+        value.solvedAtHintLevel > value.hintsUsed
+      ) {
+        context.addIssue({
+          code: 'custom',
+          message: 'Correct results require consistent solved evidence',
+        })
+      }
+      return
+    }
+
+    if (value.solvedAtHintLevel !== null) {
+      context.addIssue({
+        code: 'custom',
+        path: ['solvedAtHintLevel'],
+        message: 'Unsolved results cannot contain solved evidence',
+      })
+    }
+
+    if (value.status === 'wrong') {
+      if (value.attempts.length === 0 || hasCorrectAttempt) {
+        context.addIssue({
+          code: 'custom',
+          path: ['attempts'],
+          message: 'Wrong results require only incorrect attempt evidence',
+        })
+      }
+      return
+    }
+
+    if (value.attempts.length !== 0 || value.hintsUsed !== 0) {
+      context.addIssue({
+        code: 'custom',
+        message: 'Unanswered results cannot contain attempt or hint evidence',
+      })
+    }
+  })
 
 export const sessionQuestionSchema = safeStrictObject({
     ...questionShape,
@@ -865,15 +919,70 @@ export const sessionQuestionSchema = safeStrictObject({
   .superRefine((value, context) => refineQuestion(value, context))
 
 export const sessionSchema = safeStrictObject({
-  sessionId: nonEmptyString,
-  taskId: nullableNonEmptyString,
-  taskTitle: nonEmptyString,
-  subject: nonEmptyString,
-  completedAt: isoDateTimeSchema,
-  timeSpent: z.number().nonnegative(),
-  timeSpentSeconds: z.number().nonnegative(),
-  questions: z.array(sessionQuestionSchema).min(1),
-})
+    sessionId: nonEmptyString,
+    taskId: nullableNonEmptyString,
+    taskTitle: nonEmptyString,
+    subject: nonEmptyString,
+    completedAt: isoDateTimeSchema,
+    timeSpent: z.number().nonnegative(),
+    timeSpentSeconds: z.number().nonnegative(),
+    questions: z.array(sessionQuestionSchema).min(1),
+  })
+  .superRefine((value, context) => {
+    const ids = value.questions.map(({ id }) => id)
+    if (new Set(ids).size !== ids.length) {
+      context.addIssue({
+        code: 'custom',
+        path: ['questions'],
+        message: 'Session question ids must be unique',
+      })
+    }
+
+    const orders = value.questions.map(({ order }) => order)
+    if (new Set(orders).size !== orders.length) {
+      context.addIssue({
+        code: 'custom',
+        path: ['questions'],
+        message: 'Session question order values must be unique',
+      })
+    }
+
+    if (value.timeSpent !== Math.round(value.timeSpentSeconds / 60)) {
+      context.addIssue({
+        code: 'custom',
+        path: ['timeSpent'],
+        message: 'Session minute and second durations must align',
+      })
+    }
+
+    const completedAt = Date.parse(value.completedAt)
+    const startedAt = completedAt - value.timeSpentSeconds * 1_000
+    if (!Number.isFinite(startedAt)) {
+      context.addIssue({
+        code: 'custom',
+        path: ['timeSpentSeconds'],
+        message: 'Session duration must produce a finite start instant',
+      })
+    }
+    value.questions.forEach((question, questionIndex) => {
+      let previousAttemptAt = Number.NEGATIVE_INFINITY
+      question.result.attempts.forEach((attempt, attemptIndex) => {
+        const submittedAt = Date.parse(attempt.submittedAt)
+        if (
+          submittedAt < startedAt ||
+          submittedAt > completedAt ||
+          submittedAt < previousAttemptAt
+        ) {
+          context.addIssue({
+            code: 'custom',
+            path: ['questions', questionIndex, 'result', 'attempts', attemptIndex, 'submittedAt'],
+            message: 'Attempt timestamps must be chronological within the session',
+          })
+        }
+        previousAttemptAt = submittedAt
+      })
+    })
+  })
 
 // Bootstrap is a service-owned aggregate assembled from the individually
 // hardened schemas below. Keeping the aggregate itself unbudgeted avoids
@@ -904,6 +1013,7 @@ export type Question = z.infer<typeof questionSchema>
 export type Hint = z.infer<typeof hintSchema>
 export type ExerciseSet = z.infer<typeof exerciseSetSchema>
 export type Session = z.infer<typeof sessionSchema>
+export type SessionQuestion = z.infer<typeof sessionQuestionSchema>
 export type ErrorItem = z.infer<typeof errorItemSchema>
 export type Note = z.infer<typeof noteSchema>
 export type NoteFolder = z.infer<typeof noteFolderSchema>

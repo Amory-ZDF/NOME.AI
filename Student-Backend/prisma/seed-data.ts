@@ -152,6 +152,7 @@ export function createStudentSeedData(studentId = 'stu-001'): StudentSeedData {
     isOverdue: false,
     status: 'completed',
     lastAccuracy: 80,
+    exerciseSetId: 'set-calculus-foundations',
     completedAt: '2026-08-10T11:00:00.000Z',
   })
 
@@ -180,6 +181,14 @@ export function createStudentSeedData(studentId = 'stu-001'): StudentSeedData {
     subject: 'IELTS Reading',
     questions: [ieltsQuestion('question-ielts-evidence')],
   })
+  const completedQuestion = calculusQuestion('question-calculus-foundations')
+  const completedSet = exerciseSetSchema.parse({
+    id: 'set-calculus-foundations',
+    taskId: completedTask.id,
+    title: completedTask.title,
+    subject: completedTask.subject,
+    questions: [completedQuestion],
+  })
 
   const session = sessionSchema.parse({
     sessionId: 'session-calculus-foundations',
@@ -191,7 +200,7 @@ export function createStudentSeedData(studentId = 'stu-001'): StudentSeedData {
     timeSpentSeconds: 720,
     questions: [
       {
-        ...calculusQuestion('question-calculus-foundations'),
+        ...completedQuestion,
         result: {
           status: 'correct',
           attempts: [
@@ -321,6 +330,7 @@ export function createStudentSeedData(studentId = 'stu-001'): StudentSeedData {
     taskAdjustments: [taskAdjustment],
     exerciseSets: [
       { kind: 'task', value: aLevelSet },
+      { kind: 'task', value: completedSet },
       { kind: 'bank', value: ieltsBankSet },
     ],
     sessions: [session],
@@ -424,8 +434,7 @@ export async function seedStudentData(
       data: seed.sessions.map((value) => ({
         id: value.sessionId,
         studentId,
-        taskId:
-          value.taskId ?? (() => { throw new TypeError('Seed sessions require task ids') })(),
+        taskId: value.taskId,
         submittedAt: new Date(value.completedAt),
         payload: toInputJson(value),
       })),

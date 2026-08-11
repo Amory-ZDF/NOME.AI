@@ -452,10 +452,12 @@ export type TaskCreateNestedOneWithoutSessionsInput = {
   connect?: Prisma.TaskWhereUniqueInput
 }
 
-export type TaskUpdateOneRequiredWithoutSessionsNestedInput = {
+export type TaskUpdateOneWithoutSessionsNestedInput = {
   create?: Prisma.XOR<Prisma.TaskCreateWithoutSessionsInput, Prisma.TaskUncheckedCreateWithoutSessionsInput>
   connectOrCreate?: Prisma.TaskCreateOrConnectWithoutSessionsInput
   upsert?: Prisma.TaskUpsertWithoutSessionsInput
+  disconnect?: Prisma.TaskWhereInput | boolean
+  delete?: Prisma.TaskWhereInput | boolean
   connect?: Prisma.TaskWhereUniqueInput
   update?: Prisma.XOR<Prisma.XOR<Prisma.TaskUpdateToOneWithWhereWithoutSessionsInput, Prisma.TaskUpdateWithoutSessionsInput>, Prisma.TaskUncheckedUpdateWithoutSessionsInput>
 }
