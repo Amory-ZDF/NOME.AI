@@ -20,6 +20,7 @@ import { bootstrapRoutes } from './modules/bootstrap/bootstrap.routes.js'
 import { exerciseRoutes } from './modules/exercises/exercise.routes.js'
 import { errorRoutes } from './modules/errors/error.routes.js'
 import { noteRoutes } from './modules/notes/note.routes.js'
+import { materialRoutes } from './modules/materials/material.routes.js'
 import { sessionRoutes } from './modules/sessions/session.routes.js'
 import { settingsRoutes } from './modules/settings/settings.routes.js'
 import { taskRoutes } from './modules/tasks/task.routes.js'
@@ -29,6 +30,7 @@ interface BuildAppOptions {
   loggerStream?: { write(message: string): void }
   prisma: StudentPrisma
   now?: () => Date
+  createId?: () => string
 }
 
 const corsMethods = ['GET', 'HEAD', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS']
@@ -41,7 +43,7 @@ const healthEnvelopeSchema = z.object({
   }),
 })
 
-export function buildApp({ env, loggerStream, prisma, now = () => new Date() }: BuildAppOptions) {
+export function buildApp({ env, loggerStream, prisma, now = () => new Date(), createId = () => crypto.randomUUID() }: BuildAppOptions) {
   let logRawRouterRejection = () => undefined
   const invalidRequestBody = JSON.stringify(fail('INVALID_INPUT', 'Invalid request'))
   const rejectRawRouterRequest = (
@@ -168,6 +170,7 @@ export function buildApp({ env, loggerStream, prisma, now = () => new Date() }: 
   app.register(exerciseRoutes, { studentId: env.STUDENT_ID })
   app.register(errorRoutes, { studentId: env.STUDENT_ID })
   app.register(noteRoutes, { studentId: env.STUDENT_ID })
+  app.register(materialRoutes, { studentId: env.STUDENT_ID, now, createId })
   app.register(sessionRoutes, { studentId: env.STUDENT_ID })
   app.register(settingsRoutes, { studentId: env.STUDENT_ID })
   app.register(taskRoutes, { studentId: env.STUDENT_ID, now })
