@@ -1,7 +1,9 @@
 import { AppError } from '../../common/errors/app-error.js'
+import { ZodError } from 'zod'
 import type { Note } from '../../contracts/student-contracts.js'
 import type { StudentPrisma } from '../../db/client.js'
 import { toInputJson } from '../../db/json.js'
+import { Prisma } from '../../generated/prisma/client.js'
 import { applyNoteOrganization, applyNotePatch, hasLegacyVersionFields, normalizePersistedNote, sanitizeCreatedNote, sanitizeNoteOrganizeCommand, sanitizeNotePatchCommand, sanitizeNoteUndoCommand, undoLastNoteVersion, NoteContractError } from './note-versions.js'
 
 interface StoredNoteRow { id: string; studentId: string; version: number; updatedAtValue: Date; payload: unknown }
@@ -32,7 +34,15 @@ function isStrictlyLater(value: string, note: Note): boolean {
   return Date.parse(value) > latest
 }
 class NoteWriteConflict extends Error {}
-const mutationRetries = 3
+const transactionRetryDelaysMs = [25, 50, 100, 200] as const
+const mutationRetries = transactionRetryDelaysMs.length + 1
+function isTransientTransactionContention(cause: unknown): boolean {
+  if (cause instanceof AppError || cause instanceof ZodError) return false
+  return cause instanceof Prisma.PrismaClientKnownRequestError && (cause.code === 'P1008' || cause.code === 'P2034')
+}
+function waitForRetry(milliseconds: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, milliseconds))
+}
 function parseStored(row: StoredNoteRow): Note {
   try {
     const note = normalizePersistedNote(row.payload)
@@ -114,10 +124,12 @@ export class NoteService {
           return updated
         })
       } catch (cause) {
-        if (cause instanceof NoteWriteConflict) {
-          if (attempt + 1 < mutationRetries) continue
-          return staleChange()
+        const retryDelay = transactionRetryDelaysMs[attempt]
+        if ((cause instanceof NoteWriteConflict || isTransientTransactionContention(cause)) && retryDelay !== undefined) {
+          await waitForRetry(retryDelay)
+          continue
         }
+        if (cause instanceof NoteWriteConflict) return staleChange()
         throw cause
       }
     }
@@ -151,10 +163,12 @@ export class NoteService {
           return organized
         })
       } catch (cause) {
-        if (cause instanceof NoteWriteConflict) {
-          if (attempt + 1 < mutationRetries) continue
-          return staleChange()
+        const retryDelay = transactionRetryDelaysMs[attempt]
+        if ((cause instanceof NoteWriteConflict || isTransientTransactionContention(cause)) && retryDelay !== undefined) {
+          await waitForRetry(retryDelay)
+          continue
         }
+        if (cause instanceof NoteWriteConflict) return staleChange()
         throw cause
       }
     }
@@ -191,10 +205,12 @@ export class NoteService {
           return undone
         })
       } catch (cause) {
-        if (cause instanceof NoteWriteConflict) {
-          if (attempt + 1 < mutationRetries) continue
-          return staleChange()
+        const retryDelay = transactionRetryDelaysMs[attempt]
+        if ((cause instanceof NoteWriteConflict || isTransientTransactionContention(cause)) && retryDelay !== undefined) {
+          await waitForRetry(retryDelay)
+          continue
         }
+        if (cause instanceof NoteWriteConflict) return staleChange()
         throw cause
       }
     }

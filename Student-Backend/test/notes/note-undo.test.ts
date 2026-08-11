@@ -1,10 +1,14 @@
-import { afterAll, beforeEach, describe, expect, it } from 'vitest'
+import { afterAll, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { buildApp } from '../../src/app.js'
+import { AppError } from '../../src/common/errors/app-error.js'
 import { parseEnv } from '../../src/config/env.js'
 import { noteSchema } from '../../src/contracts/student-contracts.js'
 import { toInputJson } from '../../src/db/json.js'
-import { createTestPrisma, resetDatabase, TEST_DATABASE_URL } from '../helpers/database.js'
+import { Prisma } from '../../src/generated/prisma/client.js'
+import { NoteService } from '../../src/modules/notes/note.service.js'
+import { ZodError } from 'zod'
+import { createTestPrisma, holdStudentWriteLock, resetDatabase, TEST_DATABASE_URL, type TestPrisma } from '../helpers/database.js'
 
 const prisma = createTestPrisma()
 const studentId = 'student-note-undo'
@@ -20,7 +24,7 @@ async function insertStudent(id = studentId) {
   await prisma.student.create({ data: { id, name: id, avatar: null, joinedDays: 1, gradeInfo: 'Year 12', greeting: toInputJson({ message: 'Hello', fallback: 'Hello' }), moduleStats: toInputJson({ notesCount: 0, weeklyExercises: 0, latestAccuracy: 0, pendingErrorReview: 0 }), learningSummary: toInputJson({ overallMastery: 0, weeklyCompleted: 0, weeklyTotal: 0, overdueTasks: [], weakTopics: [], knowledgeHeatmap: [] }) } })
 }
 async function insertNote(note: { id: string; version: number; updatedAt: string } & Record<string, unknown> = current, id = studentId) { await prisma.note.create({ data: { id: note.id, studentId: id, version: note.version, updatedAtValue: new Date(note.updatedAt), payload: toInputJson(note) } }) }
-function createApp(id = studentId) { return buildApp({ env: parseEnv({ NODE_ENV: 'test', DATABASE_URL: TEST_DATABASE_URL, STUDENT_ID: id, LOG_LEVEL: 'silent' }), prisma }) }
+function createApp(id = studentId, client: TestPrisma = prisma) { return buildApp({ env: parseEnv({ NODE_ENV: 'test', DATABASE_URL: TEST_DATABASE_URL, STUDENT_ID: id, LOG_LEVEL: 'silent' }), prisma: client }) }
 
 beforeEach(async () => resetDatabase(prisma))
 afterAll(async () => { await resetDatabase(prisma); await prisma.$disconnect() })
@@ -145,5 +149,38 @@ describe('POST /api/notes/{id}/undo', () => {
     expect(stored.version).toBe(3)
     expect(payload.versions.map(({ changedAt }) => changedAt)).toEqual(['2026-08-10T11:00:01.000Z', '2026-08-10T11:00:02.000Z'])
     expect(payload.updatedAt).toBe('2026-08-10T11:00:02.000Z')
+  })
+
+  it.each([
+    ['PATCH', prior, { method: 'PATCH', payload: { title: 'locked edit', changedAt: '2026-08-10T12:00:00.000Z' } }],
+    ['organize', { ...prior, aiSuggestions: [{ id: 'tag', type: 'tag', value: 'locked' }] }, { method: 'POST', suffix: '/organize', payload: { suggestionIds: ['tag'], changedAt: '2026-08-10T12:00:00.000Z' } }],
+    ['undo', current, { method: 'POST', suffix: '/undo', payload: { changedAt: '2026-08-10T12:00:00.000Z' } }],
+  ] as const)('retries a real SQLite write lock for %s without a 500 or lost write', { timeout: 15_000 }, async (_action, note, request) => {
+    await insertStudent(); await insertNote(note)
+    const client = createTestPrisma(); const blocker = createTestPrisma(); const app = createApp(studentId, client)
+    const release = await holdStudentWriteLock(blocker, studentId, 125)
+    try {
+      const response = await app.inject({ method: request.method, url: `/api/notes/${current.id}${'suffix' in request ? request.suffix : ''}`, payload: request.payload })
+      expect(response.statusCode).toBe(200)
+      expect(response.json().data.note).toMatchObject({ version: note.version + 1, updatedAt: '2026-08-10T12:00:00.000Z' })
+      const stored = await prisma.note.findUniqueOrThrow({ where: { studentId_id: { studentId, id: current.id } } })
+      expect(stored.version).toBe(note.version + 1)
+    } finally {
+      await release(); await app.close(); await client.$disconnect(); await blocker.$disconnect()
+    }
+  })
+
+  it.each([
+    ['P1008', new Prisma.PrismaClientKnownRequestError('locked', { code: 'P1008', clientVersion: 'test' }), 5],
+    ['P2034', new Prisma.PrismaClientKnownRequestError('conflict', { code: 'P2034', clientVersion: 'test' }), 5],
+    ['P2028', new Prisma.PrismaClientKnownRequestError('synthetic', { code: 'P2028', clientVersion: 'test' }), 1],
+    ['AppError', new AppError('domain', 400, 'INVALID_INPUT'), 1],
+    ['ZodError', new ZodError([]), 1],
+    ['unknown', new Error('unknown'), 1],
+  ] as const)('retries only proven Prisma contention errors: %s', async (_label, cause, calls) => {
+    const transaction = vi.fn(async () => { throw cause })
+    const service = new NoteService({ $transaction: transaction } as any, studentId)
+    await expect(service.update(current.id, { title: 'retry', changedAt: '2026-08-10T12:00:00.000Z' })).rejects.toBe(cause)
+    expect(transaction).toHaveBeenCalledTimes(calls)
   })
 })
