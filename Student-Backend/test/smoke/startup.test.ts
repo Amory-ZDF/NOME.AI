@@ -1,4 +1,5 @@
-import { createServer } from 'node:net'
+import { createServer as createHttpServer } from 'node:http'
+import { createServer, type Socket } from 'node:net'
 import { mkdtemp, mkdir, rm, rmdir, writeFile } from 'node:fs/promises'
 import { dirname, relative, resolve, sep } from 'node:path'
 import { spawn, type ChildProcess } from 'node:child_process'
@@ -31,6 +32,16 @@ type CommandOptions = {
   registry?: ChildRegistry
   spawn?: SpawnChild
   timeoutMilliseconds?: number
+}
+type HealthWaitOptions = {
+  timeoutMilliseconds?: number
+  requestTimeoutMilliseconds?: number
+  pollMilliseconds?: number
+}
+type HealthResult = {
+  body: unknown
+  contentType: string | null
+  corsOrigin: string | null
 }
 
 const activeChildren: ChildRegistry = new Map()
@@ -231,26 +242,48 @@ async function command(
   }, label)
 }
 
-async function waitForHealth(port: number, child: ChildProcess, databaseUrl: string, secret: string, output: () => string): Promise<Response> {
-  const deadline = Date.now() + timeoutMilliseconds
+async function waitForHealth(
+  port: number,
+  child: ChildProcess,
+  databaseUrl: string,
+  secret: string,
+  output: () => string,
+  options: HealthWaitOptions = {},
+): Promise<HealthResult> {
+  const healthTimeout = options.timeoutMilliseconds ?? timeoutMilliseconds
+  const requestTimeout = options.requestTimeoutMilliseconds ?? requestTimeoutMilliseconds
+  const pollDelay = options.pollMilliseconds ?? pollMilliseconds
+  const deadline = Date.now() + healthTimeout
   let lastError = 'server did not respond'
   while (Date.now() < deadline) {
-    if (child.exitCode !== null) throw new Error(`Production server exited early (${child.exitCode}):\n${sanitize(output(), databaseUrl, secret)}`)
+    if (child.exitCode !== null || child.signalCode !== null) {
+      throw new Error(`Production server exited early (${child.exitCode ?? child.signalCode}):\n${sanitize(output(), databaseUrl, secret)}`)
+    }
     const controller = new AbortController()
-    const timeout = setTimeout(() => controller.abort(), requestTimeoutMilliseconds)
+    const timeout = setTimeout(
+      () => controller.abort(new Error(`Timed out reading production health response after ${requestTimeout}ms`)),
+      requestTimeout,
+    )
     try {
       const response = await fetch(`http://127.0.0.1:${port}/health`, {
         headers: { authorization: `Bearer ${secret}`, origin: 'http://smoke.test' },
         signal: controller.signal,
       })
-      if (response.status === 200) return response
+      if (response.status === 200) {
+        const contentType = response.headers.get('content-type')
+        const corsOrigin = response.headers.get('access-control-allow-origin')
+        const body: unknown = await response.json()
+        return { body, contentType, corsOrigin }
+      }
       lastError = `health returned ${response.status}`
+      await response.body?.cancel()
     } catch (error) {
       lastError = error instanceof Error ? error.message : String(error)
     } finally {
       clearTimeout(timeout)
     }
-    await new Promise((resolvePromise) => setTimeout(resolvePromise, pollMilliseconds))
+    const remaining = deadline - Date.now()
+    if (remaining > 0) await new Promise((resolvePromise) => setTimeout(resolvePromise, Math.min(pollDelay, remaining)))
   }
   throw new Error(`Timed out waiting for production health: ${lastError}\n${sanitize(output(), databaseUrl, secret)}`)
 }
@@ -333,9 +366,9 @@ describe('compiled production server startup', () => {
 
       await runWithCleanup(async () => {
         const health = await waitForHealth(port, child!, databaseUrl, secret, () => output)
-        expect(health.headers.get('content-type')).toMatch(/^application\/json; charset=utf-8$/)
-        expect(health.headers.get('access-control-allow-origin')).toBe('http://smoke.test')
-        await expect(health.json()).resolves.toStrictEqual({ code: 0, message: 'ok', data: { status: 'ok' } })
+        expect(health.contentType).toMatch(/^application\/json; charset=utf-8$/)
+        expect(health.corsOrigin).toBe('http://smoke.test')
+        expect(health.body).toStrictEqual({ code: 0, message: 'ok', data: { status: 'ok' } })
 
         await Promise.all([sendPlatformShutdownSignal(child!), sendPlatformShutdownSignal(child!)])
         const closeResult = await boundedClose(serverState!, 'compiled production server')
@@ -360,6 +393,49 @@ describe('compiled production server startup', () => {
 })
 
 describe('startup child lifecycle regression probes', () => {
+  it('keeps the request deadline active while a health response body stalls', async () => {
+    const sockets = new Set<Socket>()
+    let requests = 0
+    const server = createHttpServer((_request, response) => {
+      requests += 1
+      response.writeHead(200, {
+        'access-control-allow-origin': 'http://smoke.test',
+        'content-type': 'application/json; charset=utf-8',
+      })
+      response.flushHeaders()
+      response.write('{"code":0')
+    })
+    server.on('connection', (socket) => {
+      sockets.add(socket)
+      socket.once('close', () => sockets.delete(socket))
+    })
+    await new Promise<void>((resolveListen, reject) => {
+      server.once('error', reject)
+      server.listen({ host: '127.0.0.1', port: 0 }, resolveListen)
+    })
+    const address = server.address()
+    if (address === null || typeof address === 'string') throw new Error('Could not start slow-body regression server')
+
+    const startedAt = Date.now()
+    try {
+      await expect(waitForHealth(
+        address.port,
+        fakeChild(),
+        'file:slow-body-probe.db',
+        'slow-body-probe-secret',
+        () => '',
+        { timeoutMilliseconds: 100, requestTimeoutMilliseconds: 20, pollMilliseconds: 5 },
+      )).rejects.toThrow('Timed out waiting for production health')
+      expect(Date.now() - startedAt).toBeLessThan(500)
+      expect(requests).toBeGreaterThan(0)
+    } finally {
+      const closed = new Promise<void>((resolveClose, reject) => server.close((error) => error === undefined ? resolveClose() : reject(error)))
+      server.closeAllConnections()
+      for (const socket of sockets) socket.destroy()
+      await withTimeout(closed, 500, 'Timed out closing slow-body regression server')
+    }
+  })
+
   it('tracks one spawn-time close state through fast-close and already-exited paths', async () => {
     const registry = new Map<ChildProcess, ChildCloseState>()
     const fastChild = fakeChild()
