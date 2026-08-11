@@ -142,19 +142,56 @@ export async function startServer({
   signalTarget,
 }: StartServerOptions): Promise<{ shutdown: () => Promise<void> }> {
   let disposeSignals: () => void = () => undefined
-  const shutdown = createShutdown(app, prisma, () => disposeSignals())
+  let settleStartupAttempt!: () => void
+  let startupAttemptSettled = false
+  const startupAttempt = new Promise<void>((resolveStartupAttempt) => {
+    settleStartupAttempt = () => {
+      if (startupAttemptSettled) {
+        return
+      }
+      startupAttemptSettled = true
+      resolveStartupAttempt()
+    }
+  })
+  const cleanup = createShutdown(app, prisma, () => disposeSignals())
+  let shutdownRequested = false
+  let shutdownPromise: Promise<void> | undefined
+  const shutdown = () => {
+    shutdownRequested = true
+    shutdownPromise ??= (async () => {
+      await startupAttempt
+      await cleanup()
+    })()
+    return shutdownPromise
+  }
+
+  let didStartupFail = false
+  let startupError: unknown
 
   try {
     disposeSignals = registerShutdownSignals(signalTarget, shutdown, onShutdownError)
     await prisma.$connect()
-    await app.listen({ host, port })
-  } catch (startupError) {
+    if (!shutdownRequested) {
+      await app.listen({ host, port })
+    }
+  } catch (error) {
+    didStartupFail = true
+    startupError = error
+  }
+
+  settleStartupAttempt()
+
+  if (didStartupFail) {
     try {
       await shutdown()
     } catch (cleanupError) {
       throw startupCleanupError(startupError, cleanupError)
     }
     throw startupError
+  }
+
+  if (shutdownRequested) {
+    await shutdown()
   }
 
   return { shutdown }

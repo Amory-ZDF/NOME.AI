@@ -8,6 +8,14 @@ import {
   startServer,
 } from '../../src/server.js'
 
+function createDeferred() {
+  let resolve!: () => void
+  const promise = new Promise<void>((resolvePromise) => {
+    resolve = resolvePromise
+  })
+  return { promise, resolve }
+}
+
 function createServerDoubles(options: {
   closeError?: Error
   connectError?: Error
@@ -95,6 +103,84 @@ describe('Student Backend server lifecycle', () => {
     expect(signals.listenerCount('SIGINT')).toBe(0)
     expect(signals.listenerCount('SIGTERM')).toBe(0)
     expect(reportError).not.toHaveBeenCalled()
+  })
+
+  it('never listens when shutdown is requested while connect is pending', async () => {
+    const connectGate = createDeferred()
+    const signals = new EventEmitter()
+    const { app, callOrder, prisma } = createServerDoubles()
+    const reportError = vi.fn()
+    prisma.$connect.mockImplementation(async () => {
+      callOrder.push('connect')
+      await connectGate.promise
+    })
+
+    const startPromise = startServer({
+      app,
+      host: '127.0.0.1',
+      onShutdownError: reportError,
+      port: 3001,
+      prisma,
+      signalTarget: signals,
+    })
+
+    expect(prisma.$connect).toHaveBeenCalledTimes(1)
+    signals.emit('SIGINT')
+    await Promise.resolve()
+
+    expect(app.listen).not.toHaveBeenCalled()
+    expect(app.close).not.toHaveBeenCalled()
+    expect(prisma.$disconnect).not.toHaveBeenCalled()
+
+    connectGate.resolve()
+    const { shutdown } = await startPromise
+    await shutdown()
+
+    expect(callOrder).toEqual(['connect', 'close', 'disconnect'])
+    expect(app.listen).not.toHaveBeenCalled()
+    expect(app.close).toHaveBeenCalledTimes(1)
+    expect(prisma.$disconnect).toHaveBeenCalledTimes(1)
+    expect(reportError).not.toHaveBeenCalled()
+    expect(signals.listenerCount('SIGINT')).toBe(0)
+    expect(signals.listenerCount('SIGTERM')).toBe(0)
+  })
+
+  it('waits for a pending listen to settle before shutting down', async () => {
+    const listenGate = createDeferred()
+    const signals = new EventEmitter()
+    const { app, callOrder, prisma } = createServerDoubles()
+    const reportError = vi.fn()
+    app.listen.mockImplementation(async () => {
+      callOrder.push('listen')
+      await listenGate.promise
+    })
+
+    const startPromise = startServer({
+      app,
+      host: '127.0.0.1',
+      onShutdownError: reportError,
+      port: 3001,
+      prisma,
+      signalTarget: signals,
+    })
+
+    await vi.waitFor(() => expect(app.listen).toHaveBeenCalledTimes(1))
+    signals.emit('SIGTERM')
+    await Promise.resolve()
+
+    expect(app.close).not.toHaveBeenCalled()
+    expect(prisma.$disconnect).not.toHaveBeenCalled()
+
+    listenGate.resolve()
+    const { shutdown } = await startPromise
+    await shutdown()
+
+    expect(callOrder).toEqual(['connect', 'listen', 'close', 'disconnect'])
+    expect(app.close).toHaveBeenCalledTimes(1)
+    expect(prisma.$disconnect).toHaveBeenCalledTimes(1)
+    expect(reportError).not.toHaveBeenCalled()
+    expect(signals.listenerCount('SIGINT')).toBe(0)
+    expect(signals.listenerCount('SIGTERM')).toBe(0)
   })
 
   it.each(['connect', 'listen'] as const)(
