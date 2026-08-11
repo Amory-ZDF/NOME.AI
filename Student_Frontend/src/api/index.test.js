@@ -2,14 +2,20 @@ import { afterEach, expect, test, vi } from 'vitest'
 import {
   addErrors,
   bootstrap,
+  cancelUploadJob,
   completeTask,
   createNote,
   createTask,
+  createUploadJob,
+  confirmUploadJob,
   generateVariant,
   getBankExerciseSet,
   getExerciseSet,
   getSessionSummary,
+  listNotes,
   markErrorMastered,
+  organizeNote,
+  processUploadJob,
   reportTaskAdjustment,
   resetMockState,
   scheduleErrorVariant,
@@ -18,9 +24,13 @@ import {
   upsertErrors,
   updateNote,
   updateSettings,
+  undoNote,
   verifyErrorVariant,
 } from './index'
 import { isCompleteVariantResult } from '../features/exercise/exerciseContracts'
+import { MATERIAL_TYPES, MAX_FILE_BYTES } from '../features/materials/materialRules'
+import { normalizeNoteSuggestions } from '../features/materials/noteVersions'
+import { MATERIAL_FIXTURES } from '../data/materialFixtures'
 
 const makeTask = (overrides = {}) => ({
   id: 't-new', title: 'New task', type: 'ai_recommended', subject: 'A-Level Math',
@@ -39,6 +49,50 @@ const makeNote = (overrides = {}) => ({
   tags: [], linkedTopics: [], linkedErrors: [], source: 'typed',
   createdAt: '2026-08-06', updatedAt: '2026-08-06',
   content: [{ t: 'p', v: 'New content' }], aiSuggestions: [], ...overrides,
+})
+
+const makeUploadMetadata = (overrides = {}) => ({
+  id: 'job-1',
+  fileName: 'notes.jpg',
+  mimeType: 'image/jpeg',
+  size: 1000,
+  materialType: 'handwritten_draft',
+  createdAt: '2026-08-07T08:00:00.000Z',
+  ...overrides,
+})
+
+const makeUploadJob = (overrides = {}) => ({
+  ...makeUploadMetadata(),
+  updatedAt: '2026-08-07T08:00:00.000Z',
+  progress: 0,
+  status: 'queued',
+  ...overrides,
+})
+
+const makeClassifiedUploadJob = (overrides = {}) => makeUploadJob({
+  status: 'needs_confirmation',
+  progress: 100,
+  result: structuredClone(MATERIAL_FIXTURES.alevel_handwritten_calculus_note),
+  ...overrides,
+})
+
+const makeConfirmedNote = (jobId = 'job-1', overrides = {}) => ({
+  ...makeNote({
+    id: `note-${jobId}`,
+    materialType: 'handwritten_draft',
+    examBoard: 'Cambridge International',
+    subject: 'A-Level Math',
+    chapter: 'Calculus',
+    questionBlocks: structuredClone(MATERIAL_FIXTURES.alevel_handwritten_calculus_note.questionBlocks),
+    answerBlocks: structuredClone(MATERIAL_FIXTURES.alevel_handwritten_calculus_note.answerBlocks),
+    content: structuredClone(MATERIAL_FIXTURES.alevel_handwritten_calculus_note.content),
+    linkedTopics: structuredClone(MATERIAL_FIXTURES.alevel_handwritten_calculus_note.linkedTopics),
+    sourceJobId: jobId,
+    source: 'handwritten',
+    versions: [],
+    version: 1,
+  }),
+  ...overrides,
 })
 
 const makeError = (overrides = {}) => {
@@ -265,8 +319,73 @@ test('createNote returns and persists the note', async () => {
   await resetMockState()
   const note = makeNote()
 
-  await expect(createNote(note)).resolves.toEqual({ note })
-  await expect(bootstrap()).resolves.toMatchObject({ notes: expect.arrayContaining([note]) })
+  const versionedNote = { ...note, versions: [], version: 1 }
+  await expect(createNote(note)).resolves.toEqual({ note: versionedNote })
+  await expect(bootstrap()).resolves.toMatchObject({ notes: expect.arrayContaining([versionedNote]) })
+})
+
+test('round-trips a strict Task 2 note and future image/list/highlight content without dropping fields', async () => {
+  // Catches createNote allowlisting away material provenance or Task 5 content references.
+  await resetMockState()
+  const note = makeNote({
+    id: 'n-material-roundtrip',
+    materialType: 'handwritten_draft',
+    examBoard: 'Cambridge International',
+    subject: 'A-Level Math',
+    chapter: 'Calculus',
+    questionBlocks: [{ id: 'q1', label: 'Question 1', text: 'Differentiate x².' }],
+    answerBlocks: [{ id: 'a1', questionId: 'q1', text: '2x' }],
+    sourceJobId: 'job-1',
+    content: [
+      { t: 'image', v: 'Handwritten graph', reference: 'object://notes/graph-1', alt: 'A labelled graph' },
+      { t: 'list', v: 'Differentiate\nSolve\nClassify' },
+      { t: 'highlight', v: 'Check the second derivative.' },
+    ],
+  })
+
+  const created = await createNote(note)
+  expect(created.note).toEqual({ ...note, versions: [], version: 1 })
+  expect((await listNotes()).notes.find(({ id }) => id === note.id)).toEqual(created.note)
+})
+
+test.each([
+  ['unknown field', () => makeNote({ unknown: true })],
+  ['top-level raw bytes', () => makeNote({ rawBytes: 'AA==' })],
+  ['nested base64', () => makeNote({ content: [{ t: 'image', v: 'x', reference: 'object://x', alt: 'x', base64: 'AA==' }] })],
+  ['undefined', () => makeNote({ subject: undefined })],
+  ['typed array', () => makeNote({ linkedErrors: new Uint8Array([1]) })],
+  ['Blob', () => makeNote({ content: [new Blob(['unsafe'])] })],
+  ['custom prototype', () => Object.assign(Object.create({ inherited: true }), makeNote())],
+  ['accessor', () => Object.defineProperty(makeNote(), 'subject', { enumerable: true, get: () => 'Math' })],
+])('rejects a createNote payload containing %s atomically', async (_, makeInvalidNote) => {
+  // Catches validation after persistence or structuredClone accepting non-contract payloads.
+  await resetMockState()
+  const before = await listNotes()
+
+  await expect(createNote(makeInvalidNote())).rejects.toMatchObject({ code: 'INVALID_NOTE' })
+  expect(await listNotes()).toEqual(before)
+})
+
+test('validates createNote before a real transport call', async () => {
+  // Catches real mode bypassing the same strict note boundary used by the mock repository.
+  const post = vi.fn()
+  vi.resetModules()
+  vi.doMock('./client', () => ({
+    ApiError: class ApiError extends Error {
+      constructor(message, options = {}) { super(message); Object.assign(this, options) }
+    },
+    http: { post },
+    isMockMode: false,
+  }))
+
+  try {
+    const realApi = await import('./index')
+    await expect(realApi.createNote(makeNote({ rawBytes: 'AA==' }))).rejects.toMatchObject({ code: 'INVALID_NOTE' })
+    expect(post).not.toHaveBeenCalled()
+  } finally {
+    vi.doUnmock('./client')
+    vi.resetModules()
+  }
 })
 
 test('updateNote returns and persists the note patch', async () => {
@@ -279,6 +398,1016 @@ test('updateNote returns and persists the note patch', async () => {
   await expect(bootstrap()).resolves.toMatchObject({
     notes: expect.arrayContaining([expect.objectContaining({ id: 'n1', title: 'Edited title' })]),
   })
+})
+
+test.each([
+  ['data reference', () => [{ t: 'image', v: 'unsafe', reference: 'data:image/png;base64,AA==', alt: 'unsafe' }]],
+  ['base64 reference', () => [{ t: 'image', v: 'unsafe', reference: 'base64:AA==', alt: 'unsafe' }]],
+  ['raw reference', () => [{ t: 'image', v: 'unsafe', reference: 'raw:0102', alt: 'unsafe' }]],
+  ['Blob', () => [new Blob(['unsafe'])]],
+  ['typed array', () => [new Uint8Array([1])]],
+  ['custom prototype', () => [Object.assign(Object.create({ inherited: true }), { t: 'p', v: 'unsafe' })]],
+  ['undefined', () => [{ t: 'p', v: undefined }]],
+  ['cycle', () => {
+    const block = { t: 'p', v: 'unsafe' }
+    block.self = block
+    return [block]
+  }],
+])('rejects a mock update containing unsafe %s content without changing note or storage', async (_, makeContent) => {
+  // Catches versionable patch validation being mistaken for the strict persisted-note postcondition.
+  await resetMockState()
+  const before = await listNotes()
+  const storedBefore = localStorage.getItem('nome-ai.student-state.v1')
+
+  await expect(updateNote('n1', { content: makeContent() }))
+    .rejects.toMatchObject({ code: 'INVALID_NOTE' })
+
+  expect(await listNotes()).toEqual(before)
+  expect(localStorage.getItem('nome-ai.student-state.v1')).toBe(storedBefore)
+})
+
+test('undoes a legacy null-source snapshot without writing an incomplete persisted note', async () => {
+  // Catches undo deleting the current legal source and causing the note to disappear on the next list migration.
+  await resetMockState()
+  await updateNote('n1', {
+    title: 'Edited legacy source note',
+    changedAt: '2026-08-07T09:10:00.000Z',
+  })
+  mutateStoredState((state) => {
+    const note = state.notes.find(({ id }) => id === 'n1')
+    note.versions[note.versions.length - 1].source = null
+  })
+
+  const undone = await undoNote('n1', { changedAt: '2026-08-07T09:11:00.000Z' })
+  expect(undone.note).toMatchObject({ id: 'n1', source: 'typed', version: 3 })
+  expect((await listNotes()).notes.find(({ id }) => id === 'n1')).toEqual(undone.note)
+  expect(JSON.parse(localStorage.getItem('nome-ai.student-state.v1')).data.notes)
+    .toContainEqual(undone.note)
+})
+
+test('validates real note mutation commands before transport and rejects forged responses', async () => {
+  // Catches real update/organize/undo bypassing command validation or returning an unsafe/wrong-id note.
+  const patch = vi.fn()
+  const post = vi.fn()
+  vi.resetModules()
+  vi.doMock('./client', () => ({
+    ApiError: class ApiError extends Error {
+      constructor(message, options = {}) { super(message); Object.assign(this, options) }
+    },
+    http: { patch, post },
+    isMockMode: false,
+  }))
+
+  try {
+    const realApi = await import('./index')
+    const cyclicIds = ['suggestion-1']
+    cyclicIds.push(cyclicIds)
+
+    await expect(realApi.updateNote('n1', { unknown: true }))
+      .rejects.toMatchObject({ code: 'INVALID_NOTE_PATCH' })
+    await expect(realApi.updateNote('n1', {
+      content: [{ t: 'image', v: 'unsafe', reference: 'data:image/png;base64,AA==', alt: 'unsafe' }],
+    })).rejects.toMatchObject({ code: 'INVALID_NOTE' })
+    await expect(realApi.organizeNote('n1', new Uint8Array([1])))
+      .rejects.toMatchObject({ code: 'INVALID_SUGGESTION_IDS' })
+    await expect(realApi.organizeNote('n1', cyclicIds))
+      .rejects.toMatchObject({ code: 'INVALID_SUGGESTION_IDS' })
+    await expect(realApi.undoNote('n1', { unknown: true }))
+      .rejects.toMatchObject({ code: 'INVALID_CHANGE_METADATA' })
+    expect(patch).not.toHaveBeenCalled()
+    expect(post).not.toHaveBeenCalled()
+
+    const versioned = (overrides = {}) => ({ ...makeNote(), versions: [], version: 1, ...overrides })
+    patch.mockResolvedValueOnce({ note: versioned({ rawBytes: 'AA==' }) })
+    post
+      .mockResolvedValueOnce({ note: versioned({ id: 'wrong-id' }) })
+      .mockResolvedValueOnce({ note: versioned({ source: undefined }) })
+
+    await expect(realApi.updateNote('n1', { title: 'Edited' }))
+      .rejects.toMatchObject({ code: 'INVALID_UPLOAD_RESPONSE' })
+    await expect(realApi.organizeNote('n1', ['suggestion-1']))
+      .rejects.toMatchObject({ code: 'INVALID_UPLOAD_RESPONSE' })
+    await expect(realApi.undoNote('n1'))
+      .rejects.toMatchObject({ code: 'INVALID_UPLOAD_RESPONSE' })
+  } finally {
+    vi.doUnmock('./client')
+    vi.resetModules()
+  }
+})
+
+const makeUnreadNoteMutationCommand = (action, onRead) => {
+  if (action === 'update') {
+    return [Object.defineProperty({}, 'title', {
+      enumerable: true,
+      get: () => {
+        onRead()
+        return 'Must not be read'
+      },
+    })]
+  }
+  if (action === 'organize') {
+    const suggestionIds = []
+    Object.defineProperty(suggestionIds, 0, {
+      enumerable: true,
+      get: () => {
+        onRead()
+        return 's-tag'
+      },
+    })
+    return [suggestionIds]
+  }
+  return [Object.defineProperty({}, 'changedAt', {
+    enumerable: true,
+    get: () => {
+      onRead()
+      return '2026-08-07T09:10:00.000Z'
+    },
+  })]
+}
+
+test('rejects blank note mutation ids before reading commands or calling real transport', async () => {
+  // Catches real mode encoding an invalid id or command snapshotting before the shared id preflight.
+  const patch = vi.fn()
+  const post = vi.fn()
+  vi.resetModules()
+  vi.doMock('./client', () => ({
+    ApiError: class ApiError extends Error {
+      constructor(message, options = {}) { super(message); Object.assign(this, options) }
+    },
+    http: { patch, post },
+    isMockMode: false,
+  }))
+
+  try {
+    const realApi = await import('./index')
+    const failures = []
+    let commandReads = 0
+    for (const id of ['', '   ', '\t']) {
+      for (const action of ['update', 'organize', 'undo']) {
+        try {
+          await realApi[`${action}Note`](id, ...makeUnreadNoteMutationCommand(action, () => {
+            commandReads += 1
+          }))
+          failures.push(null)
+        } catch (error) {
+          failures.push(error)
+        }
+      }
+    }
+
+    expect(failures).toHaveLength(9)
+    failures.forEach((error) => expect(error).toMatchObject({ status: 400, code: 'INVALID_INPUT' }))
+    expect(commandReads).toBe(0)
+    expect(patch).not.toHaveBeenCalled()
+    expect(post).not.toHaveBeenCalled()
+  } finally {
+    vi.doUnmock('./client')
+    vi.resetModules()
+  }
+})
+
+test('rejects blank note mutation ids before reading commands or changing mock state', async () => {
+  // Catches mock-only late id validation after command access or repository entry.
+  await resetMockState()
+  const before = await listNotes()
+  const storedBefore = localStorage.getItem('nome-ai.student-state.v1')
+  const failures = []
+  let commandReads = 0
+
+  for (const id of ['', '   ', '\t']) {
+    for (const action of ['update', 'organize', 'undo']) {
+      try {
+        await ({ update: updateNote, organize: organizeNote, undo: undoNote })[action](
+          id,
+          ...makeUnreadNoteMutationCommand(action, () => {
+            commandReads += 1
+          }),
+        )
+        failures.push(null)
+      } catch (error) {
+        failures.push(error)
+      }
+    }
+  }
+
+  expect(failures).toHaveLength(9)
+  failures.forEach((error) => expect(error).toMatchObject({ status: 400, code: 'INVALID_INPUT' }))
+  expect(commandReads).toBe(0)
+  expect(await listNotes()).toEqual(before)
+  expect(localStorage.getItem('nome-ai.student-state.v1')).toBe(storedBefore)
+})
+
+const explicitInvalidMetadataCases = () => {
+  const cyclicChangedAt = {}
+  cyclicChangedAt.self = cyclicChangedAt
+  const invalidValues = [
+    ['null', null],
+    ['undefined', undefined],
+    ['non-string', 42],
+    ['Blob', new Blob(['unsafe'])],
+    ['cycle', cyclicChangedAt],
+  ]
+  const validChangedAt = '2026-08-07T09:10:00.000Z'
+  return invalidValues.flatMap(([valueLabel, value]) => ([
+    [`update patch changedAt ${valueLabel}`, 'update', {
+      patch: { changedAt: value },
+      options: { changedAt: validChangedAt },
+    }],
+    [`update patch updatedAt ${valueLabel}`, 'update', {
+      patch: { changedAt: validChangedAt, updatedAt: value },
+      options: { changedAt: validChangedAt },
+    }],
+    [`update patch reason ${valueLabel}`, 'update', {
+      patch: { reason: value },
+      options: { reason: 'edit' },
+    }],
+    [`update options changedAt ${valueLabel}`, 'update', {
+      options: { changedAt: value },
+    }],
+    [`update options reason ${valueLabel}`, 'update', {
+      options: { reason: value },
+    }],
+    [`organize options changedAt ${valueLabel}`, 'organize', {
+      options: { changedAt: value },
+    }],
+    [`undo options changedAt ${valueLabel}`, 'undo', {
+      options: { changedAt: value },
+    }],
+  ]))
+}
+
+const invokeInvalidMetadataCase = (api, action, input) => {
+  if (action === 'update') {
+    return api.updateNote('n1', { title: 'Edited', ...input.patch }, input.options)
+  }
+  if (action === 'organize') return api.organizeNote('n1', ['s-tag'], input.options)
+  return api.undoNote('n1', input.options)
+}
+
+test('rejects explicit invalid note metadata before real transport', async () => {
+  // Catches nullish defaults silently replacing explicit own null/undefined metadata values.
+  const patch = vi.fn()
+  const post = vi.fn()
+  vi.resetModules()
+  vi.doMock('./client', () => ({
+    ApiError: class ApiError extends Error {
+      constructor(message, options = {}) { super(message); Object.assign(this, options) }
+    },
+    http: { patch, post },
+    isMockMode: false,
+  }))
+
+  try {
+    const realApi = await import('./index')
+    const failures = []
+    for (const [, action, input] of explicitInvalidMetadataCases()) {
+      try {
+        await invokeInvalidMetadataCase(realApi, action, input)
+        failures.push(null)
+      } catch (error) {
+        failures.push(error)
+      }
+    }
+
+    expect(failures).toHaveLength(35)
+    failures.forEach((error) => expect(error).toMatchObject({
+      status: 400,
+      code: 'INVALID_CHANGE_METADATA',
+    }))
+    expect(patch).not.toHaveBeenCalled()
+    expect(post).not.toHaveBeenCalled()
+  } finally {
+    vi.doUnmock('./client')
+    vi.resetModules()
+  }
+})
+
+test('rejects explicit invalid note metadata without changing mock state or storage', async () => {
+  // Catches mock mode defaulting explicit invalid metadata and persisting the resulting mutation.
+  const attempts = []
+  for (const [label, action, input] of explicitInvalidMetadataCases()) {
+    await resetMockState()
+    if (action === 'undo') {
+      await updateNote('n1', { title: 'Version 2' }, {
+        changedAt: '2026-08-07T09:00:00.000Z',
+        reason: 'edit',
+      })
+    }
+    const before = await listNotes()
+    const storedBefore = localStorage.getItem('nome-ai.student-state.v1')
+    let error = null
+    try {
+      await invokeInvalidMetadataCase({ updateNote, organizeNote, undoNote }, action, input)
+    } catch (caught) {
+      error = caught
+    }
+    attempts.push({
+      label,
+      error,
+      unchanged: JSON.stringify(await listNotes()) === JSON.stringify(before),
+      storageUnchanged: localStorage.getItem('nome-ai.student-state.v1') === storedBefore,
+    })
+  }
+
+  expect(attempts).toHaveLength(35)
+  attempts.forEach(({ error, unchanged, storageUnchanged }) => {
+    expect(error).toMatchObject({ status: 400, code: 'INVALID_CHANGE_METADATA' })
+    expect(unchanged).toBe(true)
+    expect(storageUnchanged).toBe(true)
+  })
+}, 20_000)
+
+test('persists queued, confirmation, and completed upload states with metadata only', async () => {
+  // Catches a lifecycle implementation that returns transient jobs or stores caller-owned file bytes.
+  await resetMockState()
+  const rawBytes = new Uint8Array([1, 2, 3])
+  const metadata = makeUploadMetadata({
+    examBoard: 'Cambridge International',
+    subject: 'A-Level Math',
+    chapter: 'Calculus',
+  })
+
+  const queued = await createUploadJob(metadata)
+  expect(queued.job).toEqual({
+    ...metadata,
+    updatedAt: metadata.createdAt,
+    progress: 0,
+    status: 'queued',
+  })
+  expect(queued.job).not.toHaveProperty('file')
+  expect(queued.job).not.toHaveProperty('rawBytes')
+  expect(JSON.stringify(queued.job)).not.toContain(String(rawBytes))
+
+  const processed = await processUploadJob(metadata.id)
+  expect(processed.job).toMatchObject({
+    id: metadata.id,
+    status: 'needs_confirmation',
+    progress: 100,
+    result: { materialType: 'handwritten_draft' },
+  })
+
+  const completed = await confirmUploadJob(metadata.id, {
+    subject: 'A-Level Math',
+    folderId: 'f-math-ch7',
+    folderPath: 'A-Level Math / Ch7 Calculus',
+  })
+  expect(completed).toMatchObject({
+    job: { id: metadata.id, status: 'completed', progress: 100 },
+    note: {
+      id: `note-${metadata.id}`,
+      sourceJobId: metadata.id,
+      source: 'handwritten',
+      version: 1,
+      versions: [],
+    },
+  })
+
+  const reloaded = await bootstrap()
+  expect(reloaded.uploadJobs).toContainEqual(completed.job)
+  expect(reloaded.notes).toContainEqual(completed.note)
+})
+
+test('snapshots upload metadata, enforces exact file boundaries, and rejects byte-bearing payloads atomically', async () => {
+  // Catches validation after repository latency, a decimal-MB limit, or accidental File/base64 persistence.
+  await resetMockState()
+  const mutable = makeUploadMetadata({ id: 'job-snapshot', size: MAX_FILE_BYTES })
+  const operation = createUploadJob(mutable)
+  mutable.fileName = 'mutated.exe'
+  mutable.mimeType = 'application/x-msdownload'
+  mutable.size = MAX_FILE_BYTES + 1
+
+  await expect(operation).resolves.toMatchObject({
+    job: { id: 'job-snapshot', fileName: 'notes.jpg', mimeType: 'image/jpeg', size: MAX_FILE_BYTES },
+  })
+  await expect(createUploadJob(makeUploadMetadata({ id: 'job-too-large', size: MAX_FILE_BYTES + 1 })))
+    .rejects.toMatchObject({ name: 'ApiError', status: 400, code: 'FILE_TOO_LARGE' })
+  await expect(createUploadJob(makeUploadMetadata({ id: 'job-unsupported', mimeType: 'text/plain' })))
+    .rejects.toMatchObject({ name: 'ApiError', status: 400, code: 'UNSUPPORTED_TYPE' })
+
+  for (const [id, unsafe] of [
+    ['job-file', { file: { name: 'hidden.pdf', type: 'application/pdf', size: 1 } }],
+    ['job-bytes', { rawBytes: new Uint8Array([1]) }],
+    ['job-base64', { base64: 'AA==' }],
+  ]) {
+    await expect(createUploadJob(makeUploadMetadata({ id, ...unsafe })))
+      .rejects.toMatchObject({ name: 'ApiError', status: 400, code: 'INVALID_UPLOAD_METADATA' })
+  }
+  expect((await bootstrap()).uploadJobs.map(({ id }) => id)).toEqual(['job-snapshot'])
+})
+
+test('filters polluted upload jobs from mock bootstrap and removes them from later lifecycle reads', async () => {
+  // Catches bootstrap returning an unsafe persisted job that later endpoints can propagate.
+  await resetMockState()
+  await createUploadJob(makeUploadMetadata({ id: 'job-safe-bootstrap' }))
+  mutateStoredState((state) => {
+    state.uploadJobs.unshift(makeUploadJob({ id: 'job-polluted-bootstrap', rawBytes: 'AA==' }))
+  })
+
+  const data = await bootstrap()
+  expect(data.uploadJobs.map(({ id }) => id)).toEqual(['job-safe-bootstrap'])
+  await expect(processUploadJob('job-polluted-bootstrap')).rejects.toMatchObject({
+    code: 'NOT_FOUND',
+  })
+})
+
+test('migrates valid legacy notes before strict filtering and persistently removes polluted notes', async () => {
+  // Catches bootstrap/list returning or repeatedly reprocessing unsafe persisted note records.
+  await resetMockState()
+  const before = (await bootstrap()).notes
+  const [first, ...rest] = before
+  const { version: _version, versions: _versions, ...legacyFirst } = first
+  const versioned = (note) => ({ ...note, versions: [], version: 1 })
+  const polluted = [
+    versioned(makeNote({ id: 'note-unknown', rawBytes: 'AA==' })),
+    versioned(makeNote({
+      id: 'note-data-reference',
+      content: [{ t: 'image', v: 'unsafe', reference: 'data:image/png;base64,AA==', alt: 'unsafe' }],
+    })),
+    versioned(makeNote({
+      id: 'note-base64-reference',
+      content: [{ t: 'image', v: 'unsafe', reference: 'base64:AA==', alt: 'unsafe' }],
+    })),
+    versioned(makeNote({ id: 'note-missing-required', aiSuggestions: undefined })),
+  ]
+  mutateStoredState((state) => {
+    state.notes = [legacyFirst, ...polluted, ...rest]
+  })
+
+  const bootstrapped = await bootstrap()
+  expect(bootstrapped.notes).toEqual(before)
+  await expect(listNotes()).resolves.toEqual({ notes: before })
+
+  const stored = JSON.parse(localStorage.getItem('nome-ai.student-state.v1')).data.notes
+  expect(stored).toEqual(before)
+  expect(stored.map(({ id }) => id)).not.toEqual(expect.arrayContaining(polluted.map(({ id }) => id)))
+})
+
+test('validates real upload commands before transport', async () => {
+  // Catches real mode bypassing the strict metadata/id/classification command boundary.
+  const post = vi.fn()
+  vi.resetModules()
+  vi.doMock('./client', () => ({
+    ApiError: class ApiError extends Error {
+      constructor(message, options = {}) { super(message); Object.assign(this, options) }
+    },
+    http: { post },
+    isMockMode: false,
+  }))
+
+  try {
+    const realApi = await import('./index')
+    const cyclicPatch = { subject: 'A-Level Math' }
+    cyclicPatch.self = cyclicPatch
+
+    await expect(realApi.createUploadJob(makeUploadMetadata({ rawBytes: 'AA==' })))
+      .rejects.toMatchObject({ code: 'INVALID_UPLOAD_METADATA' })
+    await expect(realApi.confirmUploadJob('   ', {}))
+      .rejects.toMatchObject({ code: 'INVALID_INPUT' })
+    await expect(realApi.confirmUploadJob('job-1', { rawBytes: 'AA==' }))
+      .rejects.toMatchObject({ code: 'INVALID_CLASSIFICATION_PATCH' })
+    await expect(realApi.confirmUploadJob('job-1', { content: new Uint8Array([1]) }))
+      .rejects.toMatchObject({ code: 'INVALID_CLASSIFICATION_PATCH' })
+    await expect(realApi.confirmUploadJob('job-1', cyclicPatch))
+      .rejects.toMatchObject({ code: 'INVALID_CLASSIFICATION_PATCH' })
+    expect(post).not.toHaveBeenCalled()
+  } finally {
+    vi.doUnmock('./client')
+    vi.resetModules()
+  }
+})
+
+test.each([
+  ['create', (api) => api.createUploadJob(makeUploadMetadata()), { job: makeUploadJob({ status: 'cancelled' }) }],
+  ['process', (api) => api.processUploadJob('job-1'), { job: makeUploadJob() }],
+  ['confirm', (api) => api.confirmUploadJob('job-1', {}), { job: makeClassifiedUploadJob(), note: makeConfirmedNote() }],
+  ['cancel', (api) => api.cancelUploadJob('job-1'), { job: makeUploadJob({ status: 'failed', progress: 1, failure: { code: 'FAILED', message: 'Nope' } }) }],
+])('rejects a real %s success response with the wrong action status', async (_, invoke, response) => {
+  // Catches structurally valid but semantically impossible success responses crossing the API boundary.
+  const post = vi.fn(() => Promise.resolve(response))
+  vi.resetModules()
+  vi.doMock('./client', () => ({
+    ApiError: class ApiError extends Error {
+      constructor(message, options = {}) { super(message); Object.assign(this, options) }
+    },
+    http: { post },
+    isMockMode: false,
+  }))
+
+  try {
+    const realApi = await import('./index')
+    await expect(invoke(realApi)).rejects.toMatchObject({ code: 'INVALID_UPLOAD_RESPONSE' })
+  } finally {
+    vi.doUnmock('./client')
+    vi.resetModules()
+  }
+})
+
+test('filters polluted real bootstrap and list records and atomically rejects a forged confirm note', async () => {
+  // Catches real bootstrap/list/confirm responses bypassing recursive job and persisted-note validation.
+  const validJob = makeUploadJob({ id: 'job-safe-real' })
+  const completedJob = makeClassifiedUploadJob({ id: 'job-1', status: 'completed' })
+  const forgedNote = makeConfirmedNote('job-1', { rawBytes: 'AA==' })
+  const validNote = makeConfirmedNote('job-safe-real')
+  const missingRequired = makeConfirmedNote('job-missing-required')
+  Reflect.deleteProperty(missingRequired, 'aiSuggestions')
+  const unsafeNotes = [
+    makeConfirmedNote('job-raw-real', { rawBytes: 'AA==' }),
+    makeConfirmedNote('job-data-real', {
+      content: [{ t: 'image', v: 'unsafe', reference: 'data:image/png;base64,AA==', alt: 'unsafe' }],
+    }),
+    makeConfirmedNote('job-base64-real', {
+      content: [{ t: 'image', v: 'unsafe', reference: 'base64:AA==', alt: 'unsafe' }],
+    }),
+    makeConfirmedNote('job-blob-real', { content: [new Blob(['unsafe'])] }),
+    makeConfirmedNote('job-typed-real', { linkedErrors: new Uint8Array([1]) }),
+    Object.assign(Object.create({ inherited: true }), makeConfirmedNote('job-custom-real')),
+    missingRequired,
+  ]
+  const get = vi.fn((path) => Promise.resolve(path === '/api/notes'
+    ? { notes: [...unsafeNotes, validNote] }
+    : {
+        tasks: [],
+        notes: [...unsafeNotes, validNote],
+        uploadJobs: [makeUploadJob({ id: 'job-polluted-real', rawBytes: 'AA==' }), validJob],
+      }))
+  const post = vi.fn(() => Promise.resolve({ job: completedJob, note: forgedNote }))
+  vi.resetModules()
+  vi.doMock('./client', () => ({
+    ApiError: class ApiError extends Error {
+      constructor(message, options = {}) { super(message); Object.assign(this, options) }
+    },
+    http: { get, post },
+    isMockMode: false,
+  }))
+
+  try {
+    const realApi = await import('./index')
+    await expect(realApi.bootstrap()).resolves.toMatchObject({ uploadJobs: [validJob], notes: [validNote] })
+    await expect(realApi.listNotes()).resolves.toEqual({ notes: [validNote] })
+    await expect(realApi.confirmUploadJob('job-1', {}))
+      .rejects.toMatchObject({ code: 'INVALID_UPLOAD_RESPONSE' })
+  } finally {
+    vi.doUnmock('./client')
+    vi.resetModules()
+  }
+})
+
+test.each([
+  ['create', async () => {}, (signal) => createUploadJob(makeUploadMetadata({ id: 'job-abort-create' }), { signal }), 'job-abort-create', undefined],
+  ['process', () => createUploadJob(makeUploadMetadata({ id: 'job-abort-process' })), (signal) => processUploadJob('job-abort-process', { signal }), 'job-abort-process', 'queued'],
+  ['confirm', async () => {
+    await createUploadJob(makeUploadMetadata({ id: 'job-abort-confirm' }))
+    await processUploadJob('job-abort-confirm')
+  }, (signal) => confirmUploadJob('job-abort-confirm', {}, { signal }), 'job-abort-confirm', 'needs_confirmation'],
+  ['cancel', () => createUploadJob(makeUploadMetadata({ id: 'job-abort-cancel' })), (signal) => cancelUploadJob('job-abort-cancel', { signal }), 'job-abort-cancel', 'queued'],
+])('rechecks AbortSignal inside the mock %s transaction before persistence', async (_, prepare, start, id, expectedStatus) => {
+  // Catches an abort during repository latency committing a mutation and then reporting a false failure.
+  await resetMockState()
+  await prepare()
+  const controller = new AbortController()
+  const operation = start(controller.signal)
+  controller.abort()
+
+  await expect(operation).rejects.toMatchObject({ name: 'AbortError' })
+  const job = (await bootstrap()).uploadJobs.find((item) => item.id === id)
+  if (expectedStatus === undefined) expect(job).toBeUndefined()
+  else expect(job).toMatchObject({ status: expectedStatus })
+})
+
+test.each([
+  ['class_note', 'class-notes.pdf'],
+  ['teacher_material', 'teacher-slides.pdf'],
+  ['homework', 'calculus-homework.pdf'],
+  ['past_paper', '9709_s22_qp_31.pdf'],
+  ['mock_paper', 'mock-exam.pdf'],
+  ['mark_scheme', '9709_s22_ms_31.pdf'],
+  ['ielts_passage', 'urban-bees-reading.pdf'],
+  ['writing_speaking', 'ielts-writing-task-2.pdf'],
+  ['handwritten_draft', 'calculus-working.jpg'],
+  ['error_photo', 'stationary-point-error.webp'],
+])('selects a deterministic processing fallback for %s', async (materialType, fileName) => {
+  // Catches one of the ten documented material types falling through to an unknown fixture.
+  const id = `job-${materialType}`
+  await createUploadJob(makeUploadMetadata({ id, materialType, fileName }))
+  const first = await processUploadJob(id)
+
+  expect(MATERIAL_TYPES).toContain(materialType)
+  expect(first.job).toMatchObject({
+    id,
+    materialType,
+    status: 'needs_confirmation',
+    result: {
+      materialType,
+      suggestedTitle: expect.any(String),
+      content: expect.any(Array),
+      confidence: expect.any(Number),
+    },
+  })
+})
+
+test('makes cancellation terminal before and during processing without resurrecting a job', async () => {
+  // Catches a late processing write overwriting a cancellation or cancelled work being confirmable.
+  await resetMockState()
+  await createUploadJob(makeUploadMetadata({ id: 'job-cancelled' }))
+  await expect(cancelUploadJob('job-cancelled')).resolves.toMatchObject({
+    job: { id: 'job-cancelled', status: 'cancelled' },
+  })
+  await expect(processUploadJob('job-cancelled')).rejects.toMatchObject({ status: 409, code: 'UPLOAD_CANCELLED' })
+  await expect(confirmUploadJob('job-cancelled', {})).rejects.toMatchObject({ status: 409, code: 'UPLOAD_CANCELLED' })
+
+  await createUploadJob(makeUploadMetadata({ id: 'job-race' }))
+  const processing = processUploadJob('job-race')
+  const processingOutcome = processing.then(
+    (value) => ({ value }),
+    (error) => ({ error }),
+  )
+  const cancelling = cancelUploadJob('job-race')
+  await expect(cancelling).resolves.toMatchObject({ job: { status: 'cancelled' } })
+  expect((await processingOutcome).error).toMatchObject({ status: 409, code: 'UPLOAD_CANCELLED' })
+  expect((await bootstrap()).uploadJobs.find(({ id }) => id === 'job-race')).toMatchObject({ status: 'cancelled' })
+})
+
+test('cancels a classified upload without retaining confirmation-only result state', async () => {
+  // Catches needs_confirmation -> cancelled producing an invalid cancelled job that disappears on reload.
+  await resetMockState()
+  await createUploadJob(makeUploadMetadata({ id: 'job-cancel-classified' }))
+  await processUploadJob('job-cancel-classified')
+
+  const cancelled = await cancelUploadJob('job-cancel-classified')
+  expect(cancelled.job).toMatchObject({ id: 'job-cancel-classified', status: 'cancelled', progress: 100 })
+  expect(cancelled.job).not.toHaveProperty('result')
+  expect(cancelled.job).not.toHaveProperty('failure')
+
+  const reloaded = (await bootstrap()).uploadJobs.find(({ id }) => id === 'job-cancel-classified')
+  expect(reloaded).toEqual(cancelled.job)
+  await expect(processUploadJob('job-cancel-classified')).rejects.toMatchObject({ code: 'UPLOAD_CANCELLED' })
+  await expect(confirmUploadJob('job-cancel-classified', {})).rejects.toMatchObject({ code: 'UPLOAD_CANCELLED' })
+})
+
+test('keeps processing recoverable when a waiting cancellation is aborted before persistence', async () => {
+  // Catches a transient cancellation barrier being mistaken for a durable cancelled state.
+  await resetMockState()
+  await createUploadJob(makeUploadMetadata({ id: 'job-aborted-cancel-race' }))
+  const controller = new AbortController()
+  const nativeSetItem = Storage.prototype.setItem
+  let cancellationOutcomePromise
+  const setItem = vi.spyOn(Storage.prototype, 'setItem').mockImplementation(function abortCancellationDuringProcessing(key, value) {
+    nativeSetItem.call(this, key, value)
+    const storedJob = JSON.parse(value)?.data?.uploadJobs?.find(({ id }) => id === 'job-aborted-cancel-race')
+    if (storedJob?.status === 'processing' && !cancellationOutcomePromise) {
+      cancellationOutcomePromise = cancelUploadJob('job-aborted-cancel-race', { signal: controller.signal })
+        .then((result) => ({ result }), (error) => ({ error }))
+      controller.abort()
+    }
+  })
+  const processing = processUploadJob('job-aborted-cancel-race')
+  const processingOutcomePromise = processing.then(
+    (value) => ({ value }),
+    (error) => ({ error }),
+  )
+  const processingOutcome = await processingOutcomePromise
+  const cancellationOutcome = await cancellationOutcomePromise
+  setItem.mockRestore()
+
+  expect(cancellationOutcome.error).toMatchObject({ name: 'AbortError' })
+  let persisted = (await bootstrap()).uploadJobs.find(({ id }) => id === 'job-aborted-cancel-race')
+
+  expect(persisted.status).not.toBe('processing')
+  if (persisted.status === 'queued' || persisted.status === 'failed') {
+    await expect(processUploadJob(persisted.id)).resolves.toMatchObject({
+      job: { id: persisted.id, status: 'needs_confirmation' },
+    })
+    persisted = (await bootstrap()).uploadJobs.find(({ id }) => id === persisted.id)
+  } else {
+    expect(processingOutcome).toMatchObject({
+      value: { job: { id: persisted.id, status: 'needs_confirmation' } },
+    })
+  }
+  expect(persisted).toMatchObject({ status: 'needs_confirmation', progress: 100 })
+})
+
+test('a pre-aborted cancellation never blocks a later processing retry', async () => {
+  // Catches a rejected cancellation registering an in-memory tombstone before its transaction starts.
+  await resetMockState()
+  await createUploadJob(makeUploadMetadata({ id: 'job-pre-aborted-cancel' }))
+  const controller = new AbortController()
+  controller.abort()
+
+  await expect(cancelUploadJob('job-pre-aborted-cancel', { signal: controller.signal }))
+    .rejects.toMatchObject({ name: 'AbortError' })
+  await expect(processUploadJob('job-pre-aborted-cancel')).resolves.toMatchObject({
+    job: { id: 'job-pre-aborted-cancel', status: 'needs_confirmation' },
+  })
+})
+
+test('a cancellation persisted before a late abort still resolves as durable cancellation', async () => {
+  // Catches a post-commit signal check reporting failure after the cancelled state is already durable.
+  await resetMockState()
+  await createUploadJob(makeUploadMetadata({ id: 'job-late-abort-cancel' }))
+  const controller = new AbortController()
+  const nativeSetItem = Storage.prototype.setItem
+  const setItem = vi.spyOn(Storage.prototype, 'setItem').mockImplementation(function persistThenAbort(key, value) {
+    nativeSetItem.call(this, key, value)
+    const storedJob = JSON.parse(value)?.data?.uploadJobs?.find(({ id }) => id === 'job-late-abort-cancel')
+    if (storedJob?.status === 'cancelled') controller.abort()
+  })
+
+  try {
+    await expect(cancelUploadJob('job-late-abort-cancel', { signal: controller.signal }))
+      .resolves.toMatchObject({ job: { status: 'cancelled' } })
+  } finally {
+    setItem.mockRestore()
+  }
+  await expect(processUploadJob('job-late-abort-cancel')).rejects.toMatchObject({
+    code: 'UPLOAD_CANCELLED',
+  })
+  expect((await bootstrap()).uploadJobs.find(({ id }) => id === 'job-late-abort-cancel'))
+    .toMatchObject({ status: 'cancelled' })
+})
+
+test('settles concurrent same-id cancellations with one abort and cleans coordination state', async () => {
+  // Catches overlapping waiters overwriting each other's attempt record or leaving a reusable id blocked.
+  await resetMockState()
+  await createUploadJob(makeUploadMetadata({ id: 'job-multi-cancel' }))
+  const controller = new AbortController()
+  const first = cancelUploadJob('job-multi-cancel').then(
+    (value) => ({ value }), (error) => ({ error }),
+  )
+  const aborted = cancelUploadJob('job-multi-cancel', { signal: controller.signal }).then(
+    (value) => ({ value }), (error) => ({ error }),
+  )
+  const third = cancelUploadJob('job-multi-cancel').then(
+    (value) => ({ value }), (error) => ({ error }),
+  )
+  controller.abort()
+
+  const [firstOutcome, abortedOutcome, thirdOutcome] = await Promise.all([first, aborted, third])
+  expect(firstOutcome.value).toMatchObject({ job: { status: 'cancelled' } })
+  expect(abortedOutcome.error).toMatchObject({ name: 'AbortError' })
+  expect(thirdOutcome.value).toMatchObject({ job: { status: 'cancelled' } })
+  expect((await bootstrap()).uploadJobs.find(({ id }) => id === 'job-multi-cancel'))
+    .toMatchObject({ status: 'cancelled' })
+
+  localStorage.clear()
+  await bootstrap()
+  await createUploadJob(makeUploadMetadata({ id: 'job-multi-cancel' }))
+  await expect(processUploadJob('job-multi-cancel')).resolves.toMatchObject({
+    job: { status: 'needs_confirmation' },
+  })
+})
+
+test('filters a corrupted persisted job before processing and permits a clean same-id retry', async () => {
+  // Catches a corrupted bootstrap job reaching the processor or remaining as an unrecoverable phantom id.
+  await resetMockState()
+  await createUploadJob(makeUploadMetadata({ id: 'job-retry' }))
+  mutateStoredState((state) => {
+    state.uploadJobs = state.uploadJobs.map((job) => (
+      job.id === 'job-retry' ? { ...job, materialType: 'corrupted-type' } : job
+    ))
+  })
+
+  await expect(processUploadJob('job-retry')).rejects.toMatchObject({
+    name: 'ApiError', status: 404, code: 'NOT_FOUND',
+  })
+  expect((await bootstrap()).uploadJobs.find(({ id }) => id === 'job-retry')).toBeUndefined()
+  expect((await listNotes()).notes.some(({ sourceJobId }) => sourceJobId === 'job-retry')).toBe(false)
+
+  await createUploadJob(makeUploadMetadata({ id: 'job-retry' }))
+  const retried = await processUploadJob('job-retry')
+  expect(retried.job).toMatchObject({
+    id: 'job-retry',
+    status: 'needs_confirmation',
+    progress: 100,
+  })
+  expect(retried.job).not.toHaveProperty('failure')
+  expect((await bootstrap()).uploadJobs.find(({ id }) => id === 'job-retry')).toEqual(retried.job)
+})
+
+test('never marks cancellation or AbortError processing exits as failed', async () => {
+  // Catches cancellation control flow being mistaken for a processor failure.
+  await resetMockState()
+  await createUploadJob(makeUploadMetadata({ id: 'job-cancel-not-failed' }))
+  await cancelUploadJob('job-cancel-not-failed')
+  await expect(processUploadJob('job-cancel-not-failed')).rejects.toMatchObject({ code: 'UPLOAD_CANCELLED' })
+  const cancelled = (await bootstrap()).uploadJobs.find(({ id }) => id === 'job-cancel-not-failed')
+  expect(cancelled).toMatchObject({ status: 'cancelled' })
+  expect(cancelled).not.toHaveProperty('failure')
+
+  await createUploadJob(makeUploadMetadata({ id: 'job-abort-not-failed' }))
+  const controller = new AbortController()
+  const processing = processUploadJob('job-abort-not-failed', { signal: controller.signal })
+  controller.abort()
+  await expect(processing).rejects.toMatchObject({ name: 'AbortError' })
+  const aborted = (await bootstrap()).uploadJobs.find(({ id }) => id === 'job-abort-not-failed')
+  expect(aborted.status).not.toBe('failed')
+  expect(aborted).not.toHaveProperty('failure')
+})
+
+test('clears a failed job failure when cancellation becomes terminal', async () => {
+  // Catches failed-only diagnostic state leaking into the cancelled API response or persisted JSON.
+  await resetMockState()
+  await createUploadJob(makeUploadMetadata({ id: 'job-cancel-failed' }))
+  mutateStoredState((state) => {
+    state.uploadJobs = state.uploadJobs.map((job) => (
+      job.id === 'job-cancel-failed'
+        ? {
+            ...job,
+            status: 'failed',
+            progress: 1,
+            failure: { code: 'UPLOAD_PROCESSING_FAILED', message: 'Unable to process the material upload' },
+          }
+        : job
+    ))
+  })
+
+  const cancelled = await cancelUploadJob('job-cancel-failed')
+  expect(cancelled.job).toMatchObject({ id: 'job-cancel-failed', status: 'cancelled', progress: 1 })
+  expect(cancelled.job).not.toHaveProperty('failure')
+  expect(JSON.stringify(cancelled.job)).not.toContain('failure')
+
+  const reloaded = (await bootstrap()).uploadJobs.find(({ id }) => id === 'job-cancel-failed')
+  expect(reloaded).toEqual(cancelled.job)
+  expect(reloaded).not.toHaveProperty('failure')
+  expect((await listNotes()).notes.some(({ sourceJobId }) => sourceJobId === 'job-cancel-failed')).toBe(false)
+  await expect(processUploadJob('job-cancel-failed')).rejects.toMatchObject({
+    status: 409, code: 'UPLOAD_CANCELLED',
+  })
+  await expect(confirmUploadJob('job-cancel-failed', {})).rejects.toMatchObject({
+    status: 409, code: 'UPLOAD_CANCELLED',
+  })
+})
+
+test('uses stable terminal rules and confirms job plus note atomically', async () => {
+  // Catches repeat confirmation, completed cancellation, or a note collision partially completing the job.
+  await resetMockState()
+  await createUploadJob(makeUploadMetadata({ id: 'job-complete' }))
+  await processUploadJob('job-complete')
+  await confirmUploadJob('job-complete', {})
+  await expect(confirmUploadJob('job-complete', {})).rejects.toMatchObject({
+    status: 409, code: 'UPLOAD_ALREADY_COMPLETED',
+  })
+  await expect(cancelUploadJob('job-complete')).rejects.toMatchObject({
+    status: 409, code: 'UPLOAD_ALREADY_COMPLETED',
+  })
+
+  await createNote(makeNote({ id: 'note-job-collision', title: 'Existing collision' }))
+  await createUploadJob(makeUploadMetadata({ id: 'job-collision' }))
+  await processUploadJob('job-collision')
+  const before = await bootstrap()
+  await expect(confirmUploadJob('job-collision', {})).rejects.toMatchObject({
+    status: 409, code: 'DUPLICATE_ID',
+  })
+  const after = await bootstrap()
+  expect(after.uploadJobs.find(({ id }) => id === 'job-collision')).toMatchObject({ status: 'needs_confirmation' })
+  expect(after.notes).toEqual(before.notes)
+})
+
+test('bootstraps versioned notes and preserves source snapshots through update, organize, undo, and reload', async () => {
+  // Catches legacy notes staying half-migrated or a reload dropping version/source provenance.
+  await resetMockState()
+  const listed = await listNotes()
+  expect(listed.notes.length).toBeGreaterThan(0)
+  expect(listed.notes.every(({ version, versions }) => version === 1 && Array.isArray(versions))).toBe(true)
+
+  const edited = await updateNote('n1', {
+    title: 'Edited title',
+    changedAt: '2026-08-07T09:00:00.000Z',
+    reason: 'title_edit',
+  })
+  expect(edited.note).toMatchObject({ title: 'Edited title', version: 2 })
+  expect(edited.note.versions[0]).toMatchObject({ version: 1, source: 'typed', reason: 'title_edit' })
+
+  const legacySuggestionId = normalizeNoteSuggestions(edited.note)[0].id
+  const organized = await organizeNote('n1', [legacySuggestionId], {
+    changedAt: '2026-08-07T09:01:00.000Z',
+  })
+  expect(organized.note).toMatchObject({ version: 3, source: 'ai_organized' })
+  const undone = await undoNote('n1', { changedAt: '2026-08-07T09:02:00.000Z' })
+  expect(undone.note).toMatchObject({ version: 4, source: 'typed', title: 'Edited title' })
+  expect(undone.note.versions.map(({ source }) => source)).toEqual(['typed', 'typed', 'ai_organized'])
+
+  const reloaded = (await listNotes()).notes.find(({ id }) => id === 'n1')
+  expect(reloaded).toEqual(undone.note)
+})
+
+test('writes material migration only when legacy state actually needs it', async () => {
+  // Catches listNotes rewriting the entire persisted state on every read.
+  await resetMockState()
+  const setItem = vi.spyOn(Storage.prototype, 'setItem')
+
+  await listNotes()
+  await listNotes()
+  expect(setItem).not.toHaveBeenCalled()
+
+  mutateStoredState((state) => {
+    Reflect.deleteProperty(state, 'uploadJobs')
+    state.notes = state.notes.map(({ version: _version, versions: _versions, ...note }) => note)
+  })
+  setItem.mockClear()
+
+  await Promise.all([listNotes(), listNotes()])
+  expect(setItem).toHaveBeenCalledTimes(1)
+  await listNotes()
+  expect(setItem).toHaveBeenCalledTimes(1)
+})
+
+test('releases the in-flight cancellation barrier after durable cancellation', async () => {
+  // Catches an old in-memory tombstone cancelling a new job after storage is independently cleared.
+  await resetMockState()
+  await createUploadJob(makeUploadMetadata({ id: 'job-reused' }))
+  await cancelUploadJob('job-reused')
+  localStorage.clear()
+  await bootstrap()
+
+  await createUploadJob(makeUploadMetadata({ id: 'job-reused' }))
+  await expect(processUploadJob('job-reused')).resolves.toMatchObject({
+    job: { id: 'job-reused', status: 'needs_confirmation' },
+  })
+})
+
+test('serializes concurrent note edits and rejects unknown or invalid note commands without mutation', async () => {
+  // Catches lost updates and domain errors escaping as untyped failures after an async transaction.
+  await resetMockState()
+  await Promise.all([
+    updateNote('n1', { title: 'Concurrent title', changedAt: '2026-08-07T10:00:00.000Z' }),
+    updateNote('n1', { tags: ['concurrent-tag'], changedAt: '2026-08-07T10:01:00.000Z' }),
+  ])
+  const concurrent = (await listNotes()).notes.find(({ id }) => id === 'n1')
+  expect(concurrent).toMatchObject({ title: 'Concurrent title', tags: ['concurrent-tag'], version: 3 })
+
+  const before = await listNotes()
+  await expect(updateNote('missing', { title: 'No target' })).rejects.toMatchObject({ status: 404, code: 'NOT_FOUND' })
+  await expect(organizeNote('missing', [])).rejects.toMatchObject({ status: 404, code: 'NOT_FOUND' })
+  await expect(undoNote('missing')).rejects.toMatchObject({ status: 404, code: 'NOT_FOUND' })
+  await expect(updateNote('n1', { source: 'photo' })).rejects.toMatchObject({ status: 400, code: 'INVALID_NOTE_PATCH' })
+  expect(await listNotes()).toEqual(before)
+})
+
+test('uses the documented real material and note routes with exact bodies', async () => {
+  // Catches real-mode paths or request bodies drifting while the repository-backed adapter stays green.
+  const routeNote = { ...makeNote({ id: 'note/1' }), versions: [], version: 1 }
+  const get = vi.fn((path) => Promise.resolve({ path }))
+  const post = vi.fn((path, body) => {
+    if (path === '/api/material-uploads') {
+      return Promise.resolve({ job: { ...body, updatedAt: body.createdAt, progress: 0, status: 'queued' } })
+    }
+    if (path.endsWith('/process')) {
+      return Promise.resolve({ job: makeClassifiedUploadJob({ id: 'job/1' }) })
+    }
+    if (path.endsWith('/confirm')) {
+      return Promise.resolve({
+        job: makeClassifiedUploadJob({ id: 'job/1', status: 'completed' }),
+        note: makeConfirmedNote('job/1'),
+      })
+    }
+    if (path.endsWith('/cancel')) {
+      return Promise.resolve({ job: makeUploadJob({ id: 'job/1', status: 'cancelled' }) })
+    }
+    if (path.startsWith('/api/notes/')) return Promise.resolve({ note: routeNote })
+    return Promise.resolve({ path, body })
+  })
+  const patch = vi.fn(() => Promise.resolve({ note: routeNote }))
+  vi.resetModules()
+  vi.doMock('./client', () => ({
+    ApiError: class ApiError extends Error {},
+    http: { get, post, patch },
+    isMockMode: false,
+  }))
+
+  try {
+    const realApi = await import('./index')
+    const metadata = makeUploadMetadata({ id: 'job/1' })
+    const confirmation = { subject: 'A-Level Math' }
+    const notePatch = { title: 'Edited' }
+    const suggestionIds = ['suggestion-1']
+    const signal = new AbortController().signal
+    const changedAt = '2026-08-07T11:00:00.000Z'
+
+    await realApi.listNotes()
+    await realApi.createUploadJob(metadata, { signal })
+    await realApi.processUploadJob('job/1', { signal })
+    await realApi.confirmUploadJob('job/1', confirmation, { signal })
+    await realApi.cancelUploadJob('job/1', { signal })
+    await realApi.updateNote('note/1', notePatch, { changedAt, reason: 'title_edit' })
+    await realApi.organizeNote('note/1', suggestionIds, { changedAt })
+    await realApi.undoNote('note/1', { changedAt })
+
+    expect(get).toHaveBeenCalledWith('/api/notes')
+    expect(post).toHaveBeenNthCalledWith(1, '/api/material-uploads', metadata, { signal })
+    expect(post).toHaveBeenNthCalledWith(2, '/api/material-uploads/job%2F1/process', undefined, { signal })
+    expect(post).toHaveBeenNthCalledWith(3, '/api/material-uploads/job%2F1/confirm', confirmation, { signal })
+    expect(post).toHaveBeenNthCalledWith(4, '/api/material-uploads/job%2F1/cancel', undefined, { signal })
+    expect(patch).toHaveBeenCalledWith('/api/notes/note%2F1', {
+      ...notePatch,
+      changedAt,
+      reason: 'title_edit',
+    })
+    expect(post).toHaveBeenNthCalledWith(5, '/api/notes/note%2F1/organize', { suggestionIds, changedAt })
+    expect(post).toHaveBeenNthCalledWith(6, '/api/notes/note%2F1/undo', { changedAt })
+  } finally {
+    vi.doUnmock('./client')
+    vi.resetModules()
+  }
 })
 
 test('submitSession returns an ID and persists the session by session ID', async () => {
@@ -491,7 +1620,7 @@ test('createTask rejects invalid and duplicate entities without changing stored 
 test('createNote and submitSession reject duplicate or invalid entities', async () => {
   // Catches non-task creator families accepting duplicate IDs or malformed payloads.
   await resetMockState()
-  await expect(createNote({ title: 'Missing id' })).rejects.toMatchObject({ name: 'ApiError', code: 'INVALID_INPUT' })
+  await expect(createNote({ title: 'Missing id' })).rejects.toMatchObject({ name: 'ApiError', code: 'INVALID_NOTE' })
   await expect(createNote(makeNote({ id: 'n1', title: 'Duplicate' }))).rejects.toMatchObject({ name: 'ApiError', code: 'DUPLICATE_ID' })
   await expect(submitSession({ score: 10 })).rejects.toMatchObject({ name: 'ApiError', code: 'INVALID_INPUT' })
 
@@ -557,8 +1686,8 @@ test('createTask and createNote reject incomplete or mistyped documented entitie
 
   await expect(createTask({ id: 'task-id-only' })).rejects.toMatchObject({ name: 'ApiError', code: 'INVALID_INPUT' })
   await expect(createTask(makeTask({ id: 'task-bad-type', estimatedMinutes: '15' }))).rejects.toMatchObject({ name: 'ApiError', code: 'INVALID_INPUT' })
-  await expect(createNote({ id: 'note-id-only' })).rejects.toMatchObject({ name: 'ApiError', code: 'INVALID_INPUT' })
-  await expect(createNote(makeNote({ id: 'note-bad-type', content: 'plain text' }))).rejects.toMatchObject({ name: 'ApiError', code: 'INVALID_INPUT' })
+  await expect(createNote({ id: 'note-id-only' })).rejects.toMatchObject({ name: 'ApiError', code: 'INVALID_NOTE' })
+  await expect(createNote(makeNote({ id: 'note-bad-type', content: 'plain text' }))).rejects.toMatchObject({ name: 'ApiError', code: 'INVALID_NOTE' })
 
   const after = await bootstrap()
   expect(after.tasks).toEqual(before.tasks)
@@ -571,10 +1700,10 @@ test('updateNote rejects ID replacement and mistyped fields without changing the
   const before = (await bootstrap()).notes
 
   await expect(updateNote('n1', { id: 'n2', title: 'Duplicate identity' })).rejects.toMatchObject({
-    name: 'ApiError', code: 'INVALID_INPUT',
+    name: 'ApiError', code: 'INVALID_NOTE_PATCH',
   })
   await expect(updateNote('n1', { tags: 'organized' })).rejects.toMatchObject({
-    name: 'ApiError', code: 'INVALID_INPUT',
+    name: 'ApiError', code: 'INVALID_NOTE_PATCH',
   })
   expect((await bootstrap()).notes).toEqual(before)
 })

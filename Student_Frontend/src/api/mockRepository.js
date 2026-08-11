@@ -106,8 +106,9 @@ export function createMockRepository({ storage = window.localStorage, latencyMs 
     },
     async update(recipe) {
       await wait()
-      const next = recipe(clone(load()))
-      save(next)
+      const current = clone(load())
+      const next = recipe(current)
+      if (next !== current) save(next)
       return clone(next)
     },
     async reset() {

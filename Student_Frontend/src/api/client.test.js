@@ -1,5 +1,5 @@
 import { afterEach, expect, test, vi } from 'vitest'
-import { http } from './client'
+import { ApiError, http } from './client'
 
 afterEach(() => vi.unstubAllGlobals())
 
@@ -93,4 +93,59 @@ test.each([204, 205])('returns null for an empty %s success without parsing a bo
 
   await expect(http.del('/api/example')).resolves.toBeNull()
   expect(json).not.toHaveBeenCalled()
+})
+
+test.each([
+  ['get', ['/api/example'], 'GET', undefined],
+  ['post', ['/api/example', { value: 1 }], 'POST', JSON.stringify({ value: 1 })],
+  ['patch', ['/api/example', { value: 1 }], 'PATCH', JSON.stringify({ value: 1 })],
+  ['del', ['/api/example'], 'DELETE', undefined],
+])('merges safe request init for http.%s without allowing method or body overrides', async (method, args, expectedMethod, expectedBody) => {
+  // Catches AbortSignal being dropped or callers replacing the endpoint method/body through request init.
+  const controller = new AbortController()
+  const fetchMock = vi.fn().mockResolvedValue({
+    ok: true,
+    status: 200,
+    json: async () => ({ code: 0, data: { ok: true } }),
+  })
+  vi.stubGlobal('fetch', fetchMock)
+  const init = {
+    signal: controller.signal,
+    headers: { Authorization: 'Bearer test', 'Content-Type': 'text/plain' },
+    method: 'TRACE',
+    body: 'unsafe override',
+  }
+
+  await http[method](...args, init)
+
+  const [, requestInit] = fetchMock.mock.calls[0]
+  expect(requestInit).toMatchObject({
+    method: expectedMethod,
+    signal: controller.signal,
+    headers: { Authorization: 'Bearer test', 'Content-Type': 'application/json' },
+  })
+  if (expectedBody === undefined) expect(requestInit).not.toHaveProperty('body')
+  else expect(requestInit.body).toBe(expectedBody)
+})
+
+test('exposes failed response data on ApiError for strict endpoint-level sanitization', async () => {
+  // Catches real processing failures losing the durable failed job envelope before the API adapter sees it.
+  const data = { job: { id: 'job-1', status: 'failed' } }
+  vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+    ok: false,
+    status: 422,
+    json: async () => ({ code: 'PROCESSING_FAILED', message: 'Processing failed', data }),
+  }))
+
+  const error = await http.post('/api/material-uploads/job-1/process').catch((caught) => caught)
+  expect(error).toBeInstanceOf(ApiError)
+  expect(error).toMatchObject({ code: 'PROCESSING_FAILED', status: 422, data })
+})
+
+test('preserves fetch AbortError instead of wrapping it as a network ApiError', async () => {
+  // Catches callers being unable to distinguish intentional cancellation from a transport failure.
+  const abortError = new DOMException('The operation was aborted.', 'AbortError')
+  vi.stubGlobal('fetch', vi.fn().mockRejectedValue(abortError))
+
+  await expect(http.get('/api/example', { signal: new AbortController().signal })).rejects.toBe(abortError)
 })

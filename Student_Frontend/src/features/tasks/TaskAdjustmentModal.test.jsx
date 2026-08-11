@@ -1,6 +1,6 @@
 import { screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { expect, test, vi } from 'vitest'
+import { afterEach, expect, test, vi } from 'vitest'
 import App from '../../App'
 import { createAppServices } from '../../store/services'
 import { renderStudentApp } from '../../test/renderApp'
@@ -10,14 +10,21 @@ const now = new Date('2026-08-06T10:00:00.000Z')
 const task = { id: 'teacher', title: 'Math P3 Ch7 Review', type: 'teacher_assigned', subject: 'Math', estimatedMinutes: 45, dueAt: '2026-08-08T12:00:00.000Z', assignedBy: 'Ms. Wang', priority: 'P1', isOverdue: false, status: 'pending', topicIds: ['calculus'] }
 const secondTask = { id: 'physics-task', title: 'Physics assignment', type: 'teacher_assigned', subject: 'Physics', estimatedMinutes: 20, dueAt: null, assignedBy: 'Mr. Chen', priority: 'P2', isOverdue: false, status: 'pending', topicIds: [] }
 
-function servicesFor({ reportTaskAdjustment = vi.fn(async (_, request) => ({ request, task: { ...task, adjustmentStatus: 'submitted' } })) } = {}) {
+afterEach(() => {
+  vi.useRealTimers()
+})
+
+function servicesFor({
+  reportTaskAdjustment = vi.fn(async (_, request) => ({ request, task: { ...task, adjustmentStatus: 'submitted' } })),
+  clock = () => now,
+} = {}) {
   return createAppServices({
     apiClient: {
       bootstrap: async () => ({ tasks: [task, secondTask], taskAdjustments: [], greeting: null, moduleStats: null, learningSummary: { weakTopics: ['calculus'], knowledgeHeatmap: [] }, errors: [], notes: [], noteFolders: [], settings: {} }),
       completeTask: vi.fn(), reportTaskAdjustment,
       createTask: vi.fn(), addErrors: vi.fn(), markErrorMastered: vi.fn(), submitRedo: vi.fn(), createNote: vi.fn(), updateNote: vi.fn(), submitSession: vi.fn(), updateSettings: vi.fn(),
     },
-    now: () => now,
+    now: clock,
     createId: () => 'adjustment-id',
   })
 }
@@ -37,6 +44,9 @@ async function completeDraft(user) {
 }
 
 test('submits a detailed adjustment request without removing the task', async () => {
+  // The app clock is 2026-08-06 even when the host clock is much later than the proposed due date.
+  vi.useFakeTimers({ toFake: ['Date'] })
+  vi.setSystemTime(new Date('2099-01-01T00:00:00.000Z'))
   const user = userEvent.setup()
   const reportTaskAdjustment = vi.fn(async (_, request) => ({ request, task: { ...task, adjustmentStatus: 'submitted' } }))
   renderStudentApp(<App services={servicesFor({ reportTaskAdjustment })} />)
@@ -52,6 +62,32 @@ test('submits a detailed adjustment request without removing the task', async ()
     id: 'adjustment-id', taskId: 'teacher', reason: 'time_conflict', details: 'Mock exam preparation', availableMinutes: 20,
     proposedDueAt: new Date('2026-08-08T12:00').toISOString(), createdAt: '2026-08-06T10:00:00.000Z', status: 'submitted',
   })
+})
+
+test('uses one business-time snapshot when the injected clock crosses the proposed due time', async () => {
+  // Toast identity must not consume the business clock after the submit snapshot is captured.
+  const user = userEvent.setup()
+  const dueAt = new Date('2026-08-08T12:00')
+  const submitNow = new Date(dueAt.getTime() - 1_000)
+  const laterNow = new Date(dueAt.getTime() + 1_000)
+  const clock = vi.fn()
+    .mockReturnValueOnce(submitNow)
+    .mockReturnValueOnce(laterNow)
+  const reportTaskAdjustment = vi.fn(async (_, request) => ({
+    request,
+    task: { ...task, adjustmentStatus: 'submitted' },
+  }))
+  renderStudentApp(<App services={servicesFor({ clock, reportTaskAdjustment })} />)
+
+  await openAdjustment(user)
+  await completeDraft(user)
+  await user.click(screen.getByRole('button', { name: 'Send adjustment request' }))
+
+  await waitFor(() => expect(reportTaskAdjustment).toHaveBeenCalledTimes(1))
+  const request = reportTaskAdjustment.mock.calls[0][1]
+  expect(request.createdAt).toBe(submitNow.toISOString())
+  expect(new Date(request.createdAt).getTime()).toBeLessThanOrEqual(new Date(request.proposedDueAt).getTime())
+  expect(clock).toHaveBeenCalledTimes(1)
 })
 
 test('restores focus to the task checkbox when successful submission removes the options trigger', async () => {
@@ -76,6 +112,81 @@ test('shows field validation errors without sending an invalid adjustment reques
   await user.click(screen.getByRole('button', { name: 'Send adjustment request' }))
 
   expect(screen.getAllByRole('alert').map((alert) => alert.textContent)).toEqual(['Choose a reason', 'Choose a future time'])
+  expect(reportTaskAdjustment).not.toHaveBeenCalled()
+})
+
+test('rejects a proposed time that is earlier than the injected app clock', async () => {
+  const user = userEvent.setup()
+  const reportTaskAdjustment = vi.fn()
+  renderStudentApp(<App services={servicesFor({ reportTaskAdjustment })} />)
+
+  await openAdjustment(user)
+  await user.selectOptions(screen.getByLabelText('Reason'), 'time_conflict')
+  await user.type(screen.getByLabelText('Proposed new time'), '2026-08-05T12:00')
+  await user.click(screen.getByRole('button', { name: 'Send adjustment request' }))
+
+  expect(screen.getByRole('alert')).toHaveTextContent('Choose a future time')
+  expect(reportTaskAdjustment).not.toHaveBeenCalled()
+})
+
+test.each([
+  ['a thrown clock error', () => { throw new Error('clock unavailable') }],
+  ['null', () => null],
+  ['undefined', () => undefined],
+  ['a non-Date value', () => '2026-08-06T10:00:00.000Z'],
+  ['an invalid Date', () => new Date(Number.NaN)],
+])('fails closed when the injected app clock returns %s', async (_, clock) => {
+  const user = userEvent.setup()
+  const reportTaskAdjustment = vi.fn()
+  renderStudentApp(<App services={servicesFor({ clock, reportTaskAdjustment })} />)
+
+  await openAdjustment(user)
+  await completeDraft(user)
+  const submit = screen.getByRole('button', { name: 'Send adjustment request' })
+  await user.click(submit)
+
+  expect(screen.getByRole('alert')).toHaveTextContent('Unable to validate current time. Try again.')
+  expect(submit).not.toBeDisabled()
+  expect(reportTaskAdjustment).not.toHaveBeenCalled()
+})
+
+test('submits safely when a branded app Date has poisoned own methods', async () => {
+  const user = userEvent.setup()
+  const poisonedNow = new Date(now)
+  Object.defineProperties(poisonedNow, {
+    getTime: { value: () => { throw new Error('poisoned getTime') } },
+    toISOString: { value: () => 'forged-created-at' },
+  })
+  const reportTaskAdjustment = vi.fn(async (_, request) => ({
+    request,
+    task: { ...task, adjustmentStatus: 'submitted' },
+  }))
+  renderStudentApp(<App services={servicesFor({
+    clock: () => poisonedNow,
+    reportTaskAdjustment,
+  })} />)
+
+  await openAdjustment(user)
+  await completeDraft(user)
+  await user.click(screen.getByRole('button', { name: 'Send adjustment request' }))
+
+  await waitFor(() => expect(reportTaskAdjustment).toHaveBeenCalledTimes(1))
+  expect(reportTaskAdjustment.mock.calls[0][1].createdAt).toBe('2026-08-06T10:00:00.000Z')
+})
+
+test('fails closed without an unhandled error when the app clock is a Date Proxy', async () => {
+  const user = userEvent.setup()
+  const reportTaskAdjustment = vi.fn()
+  renderStudentApp(<App services={servicesFor({
+    clock: () => new Proxy(new Date(now), {}),
+    reportTaskAdjustment,
+  })} />)
+
+  await openAdjustment(user)
+  await completeDraft(user)
+  await user.click(screen.getByRole('button', { name: 'Send adjustment request' }))
+
+  expect(screen.getByRole('alert')).toHaveTextContent('Unable to validate current time. Try again.')
   expect(reportTaskAdjustment).not.toHaveBeenCalled()
 })
 

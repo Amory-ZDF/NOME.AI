@@ -1,11 +1,38 @@
 export const ADJUSTMENT_REASONS = ['time_conflict', 'difficulty', 'health', 'other']
+export const ADJUSTMENT_CLOCK_ERROR = 'Unable to validate current time. Try again.'
 
-const toDate = (value) => new Date(value)
+const NativeDate = Date
+const nativeGetTime = Date.prototype.getTime
+const nativeToISOString = Date.prototype.toISOString
 
-const isFutureDate = (value, now) => {
-  const proposedDueAt = toDate(value).getTime()
-  return !Number.isNaN(proposedDueAt) && proposedDueAt > toDate(now).getTime()
+const readDateMillis = (value) => {
+  try {
+    const milliseconds = Reflect.apply(nativeGetTime, value, [])
+    return Number.isFinite(milliseconds) ? milliseconds : null
+  } catch {
+    return null
+  }
 }
+
+const parseDateMillis = (value) => {
+  const brandedMilliseconds = readDateMillis(value)
+  if (brandedMilliseconds !== null) return brandedMilliseconds
+  try {
+    return readDateMillis(new NativeDate(value))
+  } catch {
+    return null
+  }
+}
+
+const toTrustedIso = (milliseconds) => Reflect.apply(
+  nativeToISOString,
+  new NativeDate(milliseconds),
+  [],
+)
+
+const isFutureMillis = (proposedDueAt, actionNow) => (
+  proposedDueAt !== null && proposedDueAt > actionNow
+)
 
 const clampAvailableMinutes = (value) => {
   const minutes = Math.trunc(Number(value))
@@ -13,8 +40,10 @@ const clampAvailableMinutes = (value) => {
   return Math.min(720, Math.max(0, minutes))
 }
 
-export function validateAdjustmentDraft(draft, now = new Date()) {
+export function validateAdjustmentDraft(draft, now) {
   const errors = {}
+  const actionNow = arguments.length < 2 ? new NativeDate() : now
+  const actionNowMillis = readDateMillis(actionNow)
 
   if (!draft.reason) {
     errors.reason = 'Choose a reason'
@@ -22,7 +51,9 @@ export function validateAdjustmentDraft(draft, now = new Date()) {
     errors.reason = 'Choose a valid reason'
   }
 
-  if (!isFutureDate(draft.proposedDueAt, now)) {
+  if (actionNowMillis === null) {
+    errors.proposedDueAt = ADJUSTMENT_CLOCK_ERROR
+  } else if (!isFutureMillis(parseDateMillis(draft.proposedDueAt), actionNowMillis)) {
     errors.proposedDueAt = 'Choose a future time'
   }
 
@@ -30,14 +61,18 @@ export function validateAdjustmentDraft(draft, now = new Date()) {
 }
 
 export function buildAdjustmentRequest({ task, draft, now, id }) {
+  const actionNowMillis = readDateMillis(now)
+  if (actionNowMillis === null) throw new Error(ADJUSTMENT_CLOCK_ERROR)
+  const proposedDueAtMillis = parseDateMillis(draft.proposedDueAt)
+  if (!isFutureMillis(proposedDueAtMillis, actionNowMillis)) throw new Error('Choose a future time')
   return {
     id,
     taskId: task.id,
     reason: draft.reason,
     details: String(draft.details ?? '').trim(),
     availableMinutes: clampAvailableMinutes(draft.availableMinutes),
-    proposedDueAt: toDate(draft.proposedDueAt).toISOString(),
-    createdAt: toDate(now).toISOString(),
+    proposedDueAt: toTrustedIso(proposedDueAtMillis),
+    createdAt: toTrustedIso(actionNowMillis),
     status: 'submitted',
   }
 }

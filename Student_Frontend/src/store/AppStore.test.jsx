@@ -2,6 +2,9 @@ import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { expect, test, vi } from 'vitest'
 import { AppProvider, useApp } from './AppStore'
 import { createAppServices } from './services'
+import { ApiError } from '../api/client'
+import { applyNoteOrganization, applyNotePatch, undoLastNoteVersion } from '../features/materials/noteVersions'
+import { MATERIAL_FIXTURES } from '../data/materialFixtures'
 
 const bootData = {
   tasks: [{ id: 't1', type: 'teacher_assigned', status: 'pending' }],
@@ -9,6 +12,7 @@ const bootData = {
   sessions: {},
   errors: [],
   notes: [],
+  uploadJobs: [],
   noteFolders: [],
   settings: { tone: 50 },
 }
@@ -91,6 +95,42 @@ const validError = (overrides = {}) => ({
   ...overrides,
 })
 
+const validNote = (overrides = {}) => ({
+  id: 'n1',
+  title: 'Original note',
+  folderId: 'f-math',
+  folderPath: 'A-Level Math',
+  tags: ['calculus'],
+  content: [{ t: 'p', v: 'Original content' }],
+  linkedTopics: ['topic-existing'],
+  linkedErrors: [],
+  aiSuggestions: [{ id: 's-tag', type: 'add_tag', tag: 'exam-ready' }],
+  source: 'typed',
+  createdAt: '2026-08-01T00:00:00.000Z',
+  updatedAt: '2026-08-01T00:00:00.000Z',
+  versions: [],
+  version: 1,
+  ...overrides,
+})
+
+const validUploadJob = (overrides = {}) => ({
+  id: 'job-1',
+  fileName: 'notes.jpg',
+  mimeType: 'image/jpeg',
+  size: 1000,
+  materialType: 'handwritten_draft',
+  createdAt: '2026-08-06T00:00:00.000Z',
+  updatedAt: '2026-08-06T00:00:00.000Z',
+  progress: 0,
+  status: 'queued',
+  ...overrides,
+})
+
+const validClassificationResult = (overrides = {}) => ({
+  ...MATERIAL_FIXTURES.alevel_handwritten_calculus_note,
+  ...overrides,
+})
+
 const scheduledErrorVariant = (error = validError({
   status: 'verification_due',
   redoHistory: [{ attemptedAt: '2026-08-06T00:00:00.000Z', answer: '2x', isCorrect: true, timeSpent: 20 }],
@@ -159,6 +199,17 @@ function createApi(overrides = {}) {
     }),
     createNote: (note) => Promise.resolve({ note }),
     updateNote: () => Promise.resolve({ note: { id: 'n1' } }),
+    createUploadJob: (metadata) => Promise.resolve({
+      job: { ...metadata, updatedAt: metadata.createdAt, progress: 0, status: 'queued' },
+    }),
+    processUploadJob: (id) => Promise.resolve({ job: { id, status: 'needs_confirmation', progress: 100 } }),
+    confirmUploadJob: (id) => Promise.resolve({
+      job: { id, status: 'completed', progress: 100 },
+      note: { id: `note-${id}`, title: 'Confirmed note', tags: [], content: [], linkedTopics: [], linkedErrors: [], source: 'typed', versions: [], version: 1 },
+    }),
+    cancelUploadJob: (id) => Promise.resolve({ job: { id, status: 'cancelled', progress: 0 } }),
+    organizeNote: () => Promise.resolve({ note: { id: 'n1' } }),
+    undoNote: () => Promise.resolve({ note: { id: 'n1' } }),
     getExerciseSet: (taskId) => Promise.resolve(validExerciseSet({ taskId })),
     getBankExerciseSet: (setId) => Promise.resolve(validExerciseSet({ id: setId, taskId: null, title: 'Bank set' })),
     submitSession: () => Promise.resolve({ sessionId: 's1' }),
@@ -1124,6 +1175,187 @@ test('builds and optimistically persists an adjustment request with injected ser
   })
 })
 
+test.each([
+  ['explicit snapshot success', true, false, 0],
+  ['explicit snapshot failure', true, true, 0],
+  ['default snapshot success', false, false, 1],
+  ['default snapshot failure', false, true, 1],
+])('keeps toast rendering off the business clock for %s', async (_, supplied, fails, expectedClockReads) => {
+  const actionNow = new Date('2026-08-06T00:00:00.000Z')
+  const clock = vi.fn(() => actionNow)
+  const failure = new Error('adjustment offline')
+  const reportTaskAdjustment = vi.fn((id, request) => (fails
+    ? Promise.reject(failure)
+    : Promise.resolve({ request, task: { id, status: 'pending', adjustmentStatus: 'submitted' } })))
+  let actions
+  function ToastClockProbe() {
+    actions = useApp()
+    return <output>{actions.bootStatus}</output>
+  }
+  render(<AppProvider services={createAppServices({
+    apiClient: createApi({ reportTaskAdjustment }),
+    now: clock,
+    createId: () => 'generated-id',
+  })}><ToastClockProbe /></AppProvider>)
+  await screen.findByText('ready')
+  const draft = { reason: 'difficulty', details: '', availableMinutes: 20, proposedDueAt: '2026-08-08T10:00:00.000Z' }
+  const options = supplied ? { now: actionNow } : undefined
+  const operation = actions.requestTaskAdjustment(actions.tasks[0], draft, options)
+
+  if (fails) await expect(operation).rejects.toBe(failure)
+  else await expect(operation).resolves.toBeDefined()
+
+  expect(clock).toHaveBeenCalledTimes(expectedClockReads)
+  await waitFor(() => expect(actions.toast).toMatchObject({
+    message: fails ? failure.message : 'Adjustment request sent to your teacher.',
+    type: fails ? 'error' : 'success',
+  }))
+})
+
+test('assigns unique monotonic keys to consecutive toasts without reading the app clock', async () => {
+  const clock = vi.fn(() => new Date('2026-08-06T00:00:00.000Z'))
+  let actions
+  function ToastProbe() {
+    actions = useApp()
+    return <output>{actions.bootStatus}</output>
+  }
+  render(<AppProvider services={createAppServices({
+    apiClient: createApi(),
+    now: clock,
+  })}><ToastProbe /></AppProvider>)
+  await screen.findByText('ready')
+
+  act(() => { actions.showToast('First toast') })
+  const first = actions.toast
+  act(() => { actions.showToast('Second toast') })
+  const second = actions.toast
+
+  expect(clock).not.toHaveBeenCalled()
+  expect(first).toMatchObject({ message: 'First toast', type: 'info' })
+  expect(second).toMatchObject({ message: 'Second toast', type: 'info' })
+  expect(second.key).toBeGreaterThan(first.key)
+})
+
+test.each([
+  ['a thrown clock error', () => { throw new Error('clock unavailable') }],
+  ['null', () => null],
+  ['undefined', () => undefined],
+  ['a non-Date value', () => '2026-08-06T00:00:00.000Z'],
+  ['an invalid Date', () => new Date(Number.NaN)],
+])('rejects a direct adjustment before mutation when the app clock returns %s', async (_, clock) => {
+  const reportTaskAdjustment = vi.fn(() => Promise.resolve({}))
+  let actions
+  function ClockProbe() {
+    actions = useApp()
+    return <output>{actions.bootStatus}</output>
+  }
+  render(<AppProvider services={createAppServices({
+    apiClient: createApi({ reportTaskAdjustment }),
+    now: clock,
+    createId: () => 'generated-id',
+  })}><ClockProbe /></AppProvider>)
+  await screen.findByText('ready')
+  const beforeTasks = structuredClone(actions.tasks)
+  const draft = { reason: 'difficulty', details: '', availableMinutes: 20, proposedDueAt: '2026-08-08T10:00:00.000Z' }
+  let operation
+
+  expect(() => {
+    operation = actions.requestTaskAdjustment(actions.tasks[0], draft)
+  }).not.toThrow()
+  await expect(operation).rejects.toThrow('Unable to validate current time. Try again.')
+
+  expect(reportTaskAdjustment).not.toHaveBeenCalled()
+  expect(actions.tasks).toEqual(beforeTasks)
+  expect(actions.taskAdjustments).toEqual([])
+  expect(actions.isActionPending('task:adjust:t1')).toBe(false)
+})
+
+test('rejects an invalid supplied adjustment time without consulting the app clock', async () => {
+  const reportTaskAdjustment = vi.fn(() => Promise.resolve({}))
+  const clock = vi.fn(() => new Date('2026-08-06T00:00:00.000Z'))
+  let actions
+  function SuppliedClockProbe() {
+    actions = useApp()
+    return <output>{actions.bootStatus}</output>
+  }
+  render(<AppProvider services={createAppServices({
+    apiClient: createApi({ reportTaskAdjustment }),
+    now: clock,
+    createId: () => 'generated-id',
+  })}><SuppliedClockProbe /></AppProvider>)
+  await screen.findByText('ready')
+  const beforeTasks = structuredClone(actions.tasks)
+  const draft = { reason: 'difficulty', details: '', availableMinutes: 20, proposedDueAt: '2026-08-08T10:00:00.000Z' }
+
+  const operation = actions.requestTaskAdjustment(actions.tasks[0], draft, { now: null })
+  await expect(operation).rejects.toThrow('Unable to validate current time. Try again.')
+
+  expect(clock).not.toHaveBeenCalled()
+  expect(reportTaskAdjustment).not.toHaveBeenCalled()
+  expect(actions.tasks).toEqual(beforeTasks)
+  expect(actions.taskAdjustments).toEqual([])
+  expect(actions.isActionPending('task:adjust:t1')).toBe(false)
+})
+
+test('authors a direct adjustment from the Date internal slot instead of poisoned methods', async () => {
+  const poisonedNow = new Date('2026-08-06T00:00:00.000Z')
+  Object.defineProperties(poisonedNow, {
+    getTime: { value: () => { throw new Error('poisoned getTime') } },
+    toISOString: { value: () => 'forged-created-at' },
+  })
+  const clock = vi.fn(() => new Date('2099-01-01T00:00:00.000Z'))
+  const reportTaskAdjustment = vi.fn((id, request) => Promise.resolve({
+    request,
+    task: { id, status: 'pending', adjustmentStatus: 'submitted' },
+  }))
+  let actions
+  function PoisonedDateProbe() {
+    actions = useApp()
+    return <output>{actions.bootStatus}</output>
+  }
+  render(<AppProvider services={createAppServices({
+    apiClient: createApi({ reportTaskAdjustment }),
+    now: clock,
+    createId: () => 'generated-id',
+  })}><PoisonedDateProbe /></AppProvider>)
+  await screen.findByText('ready')
+  const draft = { reason: 'difficulty', details: '', availableMinutes: 20, proposedDueAt: '2026-08-08T10:00:00.000Z' }
+
+  await expect(actions.requestTaskAdjustment(actions.tasks[0], draft, { now: poisonedNow }))
+    .resolves.toBeDefined()
+
+  expect(clock).not.toHaveBeenCalled()
+  expect(reportTaskAdjustment).toHaveBeenCalledWith('t1', expect.objectContaining({
+    createdAt: '2026-08-06T00:00:00.000Z',
+  }))
+})
+
+test('rejects a supplied Date Proxy before a direct adjustment mutates or calls the API', async () => {
+  const reportTaskAdjustment = vi.fn(() => Promise.resolve({}))
+  let actions
+  function ProxyDateProbe() {
+    actions = useApp()
+    return <output>{actions.bootStatus}</output>
+  }
+  render(<AppProvider services={createAppServices({
+    apiClient: createApi({ reportTaskAdjustment }),
+    now: () => new Date('2026-08-06T00:00:00.000Z'),
+    createId: () => 'generated-id',
+  })}><ProxyDateProbe /></AppProvider>)
+  await screen.findByText('ready')
+  const beforeTasks = structuredClone(actions.tasks)
+  const draft = { reason: 'difficulty', details: '', availableMinutes: 20, proposedDueAt: '2026-08-08T10:00:00.000Z' }
+  const proxiedNow = new Proxy(new Date('2026-08-06T00:00:00.000Z'), {})
+
+  await expect(actions.requestTaskAdjustment(actions.tasks[0], draft, { now: proxiedNow }))
+    .rejects.toThrow('Unable to validate current time. Try again.')
+
+  expect(reportTaskAdjustment).not.toHaveBeenCalled()
+  expect(actions.tasks).toEqual(beforeTasks)
+  expect(actions.taskAdjustments).toEqual([])
+  expect(actions.isActionPending('task:adjust:t1')).toBe(false)
+})
+
 test('rejects a duplicate task action and rolls back an adjustment failure without losing the task', async () => {
   // Catches duplicate task writes and a failed adjustment that leaves an optimistic request/task mutation behind.
   let rejectAdjustment
@@ -1686,4 +1918,735 @@ test('rolls back a valid optimistic mastery transition when the API rejects it',
   })
   expect(harness.app.errors).toEqual([verified])
   expect(harness.app.isActionPending('error:master:e1')).toBe(false)
+})
+
+test('bootstraps upload jobs alongside versioned notes', async () => {
+  // Catches provider bootstrap omitting the new durable collections.
+  const note = validNote()
+  const job = validUploadJob({
+    status: 'failed',
+    progress: 1,
+    failure: { code: 'UPLOAD_PROCESSING_FAILED', message: 'Unable to process the material upload' },
+  })
+  const harness = await renderApp(createApi({
+    bootstrap: () => Promise.resolve({ ...bootData, notes: [note], uploadJobs: [job] }),
+  }))
+
+  expect(harness.app.notes).toEqual([note])
+  expect(harness.app.uploadJobs).toEqual([job])
+})
+
+test('authors upload identity once, exposes upload:create, and rejects an unsafe returned job', async () => {
+  // Catches the store retaining a File/raw byte payload or inventing a non-contract pending key.
+  let resolveCreate
+  const createUploadJob = vi.fn(() => new Promise((resolve) => { resolveCreate = resolve }))
+  const harness = await renderApp(createApi({ createUploadJob }))
+  let operation
+
+  act(() => {
+    operation = harness.app.startMaterialUpload({
+      fileName: 'notes.jpg',
+      mimeType: 'image/jpeg',
+      size: 3,
+      materialType: 'handwritten_draft',
+    })
+  })
+  await waitFor(() => expect(harness.app.isActionPending('upload:create')).toBe(true))
+  expect(createUploadJob).toHaveBeenCalledWith({
+    fileName: 'notes.jpg',
+    mimeType: 'image/jpeg',
+    size: 3,
+    materialType: 'handwritten_draft',
+    id: 'generated-id',
+    createdAt: '2026-08-06T00:00:00.000Z',
+  }, {})
+  expect(harness.app.uploadJobs).toEqual([])
+
+  const queuedWithBytes = validUploadJob({ id: 'generated-id', size: 3, rawBytes: new Uint8Array([1, 2, 3]) })
+  await act(async () => {
+    resolveCreate({ job: queuedWithBytes })
+    await expect(operation).rejects.toMatchObject({ code: 'INVALID_UPLOAD_RESPONSE' })
+  })
+  expect(harness.app.uploadJobs).toEqual([])
+  expect(harness.app.isActionPending('upload:create')).toBe(false)
+})
+
+test('reserves a stable upload id and can reconcile a durable cancellation missing from local state', async () => {
+  const createId = vi.fn(() => 'reserved-upload-id')
+  const cancelled = validUploadJob({ id: 'reserved-upload-id', status: 'cancelled' })
+  const cancelUploadJob = vi.fn(() => Promise.resolve({ job: cancelled }))
+  const harness = await renderApp(createApi({ cancelUploadJob }), { createId })
+
+  expect(harness.app.reserveMaterialUploadId()).toBe('reserved-upload-id')
+  expect(createId).toHaveBeenCalledTimes(1)
+  await act(async () => {
+    await harness.app.cancelMaterialUpload('reserved-upload-id', { allowMissing: true })
+  })
+
+  expect(cancelUploadJob).toHaveBeenCalledWith('reserved-upload-id', {})
+  expect(harness.app.uploadJobs).toEqual([cancelled])
+})
+
+test('treats exact HTTP 404 NOT_FOUND as successful allow-missing upload cancellation', async () => {
+  const notFound = new ApiError('Upload not found', { status: 404, code: 'NOT_FOUND' })
+  const cancelUploadJob = vi.fn(() => Promise.reject(notFound))
+  const harness = await renderApp(createApi({ cancelUploadJob }))
+
+  await act(async () => {
+    await expect(harness.app.cancelMaterialUpload('missing-upload', { allowMissing: true }))
+      .resolves.toBeUndefined()
+  })
+
+  expect(cancelUploadJob).toHaveBeenCalledWith('missing-upload', {})
+  expect(harness.app.uploadJobs).toEqual([])
+  expect(harness.app.toast).toBeNull()
+})
+
+test.each([
+  ['processing', validUploadJob({ status: 'processing', progress: 35 })],
+  ['needs confirmation', validUploadJob({
+    status: 'needs_confirmation',
+    progress: 100,
+    result: validClassificationResult(),
+  })],
+])('removes a stale local %s upload after canonical allow-missing 404', async (_, localJob) => {
+  const cancelUploadJob = vi.fn(() => Promise.reject(
+    new ApiError('Upload not found', { status: 404, code: 'NOT_FOUND' }),
+  ))
+  const harness = await renderApp(createApi({
+    bootstrap: () => Promise.resolve({ ...bootData, uploadJobs: [localJob] }),
+    cancelUploadJob,
+  }))
+
+  await act(async () => {
+    await expect(harness.app.cancelMaterialUpload(localJob.id, { allowMissing: true }))
+      .resolves.toBeUndefined()
+  })
+
+  expect(harness.app.uploadJobs.some(({ id }) => id === localJob.id)).toBe(false)
+  expect(harness.app.isActionPending(`upload:cancel:${localJob.id}`)).toBe(false)
+  expect(harness.app.toast).toBeNull()
+})
+
+test('rejects a non-HTTP NOT_FOUND code and preserves the local upload for recovery', async () => {
+  const localJob = validUploadJob({ status: 'processing', progress: 35 })
+  const nonHttpNotFound = new ApiError('Upload not found', { status: 0, code: 'NOT_FOUND' })
+  const harness = await renderApp(createApi({
+    bootstrap: () => Promise.resolve({ ...bootData, uploadJobs: [localJob] }),
+    cancelUploadJob: () => Promise.reject(nonHttpNotFound),
+  }))
+
+  await act(async () => {
+    await expect(harness.app.cancelMaterialUpload(localJob.id, { allowMissing: true }))
+      .rejects.toBe(nonHttpNotFound)
+  })
+
+  expect(harness.app.uploadJobs).toEqual([localJob])
+  expect(harness.app.toast).toMatchObject({ message: 'Upload not found', type: 'error' })
+})
+
+test('filters recursively unsafe upload jobs during bootstrap', async () => {
+  // Catches shallow projection retaining invalid nested results, exotic objects, or non-JSON values.
+  const safe = validUploadJob({ id: 'safe-job' })
+  const nestedRaw = validUploadJob({ id: 'nested-raw', result: { rawBytes: 'AA==' } })
+  const typed = validUploadJob({ id: 'typed', failure: new Uint8Array([1]), status: 'failed' })
+  const custom = Object.assign(Object.create({ inherited: true }), validUploadJob({ id: 'custom' }))
+  const harness = await renderApp(createApi({
+    bootstrap: () => Promise.resolve({
+      ...bootData,
+      uploadJobs: [nestedRaw, typed, custom, safe],
+    }),
+  }))
+
+  expect(harness.app.uploadJobs).toEqual([safe])
+})
+
+test.each([
+  ['create returning a non-queued job', [], 'create', validUploadJob({ id: 'generated-id', status: 'cancelled' })],
+  ['process without an existing job', [], 'process', validUploadJob({ status: 'needs_confirmation', progress: 100, result: validClassificationResult() })],
+  ['process returning the wrong status', [validUploadJob()], 'process', validUploadJob()],
+  ['confirm from a queued state', [validUploadJob()], 'confirm', validUploadJob({ status: 'completed', progress: 100, result: validClassificationResult() })],
+  ['cancel from a completed state', [validUploadJob({ status: 'completed', progress: 100, result: validClassificationResult() })], 'cancel', validUploadJob({ status: 'cancelled', progress: 100 })],
+])('atomically rejects an impossible upload success: %s', async (_, initialJobs, action, responseJob) => {
+  // Catches a valid-shaped response inserting a missing entity or performing an illegal state transition.
+  const note = validNote({ id: 'note-job-1', sourceJobId: 'job-1' })
+  const api = createApi({
+    bootstrap: () => Promise.resolve({ ...bootData, notes: [], uploadJobs: initialJobs }),
+    createUploadJob: () => Promise.resolve({ job: responseJob }),
+    processUploadJob: () => Promise.resolve({ job: responseJob }),
+    confirmUploadJob: () => Promise.resolve({ job: responseJob, note }),
+    cancelUploadJob: () => Promise.resolve({ job: responseJob }),
+  })
+  const harness = await renderApp(api)
+  const invoke = {
+    create: () => harness.app.startMaterialUpload({
+      fileName: 'notes.jpg', mimeType: 'image/jpeg', size: 1000, materialType: 'handwritten_draft',
+    }),
+    process: () => harness.app.processMaterialUpload('job-1'),
+    confirm: () => harness.app.confirmMaterialUpload('job-1', {}),
+    cancel: () => harness.app.cancelMaterialUpload('job-1'),
+  }[action]
+
+  await act(async () => {
+    await expect(invoke()).rejects.toMatchObject({ code: 'INVALID_UPLOAD_RESPONSE' })
+  })
+  expect(harness.app.uploadJobs).toEqual(initialJobs)
+  expect(harness.app.notes).toEqual([])
+})
+
+test('rejects a confirm response that would replace an existing deterministic note id', async () => {
+  // Catches a forged confirmation overwriting an existing note instead of preserving atomic create semantics.
+  const classified = validUploadJob({
+    status: 'needs_confirmation', progress: 100, result: validClassificationResult(),
+  })
+  const completed = { ...classified, status: 'completed' }
+  const existing = validNote({ id: 'note-job-1', title: 'Existing protected note', sourceJobId: 'job-1' })
+  const replacement = validNote({ id: 'note-job-1', title: 'Forged replacement', sourceJobId: 'job-1' })
+  const harness = await renderApp(createApi({
+    bootstrap: () => Promise.resolve({ ...bootData, notes: [existing], uploadJobs: [classified] }),
+    confirmUploadJob: () => Promise.resolve({ job: completed, note: replacement }),
+  }))
+
+  await act(async () => {
+    await expect(harness.app.confirmMaterialUpload('job-1', {}))
+      .rejects.toMatchObject({ code: 'INVALID_UPLOAD_RESPONSE' })
+  })
+  expect(harness.app.uploadJobs).toEqual([classified])
+  expect(harness.app.notes).toEqual([existing])
+})
+
+test.each([
+  ['unknown field', (note) => ({ ...note, unknown: true })],
+  ['raw bytes', (note) => ({ ...note, rawBytes: 'AA==' })],
+  ['nested base64', (note) => ({ ...note, content: [{ t: 'image', v: 'x', reference: 'object://x', alt: 'x', base64: 'AA==' }] })],
+  ['Blob', (note) => ({ ...note, content: [new Blob(['unsafe'])] })],
+  ['typed array', (note) => ({ ...note, linkedErrors: new Uint8Array([1]) })],
+  ['custom prototype', (note) => Object.assign(Object.create({ inherited: true }), note)],
+  ['undefined', (note) => ({ ...note, subject: undefined })],
+  ['cycle', (note) => { const cyclic = { ...note }; cyclic.self = cyclic; return cyclic }],
+  ['wrong source job', (note) => ({ ...note, sourceJobId: 'job-forged' })],
+])('rejects a forged confirm note containing %s without committing either entity', async (_, forge) => {
+  // Catches job validation succeeding before an unsafe note is inserted in a separate state write.
+  const classified = validUploadJob({
+    status: 'needs_confirmation', progress: 100, result: validClassificationResult(),
+  })
+  const completed = { ...classified, status: 'completed' }
+  const safeNote = validNote({ id: 'note-job-1', sourceJobId: 'job-1' })
+  const harness = await renderApp(createApi({
+    bootstrap: () => Promise.resolve({ ...bootData, notes: [], uploadJobs: [classified] }),
+    confirmUploadJob: () => Promise.resolve({ job: completed, note: forge(safeNote) }),
+  }))
+
+  await act(async () => {
+    await expect(harness.app.confirmMaterialUpload('job-1', {}))
+      .rejects.toMatchObject({ code: 'INVALID_NOTE' })
+  })
+  expect(harness.app.uploadJobs).toEqual([classified])
+  expect(harness.app.notes).toEqual([])
+})
+
+test('processes and atomically confirms an upload under the exact pending keys', async () => {
+  // Catches confirmation committing only the job or only the note, and pending-key drift.
+  let resolveProcess
+  let resolveConfirm
+  const processUploadJob = vi.fn(() => new Promise((resolve) => { resolveProcess = resolve }))
+  const confirmUploadJob = vi.fn(() => new Promise((resolve) => { resolveConfirm = resolve }))
+  const queued = validUploadJob()
+  const harness = await renderApp(createApi({
+    bootstrap: () => Promise.resolve({ ...bootData, uploadJobs: [queued] }),
+    processUploadJob,
+    confirmUploadJob,
+  }))
+  let processing
+
+  act(() => { processing = harness.app.processMaterialUpload('job-1') })
+  await waitFor(() => expect(harness.app.isActionPending('upload:process:job-1')).toBe(true))
+  const classified = validUploadJob({
+    status: 'needs_confirmation',
+    progress: 100,
+    result: validClassificationResult(),
+  })
+  await act(async () => { resolveProcess({ job: classified }); await processing })
+  expect(harness.app.uploadJobs).toEqual([classified])
+  expect(harness.app.isActionPending('upload:process:job-1')).toBe(false)
+
+  let confirming
+  const patch = { subject: 'A-Level Math' }
+  act(() => { confirming = harness.app.confirmMaterialUpload('job-1', patch) })
+  await waitFor(() => expect(harness.app.isActionPending('upload:confirm:job-1')).toBe(true))
+  const completed = { ...classified, status: 'completed' }
+  const note = validNote({ id: 'note-job-1', sourceJobId: 'job-1' })
+  await act(async () => { resolveConfirm({ job: completed, note }); await confirming })
+
+  expect(confirmUploadJob).toHaveBeenCalledWith('job-1', patch, {})
+  expect(harness.app.uploadJobs).toEqual([completed])
+  expect(harness.app.notes).toEqual([note])
+  expect(harness.app.isActionPending('upload:confirm:job-1')).toBe(false)
+})
+
+test('keeps a cancellation terminal when a stale process response resolves later', async () => {
+  // Catches late asynchronous processing resurrecting a job that the student cancelled.
+  let resolveProcess
+  const processUploadJob = () => new Promise((resolve) => { resolveProcess = resolve })
+  const cancelled = validUploadJob({ status: 'cancelled' })
+  const cancelUploadJob = vi.fn(() => Promise.resolve({ job: cancelled }))
+  const harness = await renderApp(createApi({
+    bootstrap: () => Promise.resolve({ ...bootData, uploadJobs: [validUploadJob()] }),
+    processUploadJob,
+    cancelUploadJob,
+  }))
+  let processing
+
+  act(() => { processing = harness.app.processMaterialUpload('job-1') })
+  await waitFor(() => expect(harness.app.isActionPending('upload:process:job-1')).toBe(true))
+  await act(async () => { await harness.app.cancelMaterialUpload('job-1') })
+  expect(harness.app.uploadJobs).toEqual([cancelled])
+  expect(harness.app.isActionPending('upload:cancel:job-1')).toBe(false)
+
+  await act(async () => {
+    resolveProcess({ job: validUploadJob({ status: 'needs_confirmation', progress: 100 }) })
+    await expect(processing).rejects.toMatchObject({ code: 'INVALID_UPLOAD_RESPONSE' })
+  })
+  expect(harness.app.uploadJobs).toEqual([cancelled])
+})
+
+test('keeps a cancellation terminal when an older process request fails later', async () => {
+  // Catches a pessimistic upload action rolling an old snapshot over a successful cancellation.
+  let rejectProcess
+  const processUploadJob = () => new Promise((_, reject) => { rejectProcess = reject })
+  const cancelled = validUploadJob({ status: 'cancelled' })
+  const harness = await renderApp(createApi({
+    bootstrap: () => Promise.resolve({ ...bootData, uploadJobs: [validUploadJob()] }),
+    processUploadJob,
+    cancelUploadJob: () => Promise.resolve({ job: cancelled }),
+  }))
+  const processSettlement = harness.app.processMaterialUpload('job-1').catch((error) => error)
+
+  await waitFor(() => expect(harness.app.isActionPending('upload:process:job-1')).toBe(true))
+  await act(async () => { await harness.app.cancelMaterialUpload('job-1') })
+  expect(harness.app.uploadJobs).toEqual([cancelled])
+
+  await act(async () => { rejectProcess(new Error('processing failed')); await processSettlement })
+  expect(harness.app.uploadJobs).toEqual([cancelled])
+})
+
+test('shows a persisted processing failure immediately, clears pending, and retries successfully', async () => {
+  // Catches process errors only producing a toast while the durable failed job remains invisible to the UI.
+  const failed = validUploadJob({
+    status: 'failed',
+    progress: 1,
+    failure: {
+      code: 'INVALID_MATERIAL_JOB',
+      message: 'Material job is missing valid upload metadata',
+    },
+  })
+  const recovered = validUploadJob({
+    status: 'needs_confirmation',
+    progress: 100,
+    result: validClassificationResult(),
+  })
+  const processingError = Object.assign(
+    new Error('Material job is missing valid upload metadata'),
+    { code: 'INVALID_MATERIAL_JOB', job: failed },
+  )
+  const processUploadJob = vi.fn()
+    .mockRejectedValueOnce(processingError)
+    .mockResolvedValueOnce({ job: recovered })
+  const harness = await renderApp(createApi({
+    bootstrap: () => Promise.resolve({ ...bootData, uploadJobs: [validUploadJob()] }),
+    processUploadJob,
+  }))
+
+  await act(async () => {
+    await expect(harness.app.processMaterialUpload('job-1')).rejects.toBe(processingError)
+  })
+  expect(harness.app.uploadJobs).toEqual([failed])
+  expect(harness.app.isActionPending('upload:process:job-1')).toBe(false)
+  expect(harness.app.toast).toMatchObject({
+    type: 'error',
+    message: 'Material job is missing valid upload metadata',
+  })
+
+  await act(async () => {
+    await expect(harness.app.processMaterialUpload('job-1')).resolves.toEqual({ job: recovered })
+  })
+  expect(harness.app.uploadJobs).toEqual([recovered])
+  expect(harness.app.uploadJobs[0]).not.toHaveProperty('failure')
+  expect(harness.app.isActionPending('upload:process:job-1')).toBe(false)
+})
+
+test('projects a real fetch processing error envelope into the existing Store job', async () => {
+  // Catches the real HTTP client losing error.data.job or the adapter failing to sanitize and attach it.
+  const failed = validUploadJob({
+    status: 'failed',
+    progress: 1,
+    failure: { code: 'PROCESSING_FAILED', message: 'Processing failed' },
+  })
+  const fetchMock = vi.fn(async (url) => {
+    if (String(url).endsWith('/api/student/bootstrap')) {
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({ code: 0, data: { ...bootData, uploadJobs: [validUploadJob()] } }),
+      }
+    }
+    return {
+      ok: false,
+      status: 422,
+      json: async () => ({
+        code: 'PROCESSING_FAILED',
+        message: 'Processing failed',
+        data: { job: failed },
+      }),
+    }
+  })
+  vi.stubEnv('VITE_API_BASE_URL', 'https://api.example.test')
+  vi.stubGlobal('fetch', fetchMock)
+  vi.resetModules()
+
+  try {
+    const realApi = await import('../api/index')
+    const harness = await renderApp(realApi)
+
+    await act(async () => {
+      await harness.app.processMaterialUpload('job-1').catch(() => undefined)
+    })
+
+    expect(harness.app.uploadJobs).toEqual([failed])
+    expect(harness.app.isActionPending('upload:process:job-1')).toBe(false)
+    expect(harness.app.toast).toMatchObject({ type: 'error', message: 'Processing failed' })
+    expect(fetchMock).toHaveBeenCalledWith(
+      'https://api.example.test/api/material-uploads/job-1/process',
+      expect.objectContaining({ method: 'POST' }),
+    )
+  } finally {
+    vi.unstubAllGlobals()
+    vi.unstubAllEnvs()
+    vi.resetModules()
+  }
+})
+
+test.each([
+  ['a fake id', { ...validUploadJob({ id: 'fake-job', status: 'failed', progress: 1 }), failure: { code: 'FAILED', message: 'Nope' } }],
+  ['nested raw bytes', { ...validUploadJob({ status: 'failed', progress: 1 }), failure: { code: 'FAILED', message: 'Nope' }, result: { rawBytes: 'AA==' } }],
+  ['an invalid failure prototype', { ...validUploadJob({ status: 'failed', progress: 1 }), failure: Object.assign(Object.create({ stack: 'unsafe' }), { code: 'FAILED', message: 'Nope' }) }],
+])('ignores process error jobs containing %s and never inserts a forged job', async (_, unsafeJob) => {
+  // Catches process onError trusting an id/status-only object from an error envelope.
+  const processingError = Object.assign(new Error('Processing failed'), { job: unsafeJob })
+  const harness = await renderApp(createApi({
+    bootstrap: () => Promise.resolve({ ...bootData, uploadJobs: [validUploadJob()] }),
+    processUploadJob: () => Promise.reject(processingError),
+  }))
+
+  await act(async () => {
+    await harness.app.processMaterialUpload('job-1').catch(() => undefined)
+  })
+
+  expect(harness.app.uploadJobs).toEqual([validUploadJob()])
+  expect(harness.app.uploadJobs.some(({ id }) => id === 'fake-job')).toBe(false)
+  expect(harness.app.isActionPending('upload:process:job-1')).toBe(false)
+})
+
+test('clears failed-only diagnostics when Store commits cancellation', async () => {
+  // Catches a stale or malformed cancellation response leaving failure on a non-failed Store job.
+  const failure = {
+    code: 'UPLOAD_PROCESSING_FAILED',
+    message: 'Unable to process the material upload',
+  }
+  const failed = validUploadJob({ status: 'failed', progress: 1, failure })
+  const cancelled = validUploadJob({ status: 'cancelled', progress: 1 })
+  const harness = await renderApp(createApi({
+    bootstrap: () => Promise.resolve({ ...bootData, notes: [], uploadJobs: [failed] }),
+    cancelUploadJob: () => Promise.resolve({ job: cancelled }),
+  }))
+
+  await act(async () => {
+    await harness.app.cancelMaterialUpload('job-1')
+  })
+
+  expect(harness.app.uploadJobs).toEqual([cancelled])
+  expect(harness.app.uploadJobs[0]).not.toHaveProperty('failure')
+  expect(harness.app.notes).toEqual([])
+  expect(harness.app.isActionPending('upload:cancel:job-1')).toBe(false)
+})
+
+test('commits needs-confirmation cancellation without retaining classification result state', async () => {
+  // Catches the Store rejecting or losing a legal needs_confirmation -> cancelled transition.
+  const classified = validUploadJob({
+    status: 'needs_confirmation',
+    progress: 100,
+    result: validClassificationResult(),
+  })
+  const cancelled = validUploadJob({ status: 'cancelled', progress: 100 })
+  const harness = await renderApp(createApi({
+    bootstrap: () => Promise.resolve({ ...bootData, notes: [], uploadJobs: [classified] }),
+    cancelUploadJob: () => Promise.resolve({ job: cancelled }),
+  }))
+
+  await act(async () => {
+    await harness.app.cancelMaterialUpload('job-1')
+  })
+
+  expect(harness.app.uploadJobs).toEqual([cancelled])
+  expect(harness.app.uploadJobs[0]).not.toHaveProperty('result')
+  expect(harness.app.uploadJobs[0]).not.toHaveProperty('failure')
+})
+
+test('rolls back note edits with an error toast and commits organize and undo canonically', async () => {
+  // Catches optimistic version history surviving a failure or canonical source/version data being ignored.
+  const original = validNote()
+  let rejectUpdate
+  const updateNote = vi.fn(() => new Promise((_, reject) => { rejectUpdate = reject }))
+  const organized = applyNoteOrganization(original, ['s-tag'], '2026-08-06T00:00:00.000Z')
+  const undone = undoLastNoteVersion(organized, '2026-08-06T00:00:00.000Z')
+  const organizeNote = vi.fn(() => Promise.resolve({ note: organized }))
+  const undoNote = vi.fn(() => Promise.resolve({ note: undone }))
+  const harness = await renderApp(createApi({
+    bootstrap: () => Promise.resolve({ ...bootData, notes: [original] }),
+    updateNote,
+    organizeNote,
+    undoNote,
+  }))
+  let update
+
+  act(() => { update = harness.app.updateNote('n1', { title: 'Optimistic title' }) })
+  await waitFor(() => expect(harness.app.isActionPending('note:update:n1')).toBe(true))
+  expect(harness.app.notes[0]).toMatchObject({ title: 'Optimistic title', version: 2 })
+  await act(async () => { rejectUpdate(new Error('note offline')); await update.catch(() => undefined) })
+  expect(harness.app.notes).toEqual([original])
+  expect(harness.app.toast).toMatchObject({ message: 'note offline', type: 'error' })
+
+  await act(async () => { await harness.app.organizeNote('n1', ['s-tag']) })
+  expect(organizeNote).toHaveBeenCalledWith('n1', ['s-tag'], { changedAt: '2026-08-06T00:00:00.000Z' })
+  expect(harness.app.notes).toEqual([organized])
+  expect(harness.app.isActionPending('note:organize:n1')).toBe(false)
+
+  await act(async () => { await harness.app.undoNote('n1') })
+  expect(undoNote).toHaveBeenCalledWith('n1', { changedAt: '2026-08-06T00:00:00.000Z' })
+  expect(harness.app.notes).toEqual([undone])
+  expect(harness.app.isActionPending('note:undo:n1')).toBe(false)
+})
+
+test.each([
+  ['update with an unsafe note', 'update', () => validNote(), (current) => ({
+    ...applyNotePatch(current, { title: 'Server edit' }, {
+      changedAt: '2026-08-06T00:00:00.000Z', reason: 'edit',
+    }),
+    rawBytes: 'AA==',
+  })],
+  ['organize with a wrong id', 'organize', () => validNote(), (current) => ({
+    ...applyNoteOrganization(current, ['s-tag'], '2026-08-06T00:00:00.000Z'),
+    id: 'wrong-id',
+  })],
+  ['undo with a skipped version', 'undo', () => applyNotePatch(validNote(), { title: 'Version 2' }, {
+    changedAt: '2026-08-05T00:00:00.000Z', reason: 'edit',
+  }), () => {
+    const version2 = applyNotePatch(validNote(), { title: 'Server version 2' }, {
+      changedAt: '2026-08-05T00:00:00.000Z', reason: 'edit',
+    })
+    const version3 = applyNotePatch(version2, { title: 'Server version 3' }, {
+      changedAt: '2026-08-05T00:01:00.000Z', reason: 'edit',
+    })
+    return applyNotePatch(version3, { title: 'Server version 4' }, {
+      changedAt: '2026-08-05T00:02:00.000Z', reason: 'edit',
+    })
+  }],
+])('atomically rejects a forged note mutation result: %s', async (_, action, makeInitial, makeResponse) => {
+  // Catches Store commits trusting test stubs or a bypassed API boundary.
+  const initial = makeInitial()
+  const response = makeResponse(initial)
+  const harness = await renderApp(createApi({
+    bootstrap: () => Promise.resolve({ ...bootData, notes: [initial] }),
+    updateNote: () => Promise.resolve({ note: response }),
+    organizeNote: () => Promise.resolve({ note: response }),
+    undoNote: () => Promise.resolve({ note: response }),
+  }))
+  const invoke = {
+    update: () => harness.app.updateNote('n1', { title: 'Optimistic edit' }),
+    organize: () => harness.app.organizeNote('n1', ['s-tag']),
+    undo: () => harness.app.undoNote('n1'),
+  }[action]
+
+  await act(async () => {
+    await expect(invoke()).rejects.toBeDefined()
+  })
+  expect(harness.app.notes).toEqual([initial])
+})
+
+const storeMutationMetadata = {
+  changedAt: '2026-08-06T00:00:00.000Z',
+  reason: 'edit',
+}
+
+const noteWithVersion = (overrides = {}) => applyNotePatch(validNote(overrides), {
+  title: 'Version 2',
+}, {
+  changedAt: '2026-08-05T00:00:00.000Z',
+  reason: 'edit',
+})
+
+test.each([
+  ['update adds immutable subject', 'update', () => validNote(), (current) => ({
+    ...applyNotePatch(current, { title: 'Optimistic edit' }, storeMutationMetadata),
+    subject: 'A-Level Math',
+  })],
+  ['organize removes immutable materialType', 'organize', () => validNote({
+    materialType: 'class_note',
+  }), (current) => {
+    const forged = applyNoteOrganization(current, ['s-tag'], storeMutationMetadata.changedAt)
+    delete forged.materialType
+    return forged
+  }],
+  ['undo changes immutable aiSuggestions', 'undo', () => noteWithVersion(), (current) => ({
+    ...undoLastNoteVersion(current, storeMutationMetadata.changedAt),
+    aiSuggestions: [],
+  })],
+  ['update changes source', 'update', () => validNote(), (current) => ({
+    ...applyNotePatch(current, { title: 'Optimistic edit' }, storeMutationMetadata),
+    source: 'photo',
+  })],
+  ['organize keeps the pre-organization source', 'organize', () => validNote(), (current) => ({
+    ...applyNoteOrganization(current, ['s-tag'], storeMutationMetadata.changedAt),
+    source: current.source,
+  })],
+  ['undo does not restore the snapshot source', 'undo', () => applyNoteOrganization(
+    validNote(),
+    ['s-tag'],
+    '2026-08-05T00:00:00.000Z',
+  ), (current) => ({
+    ...undoLastNoteVersion(current, storeMutationMetadata.changedAt),
+    source: current.source,
+  })],
+  ['undo replaces a legacy null snapshot source', 'undo', () => {
+    const current = noteWithVersion({ source: 'typed' })
+    current.versions[current.versions.length - 1].source = null
+    return current
+  }, (current) => ({
+    ...undoLastNoteVersion(current, storeMutationMetadata.changedAt),
+    source: 'photo',
+  })],
+])('atomically rejects an action-inconsistent note response: %s', async (_, action, makeInitial, makeResponse) => {
+  // Catches schema-valid responses mutating immutable top-level fields or using the wrong action source.
+  const initial = makeInitial()
+  const response = makeResponse(initial)
+  const harness = await renderApp(createApi({
+    bootstrap: () => Promise.resolve({ ...bootData, notes: [initial] }),
+    updateNote: () => Promise.resolve({ note: response }),
+    organizeNote: () => Promise.resolve({ note: response }),
+    undoNote: () => Promise.resolve({ note: response }),
+  }))
+  const invoke = {
+    update: () => harness.app.updateNote('n1', { title: 'Optimistic edit' }),
+    organize: () => harness.app.organizeNote('n1', ['s-tag']),
+    undo: () => harness.app.undoNote('n1'),
+  }[action]
+
+  await act(async () => {
+    await expect(invoke()).rejects.toMatchObject({ code: 'INVALID_NOTE_RESPONSE' })
+  })
+  expect(harness.app.notes).toEqual([initial])
+})
+
+test.each([
+  ['update', () => validNote(), (current) => applyNotePatch(current, {
+    title: 'Optimistic edit',
+  }, {
+    changedAt: '2099-01-01T00:00:00.000Z',
+    reason: 'edit',
+  })],
+  ['organize', () => validNote(), (current) => applyNoteOrganization(
+    current,
+    ['s-tag'],
+    '2099-01-01T00:00:00.000Z',
+  )],
+  ['undo', () => noteWithVersion(), (current) => undoLastNoteVersion(
+    current,
+    '2099-01-01T00:00:00.000Z',
+  )],
+])('atomically rejects an internally consistent forged %s mutation timestamp', async (action, makeInitial, makeResponse) => {
+  // Catches a response synchronizing updatedAt and snapshot.changedAt to a timestamp the Store never sent.
+  const initial = makeInitial()
+  const response = makeResponse(initial)
+  const harness = await renderApp(createApi({
+    bootstrap: () => Promise.resolve({ ...bootData, notes: [initial] }),
+    updateNote: () => Promise.resolve({ note: response }),
+    organizeNote: () => Promise.resolve({ note: response }),
+    undoNote: () => Promise.resolve({ note: response }),
+  }))
+  const invoke = {
+    update: () => harness.app.updateNote('n1', { title: 'Optimistic edit' }),
+    organize: () => harness.app.organizeNote('n1', ['s-tag']),
+    undo: () => harness.app.undoNote('n1'),
+  }[action]
+
+  await act(async () => {
+    await expect(invoke()).rejects.toMatchObject({ code: 'INVALID_NOTE_RESPONSE' })
+  })
+  expect(harness.app.notes).toEqual([initial])
+})
+
+test('rejects a successful note mutation when the current note does not exist', async () => {
+  // Catches a late/stubbed response inserting a note that was absent when the action committed.
+  const harness = await renderApp(createApi({
+    bootstrap: () => Promise.resolve({ ...bootData, notes: [] }),
+    updateNote: () => Promise.resolve({ note: validNote() }),
+  }))
+
+  await act(async () => {
+    await expect(harness.app.updateNote('n1', { title: 'Ghost edit' })).rejects.toBeDefined()
+  })
+  expect(harness.app.notes).toEqual([])
+})
+
+test('routes the existing one-click organize update consumer through the versioned organize endpoint', async () => {
+  // Catches the legacy Notes page mutating immutable source through PATCH or breaking before Task 5 rewires the UI.
+  const original = validNote()
+  const organized = applyNoteOrganization(original, ['s-tag'], '2026-08-06T00:00:00.000Z')
+  const updateNote = vi.fn()
+  const organizeNote = vi.fn(() => Promise.resolve({ note: organized }))
+  const harness = await renderApp(createApi({
+    bootstrap: () => Promise.resolve({ ...bootData, notes: [original] }),
+    updateNote,
+    organizeNote,
+  }))
+
+  await act(async () => {
+    await harness.app.updateNote('n1', {
+      tags: ['calculus', 'organized'],
+      source: 'ai_organized',
+    })
+  })
+
+  expect(updateNote).not.toHaveBeenCalled()
+  expect(organizeNote).toHaveBeenCalledWith('n1', ['s-tag'], {
+    changedAt: '2026-08-06T00:00:00.000Z',
+  })
+  expect(harness.app.notes).toEqual([organized])
+})
+
+test('does not consume an upload response after its AbortSignal is cancelled', async () => {
+  // Catches an unmounted modal's request mutating shared store state after cancellation.
+  let resolveCreate
+  let jobReads = 0
+  const createUploadJob = () => new Promise((resolve) => { resolveCreate = resolve })
+  const harness = await renderApp(createApi({ createUploadJob }))
+  const controller = new AbortController()
+  const operation = harness.app.startMaterialUpload({
+    id: 'job-aborted',
+    createdAt: '2026-08-06T00:00:00.000Z',
+    fileName: 'notes.jpg',
+    mimeType: 'image/jpeg',
+    size: 100,
+    materialType: 'handwritten_draft',
+  }, { signal: controller.signal })
+
+  controller.abort()
+  await act(async () => {
+    resolveCreate({ get job() { jobReads += 1; return validUploadJob({ id: 'job-aborted' }) } })
+    await operation
+  })
+
+  expect(jobReads).toBe(0)
+  expect(harness.app.uploadJobs).toEqual([])
+  expect(harness.app.isActionPending('upload:create')).toBe(false)
 })

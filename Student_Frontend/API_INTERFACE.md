@@ -30,7 +30,14 @@
 - Mock persistence: without `VITE_API_BASE_URL`, the local adapter persists the state that backs
   these endpoint functions in `localStorage` key `nome-ai.student-state.v1`, using the versioned
   `{ version: 1, data }` envelope. State survives refreshes; missing, malformed, or incompatible
-  stored data falls back to the seed state during bootstrap.
+  stored data falls back to the seed state during bootstrap. Material bootstrap adds an empty
+  `uploadJobs` collection when absent and migrates legacy Module 0–3 notes that have neither
+  version field to `version: 1, versions: []`; the migrated shape is written back to the same
+  version-1 envelope.
+- Persisted-note migration: after legacy version fields are normalized, bootstrap and list apply the
+  same strict persisted-note boundary. Invalid notes are omitted and persistently removed from mock
+  storage; valid legacy and current notes retain their complete contract shape. A migrated or filtered
+  shape is written back once, while later reads do not rewrite already-valid notes.
 - Test helper: `resetMockState()` is exported from `src/api/index.js`. It clears that local key and
   returns a fresh bootstrapped seed state asynchronously. It does not introduce or alter an HTTP
   endpoint.
@@ -56,6 +63,7 @@ One-shot load of everything the student shell needs. Frontend calls it once on m
 | `sessions` | Record\<string, Session\> | Persisted sessions keyed by `sessionId` (not an array) |
 | `errors` | ErrorItem[] | Error-book entries |
 | `notes` | Note[] | Notes |
+| `uploadJobs` | MaterialUploadJob[] | Durable metadata-only material processing jobs |
 | `noteFolders` | NoteFolder[] | Folder tree (auto-created by AI) |
 | `settings` | Settings | Student preferences |
 | `greeting` | Greeting | Home greeting copy |
@@ -211,15 +219,100 @@ One-shot load of everything the student shell needs. Frontend calls it once on m
 |---|---|---|
 | `id` | string | |
 | `title` | string | |
-| `folderId` | string | |
-| `folderPath` | string | Display path, e.g. `"A-Level Math / Ch7 Calculus"` |
+| `materialType` | MaterialType? | Present on notes created from a material upload |
+| `examBoard` / `subject` / `chapter` | string? | Confirmed material classification |
+| `folderId` | string \| null | `null` means the unclassified root |
+| `folderPath` | string \| null | Display path, e.g. `"A-Level Math / Ch7 Calculus"` |
 | `tags` | string[] | |
 | `linkedTopics` | string[] | Topic ids |
 | `linkedErrors` | string[] | ErrorItem ids |
 | `source` | enum | `typed` \| `handwritten` \| `photo` \| `ai_organized` |
 | `createdAt` / `updatedAt` | string (ISO date) | |
-| `content` | NoteBlock[] | `{ t: 'p'|'h'|'formula', v: string }` |
+| `content` | NoteBlock[] | Text/formula blocks use `{ t, v }`; image blocks use `{ t: 'image', v, reference, alt }`; list/highlight blocks may also carry string `reference`/`alt` metadata |
 | `aiSuggestions` | AiSuggestion[] | `{ type, message }`, type ∈ `split_note` \| `link_topic` \| `related_content` |
+
+| `questionBlocks` | `{ id, label, text }[]?` | Extracted questions; ids are unique |
+| `answerBlocks` | `{ id, questionId, text }[]?` | Each `questionId` points to an extracted question |
+| `sourceJobId` | string? | Exact upload job that created this note |
+| `version` | positive integer | Current note version; legacy notes bootstrap at `1` |
+| `versions` | NoteVersionSnapshot[] | Immutable prior states; length is `version - 1` |
+
+### NoteVersionSnapshot
+
+Every meaningful edit or organize operation appends the prior state. Undo restores the latest
+snapshot but is itself traceable: it appends the pre-undo state and increments `version`.
+
+| Field | Type | Notes |
+|---|---|---|
+| `version` | positive integer | Version represented by this snapshot |
+| `title` | string | |
+| `folderId` / `folderPath` | string \| null | |
+| `tags` | string[] | |
+| `content` | NoteBlock[] | Deep snapshot |
+| `linkedTopics` / `linkedErrors` | string[] | Deep snapshots |
+| `source` | Note.source \| null | Explicit so organize/undo restores provenance together with content |
+| `changedAt` | string | ISO timestamp supplied by the client/store clock |
+| `reason` | string | e.g. `edit`, `title_edit`, `ai_organize`, `undo` |
+
+### MaterialType
+
+`class_note` \| `teacher_material` \| `homework` \| `past_paper` \| `mock_paper` \|
+`mark_scheme` \| `ielts_passage` \| `writing_speaking` \| `handwritten_draft` \| `error_photo`
+
+### MaterialUploadJob
+
+Only metadata and derived JSON are persisted. Accepted MIME types are `application/pdf`,
+`image/jpeg`, `image/png`, `image/webp`, and `image/heic`. `size` is bounded inclusively at
+`20 * 1024 * 1024` bytes (20 MiB); one byte above that limit is rejected.
+
+| Field | Type | Notes |
+|---|---|---|
+| `id` | string | Client supplied or generated before creation |
+| `fileName` / `mimeType` | string | Serializable file metadata |
+| `size` | non-negative number | At most 20 MiB |
+| `materialType` | MaterialType | All ten types have a deterministic mock fallback |
+| `examBoard` / `subject` / `chapter` | string? | Optional pre-classification hints |
+| `createdAt` / `updatedAt` | string | Stable ISO timestamps |
+| `progress` | number | 0–100 |
+| `status` | enum | `queued` \| `processing` \| `failed` \| `needs_confirmation` \| `completed` \| `cancelled` |
+| `result` | MaterialClassificationResult? | Present after processing |
+| `failure` | `{ code: string, message: string }`? | Serializable processing failure; present only while `status` is `failed` |
+
+The successful mock transition is `queued → processing → needs_confirmation → completed`. A non-cancellation
+processor error atomically persists `processing → failed` with the current non-zero progress and a flat
+`failure: { code, message }`; stack traces, causes, upload bytes, and caller-owned input are never persisted.
+The process endpoint still rejects with the stable `ApiError` and may attach a safe cloned `job` so AppStore can
+render the durable failure immediately. Retrying `process` from `failed` transitions back to `processing`, removes
+the old `failure`, and either reaches `needs_confirmation` or records a new safe failure.
+Known material-domain failures retain their documented domain code and HTTP status. An unexpected processor error
+rejects as HTTP 500 `UPLOAD_PROCESSING_FAILED` with a generic message; its private cause is never copied into the
+persisted `failure` or attached job.
+Cancellation is terminal before confirmation: later process/confirm calls reject with
+`UPLOAD_CANCELLED`. A completed job rejects repeat confirmation and cancellation with
+`UPLOAD_ALREADY_COMPLETED`. Confirmation writes the completed job and its created Note in one
+repository transaction, so neither half can be observed alone.
+Cancellation, `AbortError`, and `UPLOAD_CANCELLED` control flow never create a `failed` job, and no failed
+processing attempt creates a Note. Cancelling a `failed` job removes the `failure` field entirely before
+persisting `cancelled`; the field is never retained as `undefined` on non-failed JSON shapes.
+
+### MaterialClassificationResult
+
+| Field | Type | Notes |
+|---|---|---|
+| `suggestedTitle` | string | Deterministic mock title; editable at confirmation |
+| `materialType` | MaterialType | |
+| `examBoard` / `subject` / `chapter` | string | |
+| `folderId` / `folderPath` | string | Suggested destination |
+| `questionBlocks` | `{ id, label, text }[]` | Unique ids |
+| `answerBlocks` | `{ id, questionId, text }[]` | References only known question ids |
+| `content` | NoteBlock[] | Non-empty extracted content |
+| `linkedTopics` / `linkedErrors` | string[] | Suggested links |
+| `confidence` | number | Inclusive 0–1 |
+
+> **Raw-byte boundary:** this bootstrap implementation never accepts, serializes, or stores a
+> `File`, `Blob`, base64 payload, `ArrayBuffer`, or byte array. A future upload transport places raw
+> bytes in object storage and passes only its durable object reference plus the metadata above to
+> the material API. `localStorage`, `AppStore`, jobs, notes, and API JSON remain metadata-only.
 
 ### NoteFolder
 | Field | Type |
@@ -308,8 +401,94 @@ already accepted timestamp reject with code `INVALID_INPUT`; these failures do n
 ### Notes
 | Endpoint | Body | Notes |
 |---|---|---|
-| `POST /api/notes` | Note | Includes OCR-created notes |
-| `PATCH /api/notes/{id}` | Partial\<Note\> | Title/tag/content updates, AI one-click organise |
+| `POST /api/notes` | Note | Includes OCR-created notes; strict recursive JSON allowlist validation runs before mock persistence or real fetch |
+| `PATCH /api/notes/{id}` | Editable note patch plus `{ changedAt, reason }` | Title/folder/tag/content/link updates; records a prior-state snapshot with the same command metadata in mock and real modes |
+| `POST /api/notes/{id}/organize` | `{ "suggestionIds": string[], "changedAt": string }` | Apply only selected known suggestions, deduplicate additions, set `source: "ai_organized"`, and version the change |
+| `POST /api/notes/{id}/undo` | `{ "changedAt": string }` | Restore the latest snapshot while appending a traceable undo snapshot |
+
+`PATCH` accepts only `title`, `folderId`, `folderPath`, `tags`, `content`, `linkedTopics`, and
+`linkedErrors` as editable fields. The bootstrap adapter also accepts client transport metadata
+`changedAt`/`updatedAt` and `reason`, removes those keys from the patch, and writes them into the
+snapshot. Identity, source, version counters, upload provenance, and classification fields cannot
+be overwritten through this endpoint.
+
+Update, organize, and undo commands are strict plain/dense JSON and are validated before either a
+mock transaction or real network request. Their note id must be a string containing a non-whitespace
+character; this id preflight runs before any command field is read. Metadata defaults apply only when
+the own `changedAt`/`updatedAt`/`reason` field is absent. An explicitly supplied `null`, `undefined`,
+non-string, or non-JSON value is rejected with `INVALID_CHANGE_METADATA` before transport or storage.
+Every own metadata field is validated independently before precedence is applied, so a legal option
+cannot hide an invalid patch field. Update time precedence is option `changedAt`, patch `changedAt`,
+patch `updatedAt`, then the generated default; reason precedence is option `reason`, patch `reason`,
+then `edit`.
+Every successful mutation response is projected through the complete persisted-note contract and
+must preserve the requested note id. The Store additionally requires the current note and accepts
+only an exact no-op or one continuous action-consistent version step whose prior history and final
+snapshot match that current note. Upload/classification provenance, AI suggestions, and `createdAt`
+remain byte-for-byte JSON-equivalent (including field presence); update preserves `source`, organize
+uses the organizer's `ai_organized` result, and undo uses the restored snapshot source (or preserves
+the current legal source for a legacy null/missing snapshot). Invalid responses roll back atomically.
+For a version-advancing Store commit, both top-level `updatedAt` and the newest snapshot's own
+`changedAt` must exactly match the action's locally calculated result; an internally consistent but
+unsolicited server timestamp is rejected.
+
+`POST /api/notes` accepts legacy seeds and the Task 2/Task 5 note fields documented above, but
+rejects unknown keys and non-plain/non-dense JSON anywhere in the object. `undefined`, symbols,
+accessors, custom prototypes, cycles, `Blob`, typed arrays, and raw/base64 carrier fields fail with
+`INVALID_NOTE` before storage mutation or a real transport call.
+
+Versioning helpers may normalize a minimal legacy note in memory, but persistence boundaries are
+stricter. Create and material confirmation require `id`, `title`, `folderId`, `folderPath`, `tags`,
+`linkedTopics`, `linkedErrors`, `source`, `createdAt`, `updatedAt`, `content`, and `aiSuggestions`;
+`version`/`versions` may be supplied together or are initialized to version 1. Image/object references
+must be durable references; `data:`, `base64:`, `raw:`, and inline `;base64,` references are rejected.
+Bootstrap and `GET /api/notes` run this validation after legacy version migration and use stable
+filtering: polluted records are never returned, and the mock adapter removes them from local storage.
+For legacy version snapshots, a missing or `null` `source` means “unknown”; undo preserves the current
+persisted note's legal source while restoring every other snapshot field and recording the new version.
+
+### Material uploads
+
+| Endpoint | Body | Response | Notes |
+|---|---|---|---|
+| `POST /api/material-uploads` | `{ id?, fileName, mimeType, size, materialType, examBoard?, subject?, chapter?, createdAt? }` | `{ job }` | Validate and persist one queued metadata-only job |
+| `POST /api/material-uploads/{id}/process` | none | `{ job }` | Process a `queued` or `failed` job; retry clears old failure, success persists `needs_confirmation`, and non-cancellation failure rejects while persisting/attaching the safe failed job |
+| `POST /api/material-uploads/{id}/confirm` | Partial\<MaterialClassificationResult\> | `{ job, note }` | Atomically complete the job and create the linked version-1 Note |
+| `POST /api/material-uploads/{id}/cancel` | none | `{ job }` | Terminal cancellation before completion; removes state-specific `failure`/`result`; retrying cancel is idempotent |
+
+Creation accepts serialized metadata only. Unknown keys and raw-byte/base64 fields reject with
+`INVALID_UPLOAD_METADATA`; invalid MIME/size/material-type values retain their stable domain codes
+(`UNSUPPORTED_TYPE`, `FILE_TOO_LARGE`, `INVALID_MATERIAL_TYPE`). Unknown ids use `NOT_FOUND`.
+
+All four material lifecycle calls accept an optional `AbortSignal`, and the real adapter forwards it
+to `fetch`. Mock transactions recheck the signal inside the serialized repository recipe, before any
+durable mutation. Cancellation barriers exist only while cancellation is in flight and are removed in
+`finally` after the transaction settles, so a later independently recreated job may safely reuse an id.
+Processing waits for an in-flight cancellation outcome: only a durably persisted `cancelled` job ends
+processing as cancelled. If cancellation aborts or fails before persistence, processing continues or
+recovers to a retryable state and never leaves a `processing` job stranded.
+
+Every upload job crossing bootstrap, success, or error boundaries is validated as a plain, dense JSON
+object with the exact documented top-level fields. `result` must match the complete
+`MaterialClassificationResult` schema recursively. `failure` must be exactly the flat
+`{ code, message }` object and is legal only for a `failed` job. Invalid jobs are filtered during
+bootstrap/replacement and cannot be inserted by a forged success or error response.
+
+Bootstrap uses stable filtering: invalid persisted jobs are omitted and removed from mock storage, so
+later lifecycle calls see `NOT_FOUND` instead of propagating polluted data. Successful action responses
+are projected to contract fields and must preserve the requested id with the exact action state:
+create `queued`, process `needs_confirmation`, confirm `completed`, and cancel `cancelled`; otherwise
+the adapter rejects with `INVALID_UPLOAD_RESPONSE`. The Store independently enforces the legal prior
+state and requires an existing same-id job for every action except create.
+
+Confirmation validates the completed job and full persisted note before committing either. The note id
+must be `note-{jobId}`, `sourceJobId` must equal the job id, and an existing deterministic note id cannot
+be replaced by a confirmation response.
+
+A processing failure response uses the envelope
+`{ "code": string, "message": string, "data": { "job": MaterialUploadJob } }`. The client exposes
+`data` on `ApiError`; the material adapter attaches `error.job` only when it is a strict, same-id,
+`failed` job. AppStore additionally requires that the same job already exists before replacing it.
 
 ### Exercise session
 | Endpoint | Body | Notes |
@@ -353,6 +532,7 @@ Exercise pages use the two concrete set routes below. Other rows remain bootstra
 
 | Endpoint | Response `data` |
 |---|---|
+| `GET /api/notes` | `{ notes: Note[] }` |
 | `GET /api/bank/questions?subject=&difficulty=&type=&status=` | `BankQuestion[]` |
 | `GET /api/bank/recommendations` | `{ questionId, reason }[]` |
 | `GET /api/bank/exercise/{setId}` | ExerciseSet |
@@ -394,7 +574,20 @@ Task adjustments are submitted through `requestTaskAdjustment(task, draft)`; the
 | Record independent verification | `POST /api/errors/{id}/verification` | `Exercise.jsx` → `verifyErrorVariant` after the linked one-question set is persisted |
 | Mark error mastered | `PATCH /api/errors/{id}` | `Errors.jsx` after the mastery gate |
 | Submit redo | `POST /api/errors/{id}/redo` | `ErrorRedo.jsx` → `recordRedo` |
-| Create / edit note | `POST`/`PATCH /api/notes...` | `Notes.jsx` |
+| List notes | `GET /api/notes` | `AppStore` / future dedicated Notes refresh |
+| Create / edit note | `POST`/`PATCH /api/notes...` | `Notes.jsx` → `addNote` / `updateNote` |
+| Organize / undo note | `POST /api/notes/{id}/organize` / `undo` | `Notes.jsx` → `organizeNote` / `undoNote` |
+| Upload and classify material | `POST /api/material-uploads...` | Upload modal → `startMaterialUpload` / `processMaterialUpload` / `confirmMaterialUpload` / `cancelMaterialUpload` |
 | Submit exercise set | `POST /api/sessions` | `Exercise.jsx` → `saveSession` |
 | Create L6 transfer task | `POST /api/questions/{questionId}/variant` | `Exercise.jsx` → `generateVariant(sourceQuestion)` |
 | Save settings | `PATCH /api/student/settings` | `Profile.jsx` SettingsModal |
+
+Material/note actions expose pending keys `upload:create`, `upload:process:{id}`,
+`upload:confirm:{id}`, `upload:cancel:{id}`, `note:update:{id}`, `note:organize:{id}`, and
+`note:undo:{id}`. Upload actions accept an optional `{ signal: AbortSignal }`; an aborted modal
+request may settle for its caller but cannot consume the late response into AppStore state. A
+cancelled job also wins over a late process/confirm response, so asynchronous completion cannot
+resurrect it.
+When processing rejects with `error.job.status === "failed"`, AppStore projects that metadata-only job into
+`uploadJobs` before surfacing the toast. The process pending key is still cleared in `finally`; aborted requests
+do not consume a late failed payload.

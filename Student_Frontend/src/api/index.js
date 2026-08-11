@@ -24,14 +24,70 @@ import {
   recordVariantVerification,
   RedoChronologyError,
 } from '../features/errors/masteryRules'
+import {
+  buildUploadJob,
+  MaterialRulesError,
+} from '../features/materials/materialRules'
+import {
+  confirmMaterialClassification,
+  MaterialProcessorError,
+  processMaterialJob,
+  sanitizeClassificationPatch,
+} from '../features/materials/mockMaterialProcessor'
+import {
+  applyNoteOrganization,
+  applyNotePatch,
+  NoteVersionError,
+  sanitizeNoteChangedAt,
+  sanitizeNoteChangeMetadata,
+  sanitizeNotePatchCommand,
+  sanitizeNoteReason,
+  sanitizeNoteSuggestionIds,
+  sanitizePersistedNote,
+  sanitizePersistedNoteContent,
+  sanitizeNote,
+  undoLastNoteVersion,
+} from '../features/materials/noteVersions'
+import {
+  MaterialContractError,
+  sanitizeUploadJob,
+  sanitizeUploadJobs,
+} from '../features/materials/materialContracts'
 
 const repository = createMockRepository({ seedFactory: createSeedState })
+const pendingUploadCancellations = new Map()
 
 const isRecord = (value) => value !== null && typeof value === 'object' && !Array.isArray(value)
 const hasId = (value, field = 'id') => typeof value?.[field] === 'string' && value[field].trim().length > 0
 const invalid = (message) => new ApiError(message, { status: 400, code: 'INVALID_INPUT' })
 const notFound = (entity, id) => new ApiError(`${entity} ${id} was not found`, { status: 404, code: 'NOT_FOUND' })
 const duplicate = (entity, id) => new ApiError(`${entity} ${id} already exists`, { status: 409, code: 'DUPLICATE_ID' })
+const domainError = (error, status = 400) => new ApiError(error.message, {
+  status,
+  code: error.code || 'INVALID_INPUT',
+  cause: error,
+})
+const uploadCancelled = () => new ApiError('This upload was cancelled', {
+  status: 409,
+  code: 'UPLOAD_CANCELLED',
+})
+const uploadAlreadyCompleted = () => new ApiError('This upload is already completed', {
+  status: 409,
+  code: 'UPLOAD_ALREADY_COMPLETED',
+})
+const invalidUploadState = (message = 'The upload job is not in a valid state for this action') => new ApiError(message, {
+  status: 409,
+  code: 'INVALID_JOB_STATE',
+})
+const invalidUploadMetadata = (message = 'Upload metadata contains invalid fields') => new ApiError(message, {
+  status: 400,
+  code: 'INVALID_UPLOAD_METADATA',
+})
+const invalidUploadResponse = (cause) => new ApiError('Material API response is invalid', {
+  status: 502,
+  code: 'INVALID_UPLOAD_RESPONSE',
+  cause,
+})
 const masteryGateNotMet = () => new ApiError('Complete the independent variant before marking this mastered', {
   status: 409,
   code: 'MASTERY_GATE_NOT_MET',
@@ -51,6 +107,267 @@ const isNonemptyStringArray = (value) => Array.isArray(value) && value.every(isN
 const hasUniqueValues = (value) => new Set(value).size === value.length
 const isOneOf = (...values) => (value) => values.includes(value)
 const QUESTION_TYPES = Object.freeze(['choice', 'calculation', 'proof', 'fill_blank', 'reading', 'writing'])
+const UPLOAD_METADATA_FIELDS = new Set([
+  'id',
+  'fileName',
+  'mimeType',
+  'size',
+  'materialType',
+  'examBoard',
+  'subject',
+  'chapter',
+  'createdAt',
+])
+const MATERIAL_FIXTURE_BY_TYPE = Object.freeze({
+  class_note: 'alevel_handwritten_calculus_note',
+  teacher_material: 'alevel_handwritten_calculus_note',
+  homework: 'homework',
+  past_paper: 'alevel_past_paper',
+  mock_paper: 'alevel_past_paper',
+  mark_scheme: 'alevel_mark_scheme',
+  ielts_passage: 'ielts_reading_passage',
+  writing_speaking: 'ielts_reading_passage',
+  handwritten_draft: 'alevel_handwritten_calculus_note',
+  error_photo: 'error_photo',
+})
+const MATERIAL_TYPE_LABELS = Object.freeze({
+  class_note: 'Class Note',
+  teacher_material: 'Teacher Material',
+  homework: 'Homework',
+  past_paper: 'Past Paper',
+  mock_paper: 'Mock Paper',
+  mark_scheme: 'Mark Scheme',
+  ielts_passage: 'IELTS Passage',
+  writing_speaking: 'Writing & Speaking',
+  handwritten_draft: 'Handwritten Draft',
+  error_photo: 'Error Photo',
+})
+
+const isPlainRecord = (value) => {
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) return false
+  const prototype = Object.getPrototypeOf(value)
+  return prototype === Object.prototype || prototype === null
+}
+
+const cloneCommand = (value, onInvalid) => {
+  try {
+    return structuredClone(value)
+  } catch {
+    throw onInvalid()
+  }
+}
+
+const normalizeLegacyNote = (note) => {
+  if (!isPlainRecord(note)) return note
+  const hasVersion = hasOwn(note, 'version')
+  const hasVersions = hasOwn(note, 'versions')
+  if (!hasVersion && !hasVersions) return { ...note, versions: [], version: 1 }
+  return note
+}
+
+const sanitizeMaterialNotes = (notes) => {
+  if (!Array.isArray(notes)) return []
+  const sanitized = []
+  for (const note of notes) {
+    try {
+      sanitized.push(sanitizePersistedNote(normalizeLegacyNote(note)))
+    } catch (error) {
+      if (!(error instanceof NoteVersionError)) throw error
+    }
+  }
+  return sanitized
+}
+
+const needsMaterialMigration = (state) => (
+  !Array.isArray(state.uploadJobs)
+  || sanitizeUploadJobs(state.uploadJobs).length !== state.uploadJobs.length
+  || !Array.isArray(state.notes)
+  || sanitizeMaterialNotes(state.notes).length !== state.notes.length
+  || state.notes.some((note) => !hasOwn(note, 'version') && !hasOwn(note, 'versions'))
+)
+
+const normalizeMaterialState = (state) => {
+  if (!needsMaterialMigration(state)) return state
+  return {
+    ...state,
+    uploadJobs: sanitizeUploadJobs(state.uploadJobs),
+    notes: sanitizeMaterialNotes(state.notes),
+  }
+}
+
+const persistMaterialMigration = async () => {
+  const current = await repository.read((state) => state)
+  if (!needsMaterialMigration(current)) return current
+  return repository.update(normalizeMaterialState)
+}
+
+const uploadMetadataCommand = (job) => Object.fromEntries(
+  [...UPLOAD_METADATA_FIELDS]
+    .filter((field) => hasOwn(job, field))
+    .map((field) => [field, job[field]]),
+)
+
+const sanitizeUploadSuccess = (response, { expectedId, expectedStatus }) => {
+  try {
+    if (!isPlainRecord(response)) throw new MaterialContractError()
+    const job = sanitizeUploadJob(response.job, { expectedId })
+    if (job.status !== expectedStatus) throw new MaterialContractError()
+    return { job }
+  } catch (error) {
+    if (error instanceof ApiError) throw error
+    throw invalidUploadResponse(error)
+  }
+}
+
+const sanitizeConfirmSuccess = (response, id) => {
+  const { job } = sanitizeUploadSuccess(response, { expectedId: id, expectedStatus: 'completed' })
+  try {
+    const note = sanitizePersistedNote(response.note, {
+      expectedId: `note-${id}`,
+      expectedSourceJobId: id,
+    })
+    return { job, note }
+  } catch (error) {
+    throw invalidUploadResponse(error)
+  }
+}
+
+const sanitizeBootstrapMaterialState = (data) => {
+  if (!isPlainRecord(data)) return data
+  return {
+    ...data,
+    uploadJobs: sanitizeUploadJobs(data.uploadJobs),
+    notes: sanitizeMaterialNotes(data.notes),
+  }
+}
+
+const sanitizeNotesResponse = (data) => {
+  if (!isPlainRecord(data)) return { notes: [] }
+  return { ...data, notes: sanitizeMaterialNotes(data.notes) }
+}
+
+const throwIfAborted = (signal) => {
+  if (signal?.aborted) throw new DOMException('The operation was aborted.', 'AbortError')
+}
+
+const createGeneratedId = () => globalThis.crypto?.randomUUID?.()
+  || `upload-${Date.now()}-${Math.random().toString(16).slice(2)}`
+
+const snapshotUploadMetadata = (input) => {
+  if (!isPlainRecord(input)) throw invalidUploadMetadata('Upload metadata must be an object')
+  const ownKeys = Reflect.ownKeys(input)
+  if (ownKeys.some((key) => typeof key !== 'string' || !UPLOAD_METADATA_FIELDS.has(key))) {
+    throw invalidUploadMetadata()
+  }
+  for (const key of ownKeys) {
+    const descriptor = Object.getOwnPropertyDescriptor(input, key)
+    if (!descriptor || !hasOwn(descriptor, 'value') || !descriptor.enumerable) {
+      throw invalidUploadMetadata()
+    }
+  }
+
+  const cloned = cloneCommand(input, invalidUploadMetadata)
+  const id = cloned.id === undefined ? createGeneratedId() : cloned.id
+  const createdAt = cloned.createdAt === undefined ? new Date().toISOString() : cloned.createdAt
+  try {
+    return buildUploadJob({
+      file: {
+        name: cloned.fileName,
+        type: cloned.mimeType,
+        size: cloned.size,
+      },
+      materialType: cloned.materialType,
+      examBoard: cloned.examBoard,
+      subject: cloned.subject,
+      chapter: cloned.chapter,
+      id,
+      createdAt,
+    })
+  } catch (error) {
+    if (error instanceof MaterialRulesError) throw domainError(error)
+    throw error
+  }
+}
+
+const fixtureFromFileName = (fileName) => {
+  const normalized = fileName.toLowerCase()
+  if (/(^|[_\s.-])ms([_\s.-]|$)|mark[\s_-]*scheme/.test(normalized)) return 'alevel_mark_scheme'
+  if (/(^|[_\s.-])qp([_\s.-]|$)|past[\s_-]*paper/.test(normalized)) return 'alevel_past_paper'
+  if (/error|mistake|wrong/.test(normalized)) return 'error_photo'
+  if (/ielts|reading|passage|writing|speaking/.test(normalized)) return 'ielts_reading_passage'
+  if (/homework|assignment/.test(normalized)) return 'homework'
+  if (/hand|draft|working|class[\s_-]*note/.test(normalized)) return 'alevel_handwritten_calculus_note'
+  return null
+}
+
+const selectMaterialFixture = (job) => fixtureFromFileName(job.fileName)
+  || MATERIAL_FIXTURE_BY_TYPE[job.materialType]
+
+const adaptProcessedJob = (job, processed) => {
+  const selectedFixtureMatchesType = processed.result.materialType === job.materialType
+  const fileStem = job.fileName.replace(/\.[^.]+$/, '').replace(/[_-]+/g, ' ').trim()
+  return {
+    ...processed,
+    materialType: job.materialType,
+    result: {
+      ...processed.result,
+      suggestedTitle: selectedFixtureMatchesType
+        ? processed.result.suggestedTitle
+        : `${MATERIAL_TYPE_LABELS[job.materialType]} — ${fileStem || 'Study material'}`,
+      materialType: job.materialType,
+    },
+  }
+}
+
+const assertUploadId = (id) => {
+  if (!isNonemptyString(id)) throw invalid('Upload job id is required')
+}
+
+const findUploadJob = (state, id) => state.uploadJobs.find((job) => job.id === id)
+
+const replaceUploadJob = (state, replacement) => ({
+  ...state,
+  uploadJobs: state.uploadJobs.map((job) => (job.id === replacement.id ? replacement : job)),
+})
+
+const throwTerminalUploadState = (job) => {
+  if (job.status === 'cancelled') throw uploadCancelled()
+  if (job.status === 'completed') throw uploadAlreadyCompleted()
+}
+
+const createCancellationAttempt = () => {
+  let settle
+  const settled = new Promise((resolve) => { settle = resolve })
+  return { settle, settled }
+}
+
+const waitForPendingCancellation = async (id) => {
+  const pending = pendingUploadCancellations.get(id)
+  return pending ? pending.settled : false
+}
+
+const toMaterialApiError = (error) => {
+  if (error instanceof ApiError) return error
+  if (error instanceof MaterialRulesError || error instanceof MaterialProcessorError || error instanceof NoteVersionError) {
+    const status = ['NO_NOTE_VERSION', 'INVALID_JOB_STATE'].includes(error.code) ? 409 : 400
+    return domainError(error, status)
+  }
+  return error
+}
+
+const toUploadProcessingApiError = (error) => {
+  const mapped = toMaterialApiError(error)
+  if (mapped instanceof ApiError) return mapped
+  return new ApiError('Unable to process the material upload', {
+    status: 500,
+    code: 'UPLOAD_PROCESSING_FAILED',
+    cause: error,
+  })
+}
+
+const mapMaterialDomainError = (error) => {
+  throw toMaterialApiError(error)
+}
 const isAdjustmentRequest = (request) => isRecord(request)
   && isNonemptyString(request.id)
   && isNonemptyString(request.taskId)
@@ -90,12 +407,12 @@ const isSessionAttempt = (attempt) => isRecord(attempt)
   && typeof attempt.isCorrect === 'boolean'
 
 const isNoteBlock = (block) => isRecord(block)
-  && isOneOf('p', 'h', 'formula')(block.t)
+  && isOneOf('p', 'h', 'formula', 'image', 'list', 'highlight')(block.t)
   && isString(block.v)
 
 const isAiSuggestion = (suggestion) => isRecord(suggestion)
-  && isOneOf('split_note', 'link_topic', 'related_content')(suggestion.type)
-  && isString(suggestion.message)
+  && isOneOf('split_note', 'link_topic', 'related_content', 'add_tag', 'tag', 'append_content', 'content', 'link_error')(suggestion.type)
+  && (suggestion.message === undefined || isString(suggestion.message))
 
 const assertTask = (task) => {
   assertFields(task, 'Task', {
@@ -125,8 +442,8 @@ const assertTask = (task) => {
 
 const noteFieldValidators = Object.freeze({
   title: isNonemptyString,
-  folderId: isNonemptyString,
-  folderPath: isNonemptyString,
+  folderId: isNullableNonemptyString,
+  folderPath: isNullableNonemptyString,
   tags: isStringArray,
   linkedTopics: isStringArray,
   linkedErrors: isStringArray,
@@ -139,15 +456,6 @@ const noteFieldValidators = Object.freeze({
 
 const assertNote = (note) => {
   assertFields(note, 'Note', { id: isNonemptyString, ...noteFieldValidators })
-}
-
-const assertNotePatch = (patch) => {
-  if (!isRecord(patch)) throw invalid('Note patch must be an object')
-  if (hasOwn(patch, 'id')) throw invalid('Note.id is immutable')
-  Object.entries(patch).forEach(([field, value]) => {
-    const validate = noteFieldValidators[field]
-    if (!validate || !validate(value)) throw invalid(`Note.${field} is invalid`)
-  })
 }
 
 const assertRedoAttempt = (attempt) => {
@@ -443,27 +751,163 @@ const buildVariant = (current, sourceQuestion, verificationForErrorId) => {
   })
 }
 
-const updateStoredNote = async (id, patch) => {
+const invalidNotePatchError = () => domainError(new NoteVersionError(
+  'INVALID_NOTE_PATCH',
+  'Note patch contains invalid fields',
+))
+
+const invalidChangeMetadataError = () => domainError(new NoteVersionError(
+  'INVALID_CHANGE_METADATA',
+  'Change metadata is invalid',
+))
+
+const assertNoteMutationId = (id) => {
   if (!hasId({ id })) throw invalid('Note id is required')
-  assertNotePatch(patch)
-  const state = await repository.update((current) => {
-    if (!current.notes.some((note) => note.id === id)) throw notFound('Note', id)
-    return {
-      ...current,
-      notes: current.notes.map((note) => (note.id === id ? { ...note, ...patch } : note)),
+}
+
+const readCommandFields = (value, onInvalid) => {
+  if (!isPlainRecord(value)) throw onInvalid()
+  const fields = Object.create(null)
+  for (const key of Reflect.ownKeys(value)) {
+    const descriptor = Object.getOwnPropertyDescriptor(value, key)
+    if (typeof key !== 'string'
+      || !descriptor
+      || !hasOwn(descriptor, 'value')
+      || !descriptor.enumerable) throw onInvalid()
+    fields[key] = descriptor.value
+  }
+  return fields
+}
+
+const sanitizeNoteCommand = (action) => {
+  try {
+    return action()
+  } catch (error) {
+    mapMaterialDomainError(error)
+  }
+}
+
+const snapshotNoteCommand = (patch, options = {}) => {
+  const patchFields = readCommandFields(patch, invalidNotePatchError)
+  const optionFields = readCommandFields(options, invalidChangeMetadataError)
+  if (Reflect.ownKeys(optionFields).some((field) => !['changedAt', 'reason'].includes(field))) {
+    throw invalidChangeMetadataError()
+  }
+  for (const field of ['changedAt', 'updatedAt']) {
+    if (hasOwn(patchFields, field)) {
+      sanitizeNoteCommand(() => sanitizeNoteChangedAt(patchFields[field]))
     }
-  })
-  return state.notes.find((note) => note.id === id)
+  }
+  if (hasOwn(patchFields, 'reason')) {
+    sanitizeNoteCommand(() => sanitizeNoteReason(patchFields.reason))
+  }
+  if (hasOwn(optionFields, 'changedAt')) {
+    sanitizeNoteCommand(() => sanitizeNoteChangedAt(optionFields.changedAt))
+  }
+  if (hasOwn(optionFields, 'reason')) {
+    sanitizeNoteCommand(() => sanitizeNoteReason(optionFields.reason))
+  }
+  const embeddedMetadata = {}
+  for (const field of ['changedAt', 'updatedAt', 'reason']) {
+    if (hasOwn(patchFields, field)) {
+      embeddedMetadata[field] = patchFields[field]
+      Reflect.deleteProperty(patchFields, field)
+    }
+  }
+  if (hasOwn(patchFields, 'content')) {
+    sanitizeNoteCommand(() => sanitizePersistedNoteContent(patchFields.content))
+  }
+  const patchClone = sanitizeNoteCommand(() => sanitizeNotePatchCommand(patchFields))
+  const changedAt = hasOwn(optionFields, 'changedAt')
+    ? optionFields.changedAt
+    : hasOwn(embeddedMetadata, 'changedAt')
+      ? embeddedMetadata.changedAt
+      : hasOwn(embeddedMetadata, 'updatedAt')
+        ? embeddedMetadata.updatedAt
+        : new Date().toISOString()
+  const reason = hasOwn(optionFields, 'reason')
+    ? optionFields.reason
+    : hasOwn(embeddedMetadata, 'reason')
+      ? embeddedMetadata.reason
+      : 'edit'
+  const metadata = sanitizeNoteCommand(() => sanitizeNoteChangeMetadata({ changedAt, reason }))
+  return { patch: patchClone, metadata }
+}
+
+const snapshotOrganizationCommand = (suggestionIds, options = {}) => {
+  const optionFields = readCommandFields(options, invalidChangeMetadataError)
+  if (Reflect.ownKeys(optionFields).some((field) => field !== 'changedAt')) {
+    throw invalidChangeMetadataError()
+  }
+  if (hasOwn(optionFields, 'changedAt')) {
+    sanitizeNoteCommand(() => sanitizeNoteChangedAt(optionFields.changedAt))
+  }
+  return {
+    suggestionIds: sanitizeNoteCommand(() => sanitizeNoteSuggestionIds(suggestionIds)),
+    changedAt: sanitizeNoteCommand(() => sanitizeNoteChangedAt(
+      hasOwn(optionFields, 'changedAt') ? optionFields.changedAt : new Date().toISOString(),
+    )),
+  }
+}
+
+const snapshotUndoCommand = (options = {}) => {
+  const optionFields = readCommandFields(options, invalidChangeMetadataError)
+  if (Reflect.ownKeys(optionFields).some((field) => field !== 'changedAt')) {
+    throw invalidChangeMetadataError()
+  }
+  if (hasOwn(optionFields, 'changedAt')) {
+    sanitizeNoteCommand(() => sanitizeNoteChangedAt(optionFields.changedAt))
+  }
+  return {
+    changedAt: sanitizeNoteCommand(() => sanitizeNoteChangedAt(
+      hasOwn(optionFields, 'changedAt') ? optionFields.changedAt : new Date().toISOString(),
+    )),
+  }
+}
+
+const sanitizeNoteMutationSuccess = (response, id) => {
+  try {
+    if (!isPlainRecord(response)) throw new NoteVersionError('INVALID_NOTE', 'Note response is invalid')
+    const descriptor = Object.getOwnPropertyDescriptor(response, 'note')
+    if (!descriptor || !hasOwn(descriptor, 'value') || !descriptor.enumerable) {
+      throw new NoteVersionError('INVALID_NOTE', 'Note response is invalid')
+    }
+    return { note: sanitizePersistedNote(descriptor.value, { expectedId: id }) }
+  } catch (error) {
+    throw invalidUploadResponse(error)
+  }
+}
+
+const updateVersionedNote = async (id, recipe) => {
+  if (!hasId({ id })) throw invalid('Note id is required')
+  try {
+    const state = await repository.update((current) => {
+      const materialState = normalizeMaterialState(current)
+      const note = materialState.notes.find((item) => item.id === id)
+      if (!note) throw notFound('Note', id)
+      const replacement = sanitizePersistedNote(recipe(note), { expectedId: id })
+      return {
+        ...materialState,
+        notes: materialState.notes.map((item) => (item.id === id ? replacement : item)),
+      }
+    })
+    return state.notes.find((note) => note.id === id)
+  } catch (error) {
+    mapMaterialDomainError(error)
+  }
 }
 
 // ---------- Bootstrap (GET /api/student/bootstrap) ----------
-export function bootstrap() {
-  if (!isMockMode) return http.get('/api/student/bootstrap')
-  return repository.bootstrap()
+export async function bootstrap() {
+  if (!isMockMode) return sanitizeBootstrapMaterialState(await http.get('/api/student/bootstrap'))
+  return sanitizeBootstrapMaterialState(await persistMaterialMigration())
 }
 
-export function resetMockState() {
-  return repository.reset()
+export async function resetMockState() {
+  pendingUploadCancellations.forEach(({ settle }) => settle(false))
+  pendingUploadCancellations.clear()
+  await repository.reset()
+  return persistMaterialMigration()
 }
 
 // ---------- Tasks ----------
@@ -638,18 +1082,286 @@ export const verifyErrorVariant = async (id, result) => {
 }
 
 // ---------- Notes ----------
-export const createNote = async (note) => {
-  if (!isMockMode) return http.post('/api/notes', note)
-  assertNote(note)
-  const state = await repository.update((current) => {
-    if (current.notes.some((item) => item.id === note.id)) throw duplicate('Note', note.id)
-    return { ...current, notes: [note, ...current.notes] }
-  })
-  return { note: state.notes.find((item) => item.id === note.id) }
+export const listNotes = async () => {
+  if (!isMockMode) return sanitizeNotesResponse(await http.get('/api/notes'))
+  const state = await persistMaterialMigration()
+  return { notes: state.notes }
 }
-export const updateNote = async (id, patch) => {
-  if (!isMockMode) return http.patch(`/api/notes/${id}`, patch)
-  return { note: await updateStoredNote(id, patch) }
+
+export const createNote = async (note) => {
+  let persistedNote
+  try {
+    persistedNote = sanitizeNote(note)
+  } catch (error) {
+    mapMaterialDomainError(error)
+  }
+  if (!isMockMode) {
+    const response = await http.post('/api/notes', persistedNote)
+    try {
+      return { note: sanitizePersistedNote(response?.note, { expectedId: persistedNote.id }) }
+    } catch (error) {
+      throw invalidUploadResponse(error)
+    }
+  }
+  const state = await repository.update((current) => {
+    const materialState = normalizeMaterialState(current)
+    if (materialState.notes.some((item) => item.id === persistedNote.id)) throw duplicate('Note', persistedNote.id)
+    return { ...materialState, notes: [persistedNote, ...materialState.notes] }
+  })
+  return { note: sanitizePersistedNote(state.notes.find((item) => item.id === persistedNote.id), {
+    expectedId: persistedNote.id,
+  }) }
+}
+export const updateNote = async (id, patch, options = {}) => {
+  assertNoteMutationId(id)
+  const command = snapshotNoteCommand(patch, options)
+  if (!isMockMode) return sanitizeNoteMutationSuccess(await http.patch(
+    `/api/notes/${encodeURIComponent(id)}`,
+    { ...command.patch, ...command.metadata },
+  ), id)
+  return sanitizeNoteMutationSuccess({
+    note: await updateVersionedNote(id, (note) => applyNotePatch(note, command.patch, command.metadata)),
+  }, id)
+}
+
+export const organizeNote = async (id, suggestionIds, options = {}) => {
+  assertNoteMutationId(id)
+  const command = snapshotOrganizationCommand(suggestionIds, options)
+  if (!isMockMode) return sanitizeNoteMutationSuccess(await http.post(
+    `/api/notes/${encodeURIComponent(id)}/organize`,
+    command,
+  ), id)
+  return sanitizeNoteMutationSuccess({
+    note: await updateVersionedNote(id, (note) => applyNoteOrganization(
+      note,
+      command.suggestionIds,
+      command.changedAt,
+    )),
+  }, id)
+}
+
+export const undoNote = async (id, options = {}) => {
+  assertNoteMutationId(id)
+  const command = snapshotUndoCommand(options)
+  if (!isMockMode) return sanitizeNoteMutationSuccess(await http.post(
+    `/api/notes/${encodeURIComponent(id)}/undo`,
+    command,
+  ), id)
+  return sanitizeNoteMutationSuccess({
+    note: await updateVersionedNote(id, (note) => undoLastNoteVersion(note, command.changedAt)),
+  }, id)
+}
+
+// ---------- Material uploads ----------
+export const createUploadJob = async (metadata, options = {}) => {
+  const job = snapshotUploadMetadata(metadata)
+  const command = uploadMetadataCommand(job)
+  if (!isMockMode) {
+    return sanitizeUploadSuccess(
+      await http.post('/api/material-uploads', command, { signal: options?.signal }),
+      { expectedId: job.id, expectedStatus: 'queued' },
+    )
+  }
+  throwIfAborted(options?.signal)
+  const state = await repository.update((current) => {
+    throwIfAborted(options?.signal)
+    const materialState = normalizeMaterialState(current)
+    if (materialState.uploadJobs.some((item) => item.id === job.id)) throw duplicate('Upload job', job.id)
+    return { ...materialState, uploadJobs: [job, ...materialState.uploadJobs] }
+  })
+  return sanitizeUploadSuccess(
+    { job: state.uploadJobs.find((item) => item.id === job.id) },
+    { expectedId: job.id, expectedStatus: 'queued' },
+  )
+}
+
+export const processUploadJob = async (id, options = {}) => {
+  assertUploadId(id)
+  if (!isMockMode) {
+    try {
+      return sanitizeUploadSuccess(
+        await http.post(
+          `/api/material-uploads/${encodeURIComponent(id)}/process`,
+          undefined,
+          { signal: options?.signal },
+        ),
+        { expectedId: id, expectedStatus: 'needs_confirmation' },
+      )
+    } catch (error) {
+      if (error instanceof ApiError) {
+        try {
+          const failedJob = sanitizeUploadJob(error.data?.job, { expectedId: id })
+          if (failedJob.status === 'failed') error.job = failedJob
+        } catch (contractError) {
+          if (!(contractError instanceof MaterialContractError)) throw contractError
+        }
+      }
+      throw error
+    }
+  }
+  throwIfAborted(options?.signal)
+  if (await waitForPendingCancellation(id)) throw uploadCancelled()
+  throwIfAborted(options?.signal)
+
+  let processingJob
+  try {
+    await repository.update((current) => {
+      throwIfAborted(options?.signal)
+      const materialState = normalizeMaterialState(current)
+      const job = findUploadJob(materialState, id)
+      if (!job) throw notFound('Upload job', id)
+      throwTerminalUploadState(job)
+      if (!['queued', 'failed'].includes(job.status)) {
+        throw invalidUploadState('Only queued or failed uploads can be processed')
+      }
+      const { failure: _previousFailure, ...retryableJob } = job
+      processingJob = {
+        ...retryableJob,
+        status: 'processing',
+        progress: Math.max(1, job.progress || 0),
+      }
+      return replaceUploadJob(materialState, processingJob)
+    })
+
+    throwIfAborted(options?.signal)
+    if (await waitForPendingCancellation(id)) throw uploadCancelled()
+    throwIfAborted(options?.signal)
+    const fixtureKey = selectMaterialFixture(processingJob)
+    const processed = adaptProcessedJob(
+      processingJob,
+      processMaterialJob(processingJob, { fixtureKey }),
+    )
+    const state = await repository.update((current) => {
+      throwIfAborted(options?.signal)
+      const materialState = normalizeMaterialState(current)
+      const currentJob = findUploadJob(materialState, id)
+      if (!currentJob) throw notFound('Upload job', id)
+      throwTerminalUploadState(currentJob)
+      if (currentJob.status !== 'processing') throw invalidUploadState('Only processing uploads can finish classification')
+      return replaceUploadJob(materialState, processed)
+    })
+    return sanitizeUploadSuccess(
+      { job: findUploadJob(state, id) },
+      { expectedId: id, expectedStatus: 'needs_confirmation' },
+    )
+  } catch (error) {
+    if (!processingJob) mapMaterialDomainError(error)
+    if (error?.name === 'AbortError') {
+      await repository.update((current) => {
+        const materialState = normalizeMaterialState(current)
+        const currentJob = findUploadJob(materialState, id)
+        if (!currentJob || currentJob.status !== 'processing') return materialState
+        return replaceUploadJob(materialState, { ...currentJob, status: 'queued', progress: 0 })
+      })
+      throw error
+    }
+    if (error instanceof ApiError && error.code === 'UPLOAD_CANCELLED') throw error
+
+    const apiError = toUploadProcessingApiError(error)
+    let failedJob
+    await repository.update((current) => {
+      const materialState = normalizeMaterialState(current)
+      const currentJob = findUploadJob(materialState, id)
+      if (!currentJob || currentJob.status !== 'processing') return materialState
+      failedJob = {
+        ...currentJob,
+        status: 'failed',
+        progress: Math.max(1, currentJob.progress || 0),
+        failure: {
+          code: apiError.code,
+          message: apiError.message,
+        },
+      }
+      return replaceUploadJob(materialState, failedJob)
+    })
+    if (failedJob) apiError.job = structuredClone(failedJob)
+    throw apiError
+  }
+}
+
+export const confirmUploadJob = async (id, patch, options = {}) => {
+  assertUploadId(id)
+  let confirmationPatch
+  try {
+    confirmationPatch = sanitizeClassificationPatch(patch)
+  } catch (error) {
+    mapMaterialDomainError(error)
+  }
+  if (!isMockMode) return sanitizeConfirmSuccess(await http.post(
+    `/api/material-uploads/${encodeURIComponent(id)}/confirm`,
+    confirmationPatch,
+    { signal: options?.signal },
+  ), id)
+  throwIfAborted(options?.signal)
+  try {
+    let confirmed
+    await repository.update((current) => {
+      throwIfAborted(options?.signal)
+      const materialState = normalizeMaterialState(current)
+      const job = findUploadJob(materialState, id)
+      if (!job) throw notFound('Upload job', id)
+      throwTerminalUploadState(job)
+      if (job.status !== 'needs_confirmation') {
+        throw invalidUploadState('Only uploads awaiting confirmation can be confirmed')
+      }
+      confirmed = confirmMaterialClassification(job, confirmationPatch)
+      confirmed = sanitizeConfirmSuccess(confirmed, id)
+      if (materialState.notes.some((note) => note.id === confirmed.note.id)) {
+        throw duplicate('Note', confirmed.note.id)
+      }
+      return {
+        ...replaceUploadJob(materialState, confirmed.job),
+        notes: [confirmed.note, ...materialState.notes],
+      }
+    })
+    return sanitizeConfirmSuccess(confirmed, id)
+  } catch (error) {
+    mapMaterialDomainError(error)
+  }
+}
+
+export const cancelUploadJob = async (id, options = {}) => {
+  assertUploadId(id)
+  if (!isMockMode) return sanitizeUploadSuccess(await http.post(
+    `/api/material-uploads/${encodeURIComponent(id)}/cancel`,
+    undefined,
+    { signal: options?.signal },
+  ), { expectedId: id, expectedStatus: 'cancelled' })
+  throwIfAborted(options?.signal)
+  const priorAttempt = pendingUploadCancellations.get(id)
+  if (priorAttempt) await priorAttempt.settled
+  throwIfAborted(options?.signal)
+
+  const attempt = createCancellationAttempt()
+  pendingUploadCancellations.set(id, attempt)
+  let durableCancellation = false
+  try {
+    const state = await repository.update((current) => {
+      throwIfAborted(options?.signal)
+      const materialState = normalizeMaterialState(current)
+      const job = findUploadJob(materialState, id)
+      if (!job) throw notFound('Upload job', id)
+      if (job.status === 'completed') throw uploadAlreadyCompleted()
+      if (job.status === 'cancelled') return materialState
+      const {
+        failure: _failedOnlyDiagnostic,
+        result: _confirmationOnlyResult,
+        ...cancellableJob
+      } = job
+      return replaceUploadJob(materialState, { ...cancellableJob, status: 'cancelled' })
+    })
+    const job = findUploadJob(state, id)
+    durableCancellation = job?.status === 'cancelled'
+    return sanitizeUploadSuccess(
+      { job },
+      { expectedId: id, expectedStatus: 'cancelled' },
+    )
+  } catch (error) {
+    mapMaterialDomainError(error)
+  } finally {
+    attempt.settle(durableCancellation)
+    if (pendingUploadCancellations.get(id) === attempt) pendingUploadCancellations.delete(id)
+  }
 }
 
 // ---------- Exercise session ----------
