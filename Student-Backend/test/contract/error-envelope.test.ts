@@ -36,6 +36,15 @@ async function insertStudent(id = studentId) {
   } })
 }
 
+async function durableSnapshot() {
+  const [students, tasks, adjustments, sets, sessions, errors, notes, folders, jobs, settings] = await Promise.all([
+    prisma.student.findMany({ orderBy: { id: 'asc' } }), prisma.task.findMany({ orderBy: [{ studentId: 'asc' }, { id: 'asc' }] }), prisma.taskAdjustment.findMany({ orderBy: [{ studentId: 'asc' }, { id: 'asc' }] }),
+    prisma.exerciseSet.findMany({ orderBy: [{ studentId: 'asc' }, { id: 'asc' }] }), prisma.session.findMany({ orderBy: [{ studentId: 'asc' }, { id: 'asc' }] }), prisma.errorItem.findMany({ orderBy: [{ studentId: 'asc' }, { id: 'asc' }] }),
+    prisma.note.findMany({ orderBy: [{ studentId: 'asc' }, { id: 'asc' }] }), prisma.noteFolder.findMany({ orderBy: [{ studentId: 'asc' }, { id: 'asc' }] }), prisma.materialUploadJob.findMany({ orderBy: [{ studentId: 'asc' }, { id: 'asc' }] }), prisma.studentSettings.findMany({ orderBy: { studentId: 'asc' } }),
+  ])
+  return JSON.stringify({ students, tasks, adjustments, sets, sessions, errors, notes, folders, jobs, settings })
+}
+
 beforeEach(async () => resetDatabase(prisma))
 afterAll(async () => { await resetDatabase(prisma); await prisma.$disconnect() })
 
@@ -49,9 +58,10 @@ describe('public error envelope and raw-router contract', () => {
   ])('maps %s without a write or leaked details', async (_case, payload, headers, status, code, message) => {
     const server = app()
     try {
+      const before = await durableSnapshot()
       const response = await server.inject({ method: 'POST', url: '/api/tasks', headers, payload })
       expectFailure(response, status, code, message)
-      await expect(prisma.task.count()).resolves.toBe(0)
+      expect(await durableSnapshot()).toBe(before)
     } finally { await server.close() }
   })
 
@@ -61,6 +71,7 @@ describe('public error envelope and raw-router contract', () => {
     await prisma.note.create({ data: { id: 'only-other', studentId: otherId, version: 1, updatedAtValue: new Date('2026-08-11T00:00:00.000Z'), payload: toInputJson({ id: 'only-other', title: 'Other', folderId: null, folderPath: null, tags: [], linkedTopics: [], linkedErrors: [], source: 'typed', createdAt: '2026-08-11', updatedAt: '2026-08-11', content: [{ t: 'p', v: 'Other' }], aiSuggestions: [], version: 1, versions: [] }) } })
     const server = app()
     try {
+      const before = await durableSnapshot()
       const unknown = await server.inject({ method: 'PATCH', url: '/api/student/settings', payload: { unknown: true } })
       const missing = await server.inject({ method: 'PATCH', url: '/api/notes/missing', payload: { title: 'no', changedAt: '2026-08-11', reason: 'no' } })
       const cross = await server.inject({ method: 'PATCH', url: '/api/notes/only-other', payload: { title: 'no', changedAt: '2026-08-11', reason: 'no' } })
@@ -71,6 +82,7 @@ describe('public error envelope and raw-router contract', () => {
       expectFailure(cross, 404, 'NOT_FOUND', 'Note not found')
       expectFailure(tooLong, 400, 'INVALID_INPUT', 'Invalid request')
       expectFailure(badUrl, 400, 'INVALID_INPUT', 'Invalid request')
+      expect(await durableSnapshot()).toBe(before)
       await expect(prisma.note.findUnique({ where: { studentId_id: { studentId: otherId, id: 'only-other' } } })).resolves.toMatchObject({ payload: { title: 'Other' } })
     } finally { await server.close() }
   })
@@ -82,11 +94,13 @@ describe('public error envelope and raw-router contract', () => {
     const server = app(studentId, { write: (line) => logs.push(line) })
     server.get('/contract-unexpected', async () => { throw new Error(secret) })
     try {
+      const before = await durableSnapshot()
       const corrupt = await server.inject({ method: 'GET', url: '/api/student/bootstrap' })
       const unexpected = await server.inject({ method: 'GET', url: '/contract-unexpected' })
       expectFailure(corrupt, 500, 'STORED_DATA_INVALID', 'Stored student data is invalid')
       expectFailure(unexpected, 500, 'INTERNAL_ERROR', 'Internal server error')
       expect(JSON.stringify(logs)).toContain(secret)
+      expect(await durableSnapshot()).toBe(before)
     } finally { await server.close() }
   })
 

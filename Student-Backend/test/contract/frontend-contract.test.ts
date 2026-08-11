@@ -1,4 +1,5 @@
 import { afterAll, beforeEach, describe, expect, it } from 'vitest'
+import { z } from 'zod'
 
 import { buildApp } from '../../src/app.js'
 import {
@@ -6,12 +7,14 @@ import {
   exerciseSetSchema,
   materialUploadJobSchema,
   noteSchema,
+  sessionSchema,
   settingsSchema,
   taskSchema,
 } from '../../src/contracts/student-contracts.js'
 import { parseEnv } from '../../src/config/env.js'
 import { toInputJson } from '../../src/db/json.js'
 import { createTestPrisma, resetDatabase } from '../helpers/database.js'
+import { sessionSummarySchema } from '../../src/modules/sessions/session-summary.js'
 
 const prisma = createTestPrisma()
 const studentId = 'contract-student'
@@ -65,9 +68,23 @@ async function insertStudent() {
 
 function expectOk(response: { statusCode: number; json(): unknown }, schema: { parse(value: unknown): unknown }) {
   expect(response.statusCode).toBe(200)
-  expect(response.json()).toMatchObject({ code: 0, message: 'ok' })
   const body = response.json() as { data: unknown }
-  expect(() => schema.parse(body.data)).not.toThrow()
+  expect(body).toStrictEqual({ code: 0, message: 'ok', data: schema.parse(body.data) })
+}
+
+const taskEnvelope = z.strictObject({ task: taskSchema })
+const settingsEnvelope = z.strictObject({ settings: settingsSchema })
+const errorsEnvelope = z.strictObject({ errors: z.array(errorItemSchema) })
+const noteEnvelope = z.strictObject({ note: noteSchema })
+const notesEnvelope = z.strictObject({ notes: z.array(noteSchema) })
+const materialEnvelope = z.strictObject({ job: materialUploadJobSchema })
+const confirmationEnvelope = z.strictObject({ job: materialUploadJobSchema, note: noteSchema })
+
+function session() {
+  return sessionSchema.parse({
+    sessionId: 'session-contract', taskId: 'task-contract', taskTitle: 'Task set', subject: 'Math', completedAt: '2026-08-11T10:10:00.000Z', timeSpent: 10, timeSpentSeconds: 600,
+    questions: [{ ...question(), result: { status: 'correct', attempts: [{ answer: '2', submittedAt: '2026-08-11T10:09:00.000Z', isCorrect: true }], hintsUsed: 0, solvedAtHintLevel: 0, handwritingUsed: false } }],
+  })
 }
 
 beforeEach(async () => resetDatabase(prisma))
@@ -92,32 +109,92 @@ describe('documented non-Agent frontend contract', () => {
       ].sort())
 
       const settings = await server.inject({ method: 'PATCH', url: '/api/student/settings', payload: { dailyGoalHours: 6 } })
-      expectOk(settings, { parse: (data) => ({ settings: settingsSchema.parse((data as { settings: unknown }).settings) }) })
+      expectOk(settings, settingsEnvelope)
 
       const createdTask = await server.inject({ method: 'POST', url: '/api/tasks', payload: task('task-created') })
-      expectOk(createdTask, { parse: (data) => ({ task: taskSchema.parse((data as { task: unknown }).task) }) })
+      expectOk(createdTask, taskEnvelope)
       const completedTask = await server.inject({ method: 'PATCH', url: '/api/tasks/task-created', payload: { status: 'completed' } })
-      expectOk(completedTask, { parse: (data) => ({ task: taskSchema.parse((data as { task: unknown }).task) }) })
+      expectOk(completedTask, taskEnvelope)
 
       const exercise = await server.inject({ method: 'GET', url: '/api/exercise-sets/task-contract' })
       expectOk(exercise, exerciseSetSchema)
 
       const errors = await server.inject({ method: 'POST', url: '/api/errors/batch', payload: { items: [errorItem()] } })
-      expectOk(errors, { parse: (data) => ({ errors: (data as { errors: unknown[] }).errors.map((value) => errorItemSchema.parse(value)) }) })
+      expectOk(errors, errorsEnvelope)
 
       const noteBody = noteSchema.parse({ id: 'note-contract', title: 'Frontend note', folderId: null, folderPath: null, tags: [], linkedTopics: [], linkedErrors: [], source: 'typed', createdAt: now, updatedAt: now, content: [{ t: 'p', v: 'Remember this.' }], aiSuggestions: [], version: 1, versions: [] })
       const note = await server.inject({ method: 'POST', url: '/api/notes', payload: noteBody })
-      expectOk(note, { parse: (data) => ({ note: noteSchema.parse((data as { note: unknown }).note) }) })
+      expectOk(note, noteEnvelope)
       const notes = await server.inject({ method: 'GET', url: '/api/notes' })
-      expectOk(notes, { parse: (data) => ({ notes: (data as { notes: unknown[] }).notes.map((value) => noteSchema.parse(value)) }) })
+      expectOk(notes, notesEnvelope)
 
       const material = await server.inject({ method: 'POST', url: '/api/material-uploads', payload: { id: 'upload-contract', fileName: 'note.pdf', mimeType: 'application/pdf', size: 1, materialType: 'class_note', createdAt: now } })
-      expectOk(material, { parse: (data) => ({ job: materialUploadJobSchema.parse((data as { job: unknown }).job) }) })
-      const cancelled = await server.inject({ method: 'POST', url: '/api/material-uploads/upload-contract/cancel' })
-      expectOk(cancelled, { parse: (data) => ({ job: materialUploadJobSchema.parse((data as { job: unknown }).job) }) })
+      expectOk(material, materialEnvelope)
+      const queued = (material.json() as { data: { job: Record<string, unknown> } }).data.job
+      const confirmation = {
+        ...queued, status: 'needs_confirmation', progress: 100, updatedAt: '2026-08-11T11:00:00.000Z',
+        result: { suggestedTitle: 'Confirmed note', materialType: 'class_note', examBoard: 'Cambridge', subject: 'Math', chapter: 'Calculus', folderId: 'calculus', folderPath: 'Math/Calculus', questionBlocks: [{ id: 'q1', label: 'Q1', text: 'Solve' }], answerBlocks: [{ id: 'a1', questionId: 'q1', text: '2' }], content: [{ t: 'p', v: 'Confirmed.' }], linkedTopics: ['calculus'], linkedErrors: ['error-contract'], confidence: 1 },
+      }
+      await prisma.materialUploadJob.update({ where: { studentId_id: { studentId, id: 'upload-contract' } }, data: { status: 'needs_confirmation', payload: toInputJson(confirmation) } })
+      expectOk(await server.inject({ method: 'POST', url: '/api/material-uploads/upload-contract/confirm', payload: {} }), confirmationEnvelope)
+
+      const cancelledMaterial = await server.inject({ method: 'POST', url: '/api/material-uploads', payload: { id: 'upload-cancel', fileName: 'cancel.pdf', mimeType: 'application/pdf', size: 1, materialType: 'class_note', createdAt: now } })
+      expectOk(cancelledMaterial, materialEnvelope)
+      const cancelled = await server.inject({ method: 'POST', url: '/api/material-uploads/upload-cancel/cancel' })
+      expectOk(cancelled, materialEnvelope)
     } finally {
       await server.close()
     }
+  })
+
+  it('proves the task → exercise → session → summary frontend provenance row', async () => {
+    await insertStudent()
+    const seededTask = task()
+    const seededSet = exerciseSetSchema.parse({ id: 'set-contract', taskId: seededTask.id, title: 'Task set', subject: 'Math', questions: [question()] })
+    await prisma.task.create({ data: { id: seededTask.id, studentId, type: seededTask.type, status: seededTask.status, dueAt: new Date(seededTask.dueAt!), payload: toInputJson(seededTask) } })
+    await prisma.exerciseSet.create({ data: { id: 'set-contract', studentId, taskId: seededTask.id, kind: 'task', payload: toInputJson(seededSet) } })
+    const server = app()
+    try {
+      expectOk(await server.inject({ method: 'GET', url: '/api/exercise-sets/task-contract' }), exerciseSetSchema)
+      expectOk(await server.inject({ method: 'POST', url: '/api/sessions', payload: session() }), z.strictObject({ sessionId: z.literal('session-contract') }))
+      expectOk(await server.inject({ method: 'GET', url: '/api/summary/session-contract' }), sessionSummarySchema)
+    } finally { await server.close() }
+  })
+
+  it('proves full note CRUD, organize, and undo history rows through public requests', async () => {
+    await insertStudent()
+    const server = app()
+    try {
+      const created = noteSchema.parse({ id: 'note-history', title: 'Original', folderId: null, folderPath: null, tags: [], linkedTopics: [], linkedErrors: [], source: 'typed', createdAt: now, updatedAt: now, content: [{ t: 'p', v: 'Original' }], aiSuggestions: [{ id: 'add-tag', type: 'add_tag', tag: 'organized' }], version: 1, versions: [] })
+      expectOk(await server.inject({ method: 'POST', url: '/api/notes', payload: created }), noteEnvelope)
+      expectOk(await server.inject({ method: 'PATCH', url: '/api/notes/note-history', payload: { title: 'Edited', changedAt: '2026-08-11T11:00:00.000Z', reason: 'edit' } }), noteEnvelope)
+      expectOk(await server.inject({ method: 'POST', url: '/api/notes/note-history/organize', payload: { suggestionIds: ['add-tag'], changedAt: '2026-08-11T12:00:00.000Z' } }), noteEnvelope)
+      const undone = await server.inject({ method: 'POST', url: '/api/notes/note-history/undo', payload: { changedAt: '2026-08-11T13:00:00.000Z' } })
+      expectOk(undone, noteEnvelope)
+      expect((undone.json() as { data: { note: { versions: unknown[] } } }).data.note.versions).toHaveLength(3)
+    } finally { await server.close() }
+  })
+
+  it('proves error recurrence → redo → verification → mastery provenance through public requests', async () => {
+    await insertStudent()
+    const server = app()
+    try {
+      const initial = errorItem('error-mastery')
+      expectOk(await server.inject({ method: 'POST', url: '/api/errors/batch', payload: { items: [initial] } }), errorsEnvelope)
+      const redone = await server.inject({ method: 'POST', url: '/api/errors/error-mastery/redo', payload: { attemptedAt: '2026-08-11T10:00:00.000Z', answer: '2', isCorrect: true, timeSpent: 1 } })
+      expectOk(redone, z.strictObject({ error: errorItemSchema }))
+      const stored = (redone.json() as { data: { error: typeof initial } }).data.error
+      const variantTask = taskSchema.parse({ id: 'verification-task', title: 'Independent check', type: 'error_review', subject: 'Math', estimatedMinutes: 10, dueAt: null, assignedBy: null, priority: 'P1', isOverdue: false, status: 'pending', exerciseSetId: 'verification-set', sourceQuestionId: stored.questionId, verificationForErrorId: stored.id, reason: 'Verify', createdAt: '2026-08-11T10:01:00.000Z' })
+      const variantSet = exerciseSetSchema.parse({ id: 'verification-set', taskId: variantTask.id, title: variantTask.title, subject: 'Math', sourceQuestionId: stored.questionId, createdAt: variantTask.createdAt, questions: [{ ...question('verification-question'), variantOf: stored.questionId }] })
+      const awaiting = errorItemSchema.parse({ ...stored, status: 'verification_due', verificationVariantId: variantSet.id })
+      await prisma.task.create({ data: { id: variantTask.id, studentId, type: variantTask.type, status: variantTask.status, dueAt: null, payload: toInputJson(variantTask) } })
+      await prisma.exerciseSet.create({ data: { id: variantSet.id!, studentId, taskId: variantTask.id, kind: 'task', payload: toInputJson(variantSet) } })
+      await prisma.errorItem.update({ where: { studentId_id: { studentId, id: awaiting.id } }, data: { status: awaiting.status, lastOccurredAt: new Date(awaiting.lastOccurredAt), payload: toInputJson({ storageVersion: 1, error: awaiting, occurrenceEvidenceBindings: awaiting.occurrenceRecords.map(({ key, occurredAt }) => ({ key, occurredAt, fingerprint: '0'.repeat(64) })) }) } })
+      expectOk(await server.inject({ method: 'POST', url: '/api/errors/error-mastery/verification', payload: { variantId: 'verification-set', isCorrect: true, verifiedAt: '2026-08-11T10:02:00.000Z' } }), z.strictObject({ error: errorItemSchema }))
+      const mastered = await server.inject({ method: 'PATCH', url: '/api/errors/error-mastery', payload: { status: 'mastered' } })
+      expectOk(mastered, z.strictObject({ error: errorItemSchema }))
+      expect((mastered.json() as { data: { error: { status: string } } }).data.error.status).toBe('mastered')
+    } finally { await server.close() }
   })
 
   it('keeps deliberately unimplemented Agent-owned process and variant routes absent', async () => {
