@@ -794,6 +794,38 @@ describe('POST /api/tasks/{id}/adjustment-request', () => {
 })
 
 describe('task API documentation', () => {
+  it('maps unsupported media and oversized task bodies to stable envelopes', async () => {
+    const app = createApp()
+
+    const unsupported = await app.inject({
+      method: 'PATCH',
+      url: '/api/tasks/task-primary',
+      headers: { 'content-type': 'application/xml' },
+      payload: '<status>completed</status>',
+    })
+    const oversized = await app.inject({
+      method: 'POST',
+      url: '/api/tasks',
+      headers: { 'content-type': 'application/json' },
+      payload: JSON.stringify({ id: 'oversized', title: 'x'.repeat(1_048_576) }),
+    })
+    await app.close()
+
+    expect(unsupported.statusCode).toBe(415)
+    expect(unsupported.json()).toEqual({
+      code: 'UNSUPPORTED_MEDIA_TYPE',
+      message: 'Unsupported media type',
+      data: null,
+    })
+    expect(oversized.statusCode).toBe(413)
+    expect(oversized.json()).toEqual({
+      code: 'PAYLOAD_TOO_LARGE',
+      message: 'Payload too large',
+      data: null,
+    })
+    await expect(prisma.task.count()).resolves.toBe(0)
+  })
+
   it('publishes success and actual error responses for every task route', async () => {
     const app = createApp()
 
@@ -807,16 +839,20 @@ describe('task API documentation', () => {
       '400',
       '404',
       '409',
+      '413',
+      '415',
       '500',
     ])
     expect(Object.keys(paths['/api/tasks/{id}'].patch.responses).sort()).toEqual([
       '200',
       '400',
       '404',
+      '413',
+      '415',
       '500',
     ])
     expect(
       Object.keys(paths['/api/tasks/{id}/adjustment-request'].post.responses).sort(),
-    ).toEqual(['200', '400', '404', '409', '500'])
+    ).toEqual(['200', '400', '404', '409', '413', '415', '500'])
   })
 })
