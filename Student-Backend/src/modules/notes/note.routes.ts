@@ -3,18 +3,21 @@ import { validatorCompiler as zodValidatorCompiler, type ZodTypeProvider } from 
 import { z } from 'zod'
 
 import { errorEnvelopeSchema, ok } from '../../common/http/envelope.js'
-import { evidenceTimeSchema, noteBlockSchema, noteCreateSchema, noteIdSchema, noteSchema } from '../../contracts/student-contracts.js'
+import { evidenceTimeSchema, noteBlockSchema, noteCreatePublicSchema, noteIdSchema, noteSchema } from '../../contracts/student-contracts.js'
 import { NoteService } from './note.service.js'
 
 interface NoteRoutesOptions { studentId: string }
 const noteParamsSchema = z.strictObject({ id: noteIdSchema })
 const nonBlank = z.string().min(1).refine((value) => value.trim().length > 0)
-const createNoteBodySchema = noteCreateSchema
-const notePatchBodySchema = z.strictObject({
+const createNoteBodySchema = noteCreatePublicSchema
+const notePatchFields = {
   title: nonBlank.optional(), folderId: nonBlank.nullable().optional(), folderPath: nonBlank.nullable().optional(),
-  tags: z.array(nonBlank).optional(), content: z.array(noteBlockSchema).optional(), linkedTopics: z.array(nonBlank).optional(), linkedErrors: z.array(nonBlank).optional(),
-  changedAt: evidenceTimeSchema.optional(), updatedAt: evidenceTimeSchema.optional(), reason: nonBlank.optional(),
-}).refine((value) => value.changedAt !== undefined || value.updatedAt !== undefined, { message: 'changedAt or updatedAt is required' })
+  tags: z.array(nonBlank).optional(), content: z.array(noteBlockSchema).optional(), linkedTopics: z.array(nonBlank).optional(), linkedErrors: z.array(nonBlank).optional(), reason: nonBlank.optional(),
+}
+const notePatchBodySchema = z.union([
+  z.strictObject({ ...notePatchFields, changedAt: evidenceTimeSchema, updatedAt: evidenceTimeSchema.optional() }),
+  z.strictObject({ ...notePatchFields, changedAt: evidenceTimeSchema.optional(), updatedAt: evidenceTimeSchema }),
+])
 const noteRouteValidatorCompiler: FastifySchemaCompiler<any> = (routeSchema) => (
   routeSchema.httpPart === 'body'
     ? (value: unknown) => ({ value })

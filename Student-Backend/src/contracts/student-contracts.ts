@@ -635,10 +635,6 @@ const noteShape = {
     versions: z.array(noteVersionSnapshotSchema),
   }
 
-export const noteCreateCurrentSchema = z.strictObject(noteShape)
-export const noteCreateLegacySchema = z.strictObject((( { version, versions, ...legacy }) => legacy)(noteShape))
-export const noteCreateSchema = z.union([noteCreateCurrentSchema, noteCreateLegacySchema])
-
 export const noteSchema = safeStrictObject(noteShape)
   .superRefine((value, context) => {
     if (value.versions.length !== value.version - 1) {
@@ -684,6 +680,22 @@ export const noteSchema = safeStrictObject(noteShape)
       }
     })
   })
+
+// Runtime create contract: both alternatives enter the same complete persisted
+// contract. The legacy alternative only supplies the two historical defaults.
+const legacyNoteCreateSchema = z.preprocess((value) => {
+  const cloned = normalizeContractInput(value)
+  if (cloned === invalidContractInput || cloned === null || typeof cloned !== 'object' || Array.isArray(cloned)) return invalidContractInput
+  if (Object.hasOwn(cloned, 'version') || Object.hasOwn(cloned, 'versions')) return invalidContractInput
+  return { ...cloned, version: 1, versions: [] }
+}, noteSchema)
+export const noteCreateSchema = z.union([noteSchema, legacyNoteCreateSchema])
+
+// Public input schema remains transform-free so Swagger can render both exact
+// branches without exposing the internal normalization step.
+export const noteCreateCurrentSchema = z.strictObject(noteShape)
+export const noteCreateLegacySchema = z.strictObject((( { version, versions, ...legacy }) => legacy)(noteShape))
+export const noteCreatePublicSchema = z.union([noteCreateCurrentSchema, noteCreateLegacySchema])
 
 export const materialClassificationResultSchema = safeStrictObject({
     suggestedTitle: nonEmptyString,
