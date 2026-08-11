@@ -1,4 +1,4 @@
-import { afterAll, beforeEach, describe, expect, it } from 'vitest'
+import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { buildApp } from '../../src/app.js'
 import { parseEnv } from '../../src/config/env.js'
@@ -12,6 +12,9 @@ import {
 const prisma = createTestPrisma()
 const primaryStudentId = 'exercise-student-primary'
 const otherStudentId = 'exercise-student-other'
+const allowedOrigin = 'https://student.example.com'
+const overlongTaskId = 'SENSITIVE_LONG_TASK_ID_SENTINEL'.padEnd(101, 't')
+const overlongBankId = 'SENSITIVE_LONG_BANK_ID_SENTINEL'.padEnd(101, 'b')
 
 function makeQuestion(id = 'question-primary') {
   return {
@@ -128,6 +131,7 @@ function createApp(studentId = primaryStudentId) {
       NODE_ENV: 'test',
       DATABASE_URL: TEST_DATABASE_URL,
       STUDENT_ID: studentId,
+      CORS_ORIGINS: allowedOrigin,
       LOG_LEVEL: 'silent',
     }),
     prisma,
@@ -136,6 +140,10 @@ function createApp(studentId = primaryStudentId) {
 
 beforeEach(async () => {
   await resetDatabase(prisma)
+})
+
+afterEach(() => {
+  vi.restoreAllMocks()
 })
 
 afterAll(async () => {
@@ -430,4 +438,68 @@ describe('exercise route boundaries and OpenAPI', () => {
       ])
     }
   })
+
+  it.each([
+    [
+      'task malformed URL',
+      '/api/exercise-sets/SENSITIVE_BAD_URL_SENTINEL-%E0%A4%A',
+    ],
+    [
+      'bank malformed URL',
+      '/api/bank/exercise/SENSITIVE_BAD_URL_SENTINEL-%E0%A4%A',
+    ],
+    [
+      'task overlong id',
+      `/api/exercise-sets/${overlongTaskId}`,
+    ],
+    [
+      'bank overlong id',
+      `/api/bank/exercise/${overlongBankId}`,
+    ],
+  ])(
+    'safely rejects %s before any database access while preserving configured CORS',
+    async (_label, url) => {
+      const databaseAccess = [
+        vi.spyOn(prisma.exerciseSet, 'findMany'),
+        vi.spyOn(prisma.exerciseSet, 'findFirst'),
+        vi.spyOn(prisma.exerciseSet, 'create'),
+        vi.spyOn(prisma.exerciseSet, 'createMany'),
+        vi.spyOn(prisma.exerciseSet, 'update'),
+        vi.spyOn(prisma.exerciseSet, 'updateMany'),
+        vi.spyOn(prisma.exerciseSet, 'upsert'),
+        vi.spyOn(prisma.exerciseSet, 'delete'),
+        vi.spyOn(prisma.exerciseSet, 'deleteMany'),
+      ]
+      const app = createApp()
+
+      const configured = await app.inject({
+        method: 'GET',
+        url,
+        headers: { origin: allowedOrigin },
+      })
+      const unconfigured = await app.inject({
+        method: 'GET',
+        url,
+        headers: { origin: 'https://attacker.example.com' },
+      })
+      await app.close()
+
+      for (const response of [configured, unconfigured]) {
+        expect(response.statusCode).toBe(400)
+        expect(response.headers['content-type']).toContain('application/json')
+        expect(response.headers.vary).toBe('Origin')
+        expect(response.json()).toEqual({
+          code: 'INVALID_INPUT',
+          message: 'Invalid request',
+          data: null,
+        })
+        expect(response.body).not.toMatch(
+          /SENSITIVE_|FST_ERR_BAD_URL|FST_ERR_MAX_PARAM_LENGTH|%E0%A4%A/,
+        )
+      }
+      expect(configured.headers['access-control-allow-origin']).toBe(allowedOrigin)
+      expect(unconfigured.headers['access-control-allow-origin']).toBeUndefined()
+      for (const access of databaseAccess) expect(access).not.toHaveBeenCalled()
+    },
+  )
 })

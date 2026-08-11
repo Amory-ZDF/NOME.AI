@@ -2,6 +2,7 @@ import cors from '@fastify/cors'
 import swagger from '@fastify/swagger'
 import swaggerUi from '@fastify/swagger-ui'
 import Fastify from 'fastify'
+import type { IncomingMessage, ServerResponse } from 'node:http'
 import {
   jsonSchemaTransform,
   serializerCompiler,
@@ -38,13 +39,43 @@ const healthEnvelopeSchema = z.object({
 })
 
 export function buildApp({ env, loggerStream, prisma, now = () => new Date() }: BuildAppOptions) {
+  let logRawRouterRejection = () => undefined
+  const invalidRequestBody = JSON.stringify(fail('INVALID_INPUT', 'Invalid request'))
+  const rejectRawRouterRequest = (
+    _path: string,
+    request: IncomingMessage,
+    response: ServerResponse,
+  ) => {
+    try {
+      logRawRouterRejection()
+    } catch {
+      // A logging transport failure must not prevent the safe rejection.
+    }
+
+    if (response.destroyed || response.writableEnded || response.headersSent) return
+
+    const origin = request.headers.origin
+    const headers: Record<string, string | number> = {
+      'Content-Type': 'application/json; charset=utf-8',
+      'Content-Length': Buffer.byteLength(invalidRequestBody),
+      Vary: 'Origin',
+    }
+    if (origin !== undefined && env.CORS_ORIGINS.includes(origin)) {
+      headers['Access-Control-Allow-Origin'] = origin
+    }
+
+    try {
+      response.writeHead(400, headers)
+      response.end(invalidRequestBody)
+    } catch {
+      if (!response.destroyed) response.destroy()
+    }
+  }
+
   const app = Fastify({
     routerOptions: {
-      onBadUrl: (_path, _request, response) => {
-        response.statusCode = 400
-        response.setHeader('content-type', 'application/json; charset=utf-8')
-        response.end(JSON.stringify(fail('INVALID_INPUT', 'Invalid request')))
-      },
+      onBadUrl: rejectRawRouterRequest,
+      onMaxParamLength: rejectRawRouterRequest,
     },
     logger: {
       level: env.LOG_LEVEL,
@@ -79,6 +110,16 @@ export function buildApp({ env, loggerStream, prisma, now = () => new Date() }: 
       },
     },
   }).withTypeProvider<ZodTypeProvider>()
+
+  logRawRouterRejection = () => {
+    app.log.warn(
+      {
+        event: 'raw_router_rejection',
+        reason: 'invalid_request_target',
+      },
+      'Raw router request rejected',
+    )
+  }
 
   app.decorate('prisma', prisma)
 

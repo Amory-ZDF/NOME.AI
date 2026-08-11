@@ -22,7 +22,7 @@ function createApp(loggerStream?: { write(message: string): void }) {
   const app = buildApp({
     env: {
       ...testEnv,
-      LOG_LEVEL: loggerStream === undefined ? 'silent' : 'error',
+      LOG_LEVEL: loggerStream === undefined ? 'silent' : 'warn',
     },
     prisma: foundationPrisma,
     ...(loggerStream === undefined ? {} : { loggerStream }),
@@ -112,6 +112,32 @@ describe('Fastify application foundation', () => {
       'https://student.example.com',
     )
     expect(unconfigured.headers['access-control-allow-origin']).toBeUndefined()
+  })
+
+  it('logs one fixed safe event for a raw-router rejection', async () => {
+    const capture = createLogCapture()
+    const app = createApp(capture.stream)
+    const sentinel = 'RAW_ROUTER_LOG_SECRET_SENTINEL'
+
+    const response = await app.inject({
+      method: 'GET',
+      url: `/api/exercise-sets/${sentinel}-%E0%A4%A`,
+      headers: {
+        origin: 'https://attacker.example.com',
+        authorization: 'Bearer RAW_ROUTER_AUTH_SECRET',
+      },
+    })
+    const logs = capture.read()
+    const logLines = logs.trim() === '' ? [] : logs.trim().split('\n')
+
+    expect(response.statusCode).toBe(400)
+    expect(logLines).toHaveLength(1)
+    expect(logs).toContain('Raw router request rejected')
+    expect(logs).toContain('"event":"raw_router_rejection"')
+    expect(logs).toContain('"reason":"invalid_request_target"')
+    expect(logs).not.toMatch(
+      /RAW_ROUTER_|attacker\.example\.com|%E0%A4%A|FST_ERR_BAD_URL|FST_ERR_MAX_PARAM_LENGTH/,
+    )
   })
 
   it.each(['PATCH', 'DELETE'])('allows configured-origin %s preflight', async (method) => {
