@@ -9,6 +9,7 @@ import {
   noteSchema,
   sessionSchema,
   settingsSchema,
+  taskAdjustmentSchema,
   taskSchema,
 } from '../../src/contracts/student-contracts.js'
 import { parseEnv } from '../../src/config/env.js'
@@ -80,6 +81,17 @@ const notesEnvelope = z.strictObject({ notes: z.array(noteSchema) })
 const materialEnvelope = z.strictObject({ job: materialUploadJobSchema })
 const confirmationEnvelope = z.strictObject({ job: materialUploadJobSchema, note: noteSchema })
 
+// Exact implemented/documented non-Agent inventory. Notes deliberately has no
+// single-note GET or DELETE route: list/create/patch/organize/undo are complete.
+const implementedRoutes = [
+  ['health', '/health', 'get'], ['bootstrap', '/api/student/bootstrap', 'get'], ['settings patch', '/api/student/settings', 'patch'],
+  ['task create', '/api/tasks', 'post'], ['task complete', '/api/tasks/{id}', 'patch'], ['task adjustment', '/api/tasks/{id}/adjustment-request', 'post'],
+  ['task exercise read', '/api/exercise-sets/{taskId}', 'get'], ['bank exercise read', '/api/bank/exercise/{setId}', 'get'], ['session create', '/api/sessions', 'post'], ['summary read', '/api/summary/{sessionId}', 'get'],
+  ['error batch', '/api/errors/batch', 'post'], ['error redo', '/api/errors/{id}/redo', 'post'], ['error verification', '/api/errors/{id}/verification', 'post'], ['error mastery', '/api/errors/{id}', 'patch'],
+  ['note list', '/api/notes', 'get'], ['note create', '/api/notes', 'post'], ['note patch', '/api/notes/{id}', 'patch'], ['note organize', '/api/notes/{id}/organize', 'post'], ['note undo', '/api/notes/{id}/undo', 'post'],
+  ['material create', '/api/material-uploads', 'post'], ['material cancel', '/api/material-uploads/{id}/cancel', 'post'], ['material confirm', '/api/material-uploads/{id}/confirm', 'post'],
+] as const
+
 function session() {
   return sessionSchema.parse({
     sessionId: 'session-contract', taskId: 'task-contract', taskTitle: 'Task set', subject: 'Math', completedAt: '2026-08-11T10:10:00.000Z', timeSpent: 10, timeSpentSeconds: 600,
@@ -91,6 +103,14 @@ beforeEach(async () => resetDatabase(prisma))
 afterAll(async () => { await resetDatabase(prisma); await prisma.$disconnect() })
 
 describe('documented non-Agent frontend contract', () => {
+  it.each(implementedRoutes)('publishes the documented %s route exactly once', async (_name, path, method) => {
+    const server = app()
+    try {
+      const document = await server.inject({ method: 'GET', url: '/documentation/json' })
+      expect(document.statusCode).toBe(200)
+      expect((document.json() as { paths: Record<string, Record<string, unknown>> }).paths[path]?.[method]).toBeDefined()
+    } finally { await server.close() }
+  })
   it('serves the documented health, bootstrap, settings, task, exercise, error, note, and material envelopes', async () => {
     await insertStudent()
     const seededTask = task()
@@ -115,9 +135,14 @@ describe('documented non-Agent frontend contract', () => {
       expectOk(createdTask, taskEnvelope)
       const completedTask = await server.inject({ method: 'PATCH', url: '/api/tasks/task-created', payload: { status: 'completed' } })
       expectOk(completedTask, taskEnvelope)
+      const adjustment = await server.inject({ method: 'POST', url: '/api/tasks/task-contract/adjustment-request', payload: { id: 'adjustment-contract', taskId: 'task-contract', reason: 'time_conflict', details: 'Overlap', availableMinutes: 30, proposedDueAt: '2026-08-12T11:00:00.000Z', createdAt: '2026-08-11T10:00:00.000Z', status: 'submitted' } })
+      expectOk(adjustment, z.strictObject({ request: taskAdjustmentSchema, task: taskSchema }))
 
       const exercise = await server.inject({ method: 'GET', url: '/api/exercise-sets/task-contract' })
       expectOk(exercise, exerciseSetSchema)
+      const bank = exerciseSetSchema.parse({ id: 'bank-contract', taskId: null, title: 'Bank set', subject: 'Math', questions: [question('bank-question')] })
+      await prisma.exerciseSet.create({ data: { id: 'bank-contract', studentId, taskId: null, kind: 'bank', payload: toInputJson(bank) } })
+      expectOk(await server.inject({ method: 'GET', url: '/api/bank/exercise/bank-contract' }), exerciseSetSchema)
 
       const errors = await server.inject({ method: 'POST', url: '/api/errors/batch', payload: { items: [errorItem()] } })
       expectOk(errors, errorsEnvelope)

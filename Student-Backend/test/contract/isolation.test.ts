@@ -42,11 +42,11 @@ async function insertStudent(id: string, name: string) {
   await prisma.studentSettings.create({ data: { studentId: id, payload: toInputJson(settingsSchema.parse({ tone: 35, dailyGoalHours: 4, reminderTask: true, reminderErrorReview: true, reminderStudyTime: false })) } })
 }
 
-async function otherSnapshot() {
+async function studentSnapshot(owner: string) {
   const [student, settings, tasks, sets, errors, notes, jobs] = await Promise.all([
-    prisma.student.findUnique({ where: { id: second } }), prisma.studentSettings.findUnique({ where: { studentId: second } }),
-    prisma.task.findMany({ where: { studentId: second }, orderBy: { id: 'asc' } }), prisma.exerciseSet.findMany({ where: { studentId: second }, orderBy: { id: 'asc' } }),
-    prisma.errorItem.findMany({ where: { studentId: second }, orderBy: { id: 'asc' } }), prisma.note.findMany({ where: { studentId: second }, orderBy: { id: 'asc' } }), prisma.materialUploadJob.findMany({ where: { studentId: second }, orderBy: { id: 'asc' } }),
+    prisma.student.findUnique({ where: { id: owner } }), prisma.studentSettings.findUnique({ where: { studentId: owner } }),
+    prisma.task.findMany({ where: { studentId: owner }, orderBy: { id: 'asc' } }), prisma.exerciseSet.findMany({ where: { studentId: owner }, orderBy: { id: 'asc' } }),
+    prisma.errorItem.findMany({ where: { studentId: owner }, orderBy: { id: 'asc' } }), prisma.note.findMany({ where: { studentId: owner }, orderBy: { id: 'asc' } }), prisma.materialUploadJob.findMany({ where: { studentId: owner }, orderBy: { id: 'asc' } }),
   ])
   return JSON.stringify({ student, settings, tasks, sets, errors, notes, jobs })
 }
@@ -70,7 +70,7 @@ describe('student isolation across documented non-Agent ownership families', () 
 
       const set = exerciseSetSchema.parse({ id: 'shared-set', taskId: 'shared', title: 'Second-only set', subject: 'Math', questions: [{ id: 'shared-question', order: 1, type: 'calculation', topic: 'Algebra', difficulty: 2, content: '2+2', acceptKeywords: ['4'], correctDisplay: '4', errorType: 'calculation', hints: [1, 2, 3, 4, 5].map((level) => ({ level, title: String(level), content: String(level) })) }] })
       await prisma.exerciseSet.create({ data: { id: 'shared-set', studentId: second, taskId: 'shared', kind: 'task', payload: toInputJson(set) } })
-      const before = await otherSnapshot()
+      const before = await studentSnapshot(second)
 
       const complete = await one.inject({ method: 'PATCH', url: '/api/tasks/shared', payload: { status: 'completed' } })
       const redo = await one.inject({ method: 'POST', url: '/api/errors/shared/redo', payload: { attemptedAt: actionTimestamp, answer: '2', isCorrect: true, timeSpent: 3 } })
@@ -84,7 +84,11 @@ describe('student isolation across documented non-Agent ownership families', () 
       expect(JSON.stringify(bootstrap.json())).not.toContain('Second Student')
       const hiddenSet = await one.inject({ method: 'GET', url: '/api/exercise-sets/shared' })
       expect(hiddenSet.statusCode).toBe(404)
-      expect(await otherSnapshot()).toBe(before)
+      expect(await studentSnapshot(second)).toBe(before)
+      const firstAfterOwnWrites = await studentSnapshot(first)
+      expect((await two.inject({ method: 'PATCH', url: '/api/tasks/shared', payload: { status: 'completed' } })).statusCode).toBe(200)
+      expect((await two.inject({ method: 'PATCH', url: '/api/student/settings', payload: { dailyGoalHours: 5 } })).statusCode).toBe(200)
+      expect(await studentSnapshot(first)).toBe(firstAfterOwnWrites)
       await expect(prisma.task.count({ where: { id: 'shared' } })).resolves.toBe(2)
       await expect(prisma.errorItem.count({ where: { id: 'shared' } })).resolves.toBe(2)
       await expect(prisma.note.count({ where: { id: 'shared' } })).resolves.toBe(2)
