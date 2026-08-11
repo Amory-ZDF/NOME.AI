@@ -18,6 +18,11 @@ const notePatchBodySchema = z.union([
   z.strictObject({ ...notePatchFields, changedAt: evidenceTimeSchema, updatedAt: evidenceTimeSchema.optional() }),
   z.strictObject({ ...notePatchFields, changedAt: evidenceTimeSchema.optional(), updatedAt: evidenceTimeSchema }),
 ])
+const noteOrganizeBodySchema = z.strictObject({
+  suggestionIds: z.array(noteIdSchema),
+  changedAt: evidenceTimeSchema,
+})
+const noteUndoBodySchema = z.strictObject({ changedAt: evidenceTimeSchema })
 const noteRouteValidatorCompiler: FastifySchemaCompiler<any> = (routeSchema) => (
   routeSchema.httpPart === 'body'
     ? (value: unknown) => ({ value })
@@ -33,4 +38,6 @@ export async function noteRoutes(app: FastifyInstance, options: NoteRoutesOption
   routes.get('/api/notes', { schema: { tags: ['notes'], summary: 'List notes for the configured student', response: { 200: notesEnvelopeSchema, 404: errorEnvelopeSchema, 500: errorEnvelopeSchema } } }, async () => ok({ notes: await service.list() }))
   routes.post('/api/notes', { validatorCompiler: noteRouteValidatorCompiler, schema: { tags: ['notes'], summary: 'Create a versioned note', body: createNoteBodySchema, response: { 200: noteEnvelopeSchema, ...errors } } }, async (request) => ok({ note: await service.create(request.body) }))
   routes.patch('/api/notes/:id', { validatorCompiler: noteRouteValidatorCompiler, schema: { tags: ['notes'], summary: 'Edit a note and record its prior version', params: noteParamsSchema, body: notePatchBodySchema, response: { 200: noteEnvelopeSchema, ...errors } } }, async (request) => ok({ note: await service.update(request.params.id, request.body) }))
+  routes.post('/api/notes/:id/organize', { validatorCompiler: noteRouteValidatorCompiler, schema: { tags: ['notes'], summary: 'Apply selected persisted note suggestions', params: noteParamsSchema, body: noteOrganizeBodySchema, response: { 200: noteEnvelopeSchema, ...errors } } }, async (request) => ok({ note: await service.organize(request.params.id, request.body) }))
+  routes.post('/api/notes/:id/undo', { validatorCompiler: noteRouteValidatorCompiler, schema: { tags: ['notes'], summary: 'Restore the latest note snapshot with an undo trace', params: noteParamsSchema, body: noteUndoBodySchema, response: { 200: noteEnvelopeSchema, ...errors } } }, async (request) => ok({ note: await service.undo(request.params.id, request.body) }))
 }

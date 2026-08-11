@@ -2,7 +2,7 @@ import { AppError } from '../../common/errors/app-error.js'
 import type { Note } from '../../contracts/student-contracts.js'
 import type { StudentPrisma } from '../../db/client.js'
 import { toInputJson } from '../../db/json.js'
-import { applyNotePatch, hasLegacyVersionFields, normalizePersistedNote, sanitizeCreatedNote, sanitizeNotePatchCommand, NoteContractError } from './note-versions.js'
+import { applyNoteOrganization, applyNotePatch, hasLegacyVersionFields, normalizePersistedNote, sanitizeCreatedNote, sanitizeNoteOrganizeCommand, sanitizeNotePatchCommand, sanitizeNoteUndoCommand, undoLastNoteVersion, NoteContractError } from './note-versions.js'
 
 interface StoredNoteRow { id: string; studentId: string; version: number; updatedAtValue: Date; payload: unknown }
 
@@ -13,11 +13,18 @@ function noteNotFound(): never { throw new AppError('Note not found', 404, 'NOT_
 function duplicateNote(): never { throw new AppError('Note id already exists', 409, 'DUPLICATE_ID') }
 function contractError(cause: NoteContractError): never {
   const message = cause.code === 'INVALID_NOTE' ? 'Note contains invalid or non-JSON data'
-    : cause.code === 'INVALID_NOTE_PATCH' ? 'Note patch contains invalid fields' : 'Change metadata is invalid'
+    : cause.code === 'INVALID_NOTE_PATCH' ? 'Note patch contains invalid fields'
+      : cause.code === 'INVALID_NOTE_SUGGESTION' ? 'Selected note suggestion is invalid'
+        : 'Change metadata is invalid'
   throw new AppError(message, 400, cause.code)
 }
+function staleChange(): never { throw new AppError('Change timestamp must be later than the current note', 409, 'STALE_CHANGE') }
+function noVersion(): never { throw new AppError('There is no previous note version to restore', 409, 'NO_NOTE_VERSION') }
 function sameInstant(value: string, stored: Date): boolean {
   return Date.parse(value) === stored.getTime()
+}
+function isStrictlyLater(value: string, current: string): boolean {
+  return Date.parse(value) > Date.parse(current)
 }
 function parseStored(row: StoredNoteRow): Note {
   try {
@@ -94,6 +101,61 @@ export class NoteService {
         data: { version: updated.version, updatedAtValue: new Date(updated.updatedAt), payload: toInputJson(updated) },
       })
       return updated
+    })
+  }
+
+  async organize(noteId: string, rawCommand: unknown): Promise<Note> {
+    let command
+    try { command = sanitizeNoteOrganizeCommand(rawCommand) } catch (cause) {
+      if (cause instanceof NoteContractError) return contractError(cause)
+      throw cause
+    }
+    return this.prisma.$transaction(async (transaction) => {
+      const row = await transaction.note.findUnique({ where: { studentId_id: { studentId: this.studentId, id: noteId } } })
+      if (row === null) noteNotFound()
+      const note = parseStored(row)
+      if (!isStrictlyLater(command.changedAt, note.updatedAt)) staleChange()
+      let organized: Note
+      try { organized = applyNoteOrganization(note, command) } catch (cause) {
+        if (cause instanceof NoteContractError) return contractError(cause)
+        throw cause
+      }
+      if (organized === note) return note
+      const write = await transaction.note.updateMany({
+        where: { studentId: this.studentId, id: noteId, version: note.version },
+        data: { version: organized.version, updatedAtValue: new Date(organized.updatedAt), payload: toInputJson(organized) },
+      })
+      if (write.count !== 1) staleChange()
+      return organized
+    })
+  }
+
+  async undo(noteId: string, rawCommand: unknown): Promise<Note> {
+    let changedAt: string
+    try {
+      const command = sanitizeNoteUndoCommand(rawCommand)
+      changedAt = command.changedAt
+    } catch (cause) {
+      if (cause instanceof NoteContractError) return contractError(cause)
+      throw cause
+    }
+    return this.prisma.$transaction(async (transaction) => {
+      const row = await transaction.note.findUnique({ where: { studentId_id: { studentId: this.studentId, id: noteId } } })
+      if (row === null) noteNotFound()
+      const note = parseStored(row)
+      if (!isStrictlyLater(changedAt, note.updatedAt)) staleChange()
+      let undone: Note | null
+      try { undone = undoLastNoteVersion(note, changedAt) } catch (cause) {
+        if (cause instanceof NoteContractError) return contractError(cause)
+        throw cause
+      }
+      if (undone === null) noVersion()
+      const write = await transaction.note.updateMany({
+        where: { studentId: this.studentId, id: noteId, version: note.version },
+        data: { version: undone.version, updatedAtValue: new Date(undone.updatedAt), payload: toInputJson(undone) },
+      })
+      if (write.count !== 1) staleChange()
+      return undone
     })
   }
 }

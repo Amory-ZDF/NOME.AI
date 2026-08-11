@@ -580,10 +580,23 @@ export const noteBlockSchema = z.union([
   imageNoteBlockSchema,
 ])
 
-export const aiSuggestionSchema = safeStrictObject({
-  type: z.enum(['split_note', 'link_topic', 'related_content']),
-  message: nonEmptyString,
-})
+// These are persisted client suggestions only.  They deliberately describe no
+// model output or generation capability; organize consumes an id selected by
+// the client from this already-stored data.
+const aiSuggestionIdSchema = noteIdSchema.optional()
+const aiSuggestionMessageSchema = nonEmptyString.optional()
+export const aiSuggestionSchema = z.union([
+  safeStrictObject({ id: aiSuggestionIdSchema, type: z.enum(['split_note', 'related_content']), message: nonEmptyString }),
+  safeStrictObject({ id: aiSuggestionIdSchema, type: z.enum(['add_tag', 'tag']), message: aiSuggestionMessageSchema, tag: nonEmptyString }),
+  safeStrictObject({ id: aiSuggestionIdSchema, type: z.enum(['add_tag', 'tag']), message: aiSuggestionMessageSchema, value: nonEmptyString }),
+  safeStrictObject({ id: aiSuggestionIdSchema, type: z.enum(['append_content', 'content']), message: aiSuggestionMessageSchema, content: z.array(noteBlockSchema).min(1) }),
+  safeStrictObject({ id: aiSuggestionIdSchema, type: z.enum(['append_content', 'content']), message: aiSuggestionMessageSchema, blocks: z.array(noteBlockSchema).min(1) }),
+  safeStrictObject({ id: aiSuggestionIdSchema, type: z.literal('link_topic'), message: nonEmptyString }),
+  safeStrictObject({ id: aiSuggestionIdSchema, type: z.literal('link_topic'), message: aiSuggestionMessageSchema, topicId: nonEmptyString }),
+  safeStrictObject({ id: aiSuggestionIdSchema, type: z.literal('link_topic'), message: aiSuggestionMessageSchema, value: nonEmptyString }),
+  safeStrictObject({ id: aiSuggestionIdSchema, type: z.literal('link_error'), message: aiSuggestionMessageSchema, errorId: nonEmptyString }),
+  safeStrictObject({ id: aiSuggestionIdSchema, type: z.literal('link_error'), message: aiSuggestionMessageSchema, value: nonEmptyString }),
+])
 
 export const questionBlockSchema = safeStrictObject({
   id: nonEmptyString,
@@ -653,6 +666,17 @@ export const noteSchema = safeStrictObject(noteShape)
         })
       }
     })
+
+    const explicitSuggestionIds = value.aiSuggestions.flatMap((suggestion) => (
+      suggestion.id === undefined ? [] : [suggestion.id]
+    ))
+    if (new Set(explicitSuggestionIds).size !== explicitSuggestionIds.length) {
+      context.addIssue({
+        code: 'custom',
+        path: ['aiSuggestions'],
+        message: 'Explicit AI suggestion ids must be unique',
+      })
+    }
 
     const questionIds = new Set((value.questionBlocks ?? []).map(({ id }) => id))
     if (questionIds.size !== (value.questionBlocks ?? []).length) {
