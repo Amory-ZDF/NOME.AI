@@ -2,6 +2,7 @@ import {
   errorItemSchema,
   type ErrorItem,
   type RedoAttempt,
+  type VariantVerification,
 } from '../../contracts/student-contracts.js'
 
 function evidenceInstant(value: string): number {
@@ -120,4 +121,68 @@ export function applyRedoAttempt(
     variantVerifiedAt: null,
     variantVerification: null,
   })
+}
+
+function latestRedo(error: ErrorItem): RedoAttempt | undefined {
+  return error.redoHistory.reduce<RedoAttempt | undefined>((latest, candidate) => {
+    if (latest === undefined || evidenceInstant(candidate.attemptedAt) > evidenceInstant(latest.attemptedAt)) {
+      return candidate
+    }
+    return latest
+  }, undefined)
+}
+
+export function recordVariantVerification(
+  error: ErrorItem,
+  verification: VariantVerification,
+): ErrorItem | undefined {
+  const latest = latestRedo(error)
+  if (
+    error.status !== 'verification_due' ||
+    latest?.isCorrect !== true ||
+    error.verificationVariantId === null ||
+    verification.variantId !== error.verificationVariantId
+  ) {
+    return undefined
+  }
+
+  const verifiedAt = evidenceInstant(verification.verifiedAt)
+  if (verifiedAt < evidenceInstant(latest.attemptedAt)) return undefined
+
+  const previousVerificationInstants = [
+    ...(error.variantVerifiedAt === null ? [] : [error.variantVerifiedAt]),
+    ...(error.variantVerification === null ? [] : [error.variantVerification.verifiedAt]),
+  ].map(evidenceInstant)
+  if (
+    previousVerificationInstants.length > 0 &&
+    verifiedAt <= Math.max(...previousVerificationInstants)
+  ) {
+    return undefined
+  }
+
+  return errorItemSchema.parse({
+    ...structuredClone(error),
+    status: verification.isCorrect ? 'verification_due' : 'reviewing',
+    variantVerifiedAt: verification.isCorrect ? verification.verifiedAt : null,
+    variantVerification: structuredClone(verification),
+  })
+}
+
+export function canMarkMastered(error: ErrorItem): boolean {
+  if (error.status !== 'verification_due' && error.status !== 'mastered') return false
+  const latest = latestRedo(error)
+  if (latest?.isCorrect !== true || error.verificationVariantId === null) return false
+
+  const verification = error.variantVerification
+  if (
+    error.variantVerifiedAt === null ||
+    verification === null ||
+    verification.variantId !== error.verificationVariantId ||
+    verification.isCorrect !== true ||
+    verification.verifiedAt !== error.variantVerifiedAt
+  ) {
+    return false
+  }
+
+  return evidenceInstant(verification.verifiedAt) >= evidenceInstant(latest.attemptedAt)
 }

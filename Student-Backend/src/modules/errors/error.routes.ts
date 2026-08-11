@@ -7,6 +7,7 @@ import {
   errorIdSchema,
   errorItemSchema,
   redoAttemptSchema,
+  variantVerificationSchema,
 } from '../../contracts/student-contracts.js'
 import { errorBatchBodySchema } from './error-cards.js'
 import { ErrorService } from './error.service.js'
@@ -33,6 +34,10 @@ const redoEnvelopeSchema = z.strictObject({
   data: z.strictObject({
     error: errorItemSchema,
   }),
+})
+
+const masteryBodySchema = z.strictObject({
+  status: z.literal('mastered'),
 })
 
 export async function errorRoutes(
@@ -82,5 +87,48 @@ export async function errorRoutes(
       },
     },
     async (request) => ok(await service.addRedo(request.params.id, request.body)),
+  )
+
+  routes.post(
+    '/api/errors/:id/verification',
+    {
+      schema: {
+        tags: ['errors'],
+        summary: 'Record an independently persisted variant verification',
+        params: errorParamsSchema,
+        body: variantVerificationSchema,
+        response: {
+          200: redoEnvelopeSchema,
+          400: errorEnvelopeSchema,
+          404: errorEnvelopeSchema,
+          413: errorEnvelopeSchema,
+          415: errorEnvelopeSchema,
+          500: errorEnvelopeSchema,
+        },
+      },
+    },
+    async (request) => ok(await service.recordVerification(request.params.id, request.body)),
+  )
+
+  routes.patch(
+    '/api/errors/:id',
+    {
+      schema: {
+        tags: ['errors'],
+        summary: 'Mark an error mastered after its independent verification',
+        params: errorParamsSchema,
+        body: masteryBodySchema,
+        response: {
+          200: redoEnvelopeSchema,
+          400: errorEnvelopeSchema,
+          404: errorEnvelopeSchema,
+          409: errorEnvelopeSchema,
+          413: errorEnvelopeSchema,
+          415: errorEnvelopeSchema,
+          500: errorEnvelopeSchema,
+        },
+      },
+    },
+    async (request) => ok(await service.markMastered(request.params.id)),
   )
 }

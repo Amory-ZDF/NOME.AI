@@ -2,9 +2,13 @@ import { ZodError } from 'zod'
 
 import { AppError } from '../../common/errors/app-error.js'
 import {
+  exerciseSetSchema,
   redoAttemptSchema,
+  taskSchema,
   type ErrorItem,
   type RedoAttempt,
+  type VariantVerification,
+  variantVerificationSchema,
 } from '../../contracts/student-contracts.js'
 import type { StudentPrisma } from '../../db/client.js'
 import { toInputJson } from '../../db/json.js'
@@ -22,7 +26,12 @@ import {
   storedErrorPayload,
   type StoredErrorAggregate,
 } from './error-cards.js'
-import { applyRedoAttempt, RedoChronologyError } from './mastery.js'
+import {
+  applyRedoAttempt,
+  canMarkMastered,
+  recordVariantVerification,
+  RedoChronologyError,
+} from './mastery.js'
 
 interface StoredErrorRow {
   id: string
@@ -30,6 +39,23 @@ interface StoredErrorRow {
   questionId: string
   status: string
   lastOccurredAt: Date
+  payload: unknown
+}
+
+interface StoredExerciseSetRow {
+  id: string
+  studentId: string
+  taskId: string | null
+  kind: string
+  payload: unknown
+}
+
+interface StoredTaskRow {
+  id: string
+  studentId: string
+  type: string
+  status: string
+  dueAt: Date | null
   payload: unknown
 }
 
@@ -74,6 +100,22 @@ function occurrenceConflict(): never {
 
 function invalidRecurrence(message: string): never {
   throw new AppError(message, 400, 'INVALID_INPUT')
+}
+
+function invalidVerification(): never {
+  throw new AppError('Verification result is invalid or out of order', 400, 'INVALID_INPUT')
+}
+
+function invalidVerificationProvenance(): never {
+  throw new AppError('Verification variant provenance is invalid', 400, 'INVALID_INPUT')
+}
+
+function masteryGateNotMet(): never {
+  throw new AppError(
+    'Complete the independent variant before marking this mastered',
+    409,
+    'MASTERY_GATE_NOT_MET',
+  )
 }
 
 function isErrorItemCreateUniqueViolation(cause: unknown): boolean {
@@ -152,6 +194,89 @@ function parseStoredError(row: StoredErrorRow, studentId: string): StoredErrorAg
   } catch (cause) {
     if (cause instanceof AppError) throw cause
     return storedDataInvalid(new Error('Invalid stored error', { cause }))
+  }
+}
+
+function sameNullableInstant(value: string | null, stored: Date | null): boolean {
+  if (value === null || stored === null) return value === null && stored === null
+  return Date.parse(value) === stored.getTime()
+}
+
+function parseStoredExerciseSet(row: StoredExerciseSetRow, studentId: string) {
+  try {
+    const set = exerciseSetSchema.parse(row.payload)
+    if (
+      row.studentId !== studentId ||
+      row.kind !== 'task' ||
+      set.id !== row.id ||
+      set.taskId !== row.taskId
+    ) {
+      return storedDataInvalid(new Error('Stored exercise set metadata mismatch'))
+    }
+    return set
+  } catch (cause) {
+    if (cause instanceof AppError) throw cause
+    return storedDataInvalid(new Error('Invalid stored exercise set', { cause }))
+  }
+}
+
+function parseStoredTask(row: StoredTaskRow, studentId: string) {
+  try {
+    const task = taskSchema.parse(row.payload)
+    if (
+      row.studentId !== studentId ||
+      task.id !== row.id ||
+      task.type !== row.type ||
+      task.status !== row.status ||
+      !sameNullableInstant(task.dueAt, row.dueAt)
+    ) {
+      return storedDataInvalid(new Error('Stored task metadata mismatch'))
+    }
+    return task
+  } catch (cause) {
+    if (cause instanceof AppError) throw cause
+    return storedDataInvalid(new Error('Invalid stored task', { cause }))
+  }
+}
+
+async function assertVerificationProvenance(
+  transaction: Prisma.TransactionClient,
+  studentId: string,
+  error: ErrorItem,
+  verification: VariantVerification,
+): Promise<void> {
+  if (error.verificationVariantId === null || verification.variantId !== error.verificationVariantId) {
+    invalidVerificationProvenance()
+  }
+
+  const setRow = await transaction.exerciseSet.findUnique({
+    where: { studentId_id: { studentId, id: verification.variantId } },
+  })
+  if (setRow === null) invalidVerificationProvenance()
+  const set = parseStoredExerciseSet(setRow, studentId)
+  const variantQuestions = set.questions.filter(({ variantOf }) => variantOf !== undefined)
+  if (
+    set.sourceQuestionId !== error.questionId ||
+    set.taskId === null ||
+    variantQuestions.length !== 1 ||
+    variantQuestions[0]?.variantOf !== error.questionId
+  ) {
+    invalidVerificationProvenance()
+  }
+
+  const taskRows = await transaction.task.findMany({
+    where: { studentId, id: set.taskId },
+    take: 2,
+  })
+  if (taskRows.length !== 1) invalidVerificationProvenance()
+  const task = parseStoredTask(taskRows[0]!, studentId)
+  if (
+    task.id !== set.taskId ||
+    task.exerciseSetId !== set.id ||
+    task.sourceQuestionId !== error.questionId ||
+    task.verificationForErrorId !== error.id
+  ) {
+    invalidVerificationProvenance()
   }
 }
 
@@ -323,6 +448,58 @@ export class ErrorService {
         },
       })
       return { error: parseStoredError(updated, this.studentId).error }
+    })
+  }
+
+  async recordVerification(
+    errorId: string,
+    rawVerification: VariantVerification,
+  ): Promise<{ error: ErrorItem }> {
+    const verification = variantVerificationSchema.parse(rawVerification)
+    return runWithTransactionRetry(() => this.recordVerificationTransaction(errorId, verification))
+  }
+
+  private async recordVerificationTransaction(
+    errorId: string,
+    verification: VariantVerification,
+  ): Promise<{ error: ErrorItem }> {
+    return this.prisma.$transaction(async (transaction) => {
+      const row = await transaction.errorItem.findUnique({
+        where: { studentId_id: { studentId: this.studentId, id: errorId } },
+      })
+      if (row === null) errorNotFound()
+      const current = parseStoredError(row, this.studentId)
+      await assertVerificationProvenance(transaction, this.studentId, current.error, verification)
+      const error = recordVariantVerification(current.error, verification)
+      if (error === undefined) invalidVerification()
+
+      await transaction.errorItem.update({
+        where: { studentId_id: { studentId: this.studentId, id: errorId } },
+        data: errorWrite({ ...current, error }),
+      })
+      return { error }
+    })
+  }
+
+  async markMastered(errorId: string): Promise<{ error: ErrorItem }> {
+    return runWithTransactionRetry(() => this.markMasteredTransaction(errorId))
+  }
+
+  private async markMasteredTransaction(errorId: string): Promise<{ error: ErrorItem }> {
+    return this.prisma.$transaction(async (transaction) => {
+      const row = await transaction.errorItem.findUnique({
+        where: { studentId_id: { studentId: this.studentId, id: errorId } },
+      })
+      if (row === null) errorNotFound()
+      const current = parseStoredError(row, this.studentId)
+      if (!canMarkMastered(current.error)) masteryGateNotMet()
+      const error = { ...current.error, status: 'mastered' as const }
+
+      await transaction.errorItem.update({
+        where: { studentId_id: { studentId: this.studentId, id: errorId } },
+        data: errorWrite({ ...current, error }),
+      })
+      return { error }
     })
   }
 }
