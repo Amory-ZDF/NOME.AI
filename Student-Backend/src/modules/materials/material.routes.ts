@@ -12,7 +12,7 @@ import {
   noteBlockSchema,
   noteSchema,
   questionBlockSchema,
-  sessionIdSchema,
+  materialJobIdSchema,
 } from '../../contracts/student-contracts.js'
 import { ALLOWED_MIME_TYPES, MAX_FILE_BYTES } from './material-rules.js'
 import { MaterialService } from './material.service.js'
@@ -24,7 +24,7 @@ interface MaterialRoutesOptions {
 }
 
 const uploadBodySchema = z.strictObject({
-  id: sessionIdSchema.optional(),
+  id: materialJobIdSchema.optional(),
   fileName: z.string().min(1),
   mimeType: z.enum(ALLOWED_MIME_TYPES),
   size: z.number().nonnegative().max(MAX_FILE_BYTES),
@@ -34,7 +34,7 @@ const uploadBodySchema = z.strictObject({
   chapter: z.string().min(1).optional(),
   createdAt: isoDateTimeSchema.meta({ format: 'date-time' }).optional(),
 })
-const materialParamsSchema = z.strictObject({ id: sessionIdSchema })
+const materialParamsSchema = z.strictObject({ id: materialJobIdSchema })
 const confirmationBodySchema = z.strictObject({
   suggestedTitle: z.string().min(1).optional(),
   materialType: materialTypeSchema.optional(),

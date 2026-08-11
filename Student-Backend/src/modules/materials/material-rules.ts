@@ -1,7 +1,7 @@
 import { AppError } from '../../common/errors/app-error.js'
 import { isProxy } from 'node:util/types'
 import { cloneSafeJson, type JsonValue } from '../../common/json/safe-json.js'
-import { isoDateTimeSchema, materialTypeSchema, sessionIdSchema } from '../../contracts/student-contracts.js'
+import { isoDateTimeSchema, materialJobIdSchema, materialTypeSchema } from '../../contracts/student-contracts.js'
 
 export const MATERIAL_TYPES = [
   'class_note', 'teacher_material', 'homework', 'past_paper', 'mock_paper',
@@ -61,7 +61,7 @@ function nonBlankString(value: JsonValue | undefined): value is string {
 }
 
 function validateId(value: JsonValue | undefined): string {
-  if (typeof value !== 'string' || isRawCarrier(value) || !sessionIdSchema.safeParse(value).success) invalidMetadata()
+  if (typeof value !== 'string' || !materialJobIdSchema.safeParse(value).success) invalidMetadata()
   return value
 }
 

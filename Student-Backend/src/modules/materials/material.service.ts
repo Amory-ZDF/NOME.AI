@@ -15,7 +15,7 @@ import {
   parseMaterialClassificationPatch,
   parseMaterialMetadata,
 } from './material-rules.js'
-import { sessionIdSchema } from '../../contracts/student-contracts.js'
+import { materialJobIdSchema } from '../../contracts/student-contracts.js'
 import { Prisma } from '../../generated/prisma/client.js'
 
 type Clock = () => Date
@@ -70,7 +70,7 @@ function readClock(clock: Clock): string {
 function readId(factory: IdFactory): string {
   try {
     const id = factory()
-    if (typeof id !== 'string' || /^(?:data|base64|raw):/iu.test(id.trim()) || /;base64,/iu.test(id) || !sessionIdSchema.safeParse(id).success) {
+    if (typeof id !== 'string' || !materialJobIdSchema.safeParse(id).success) {
       throw new TypeError('Invalid generated id')
     }
     return id

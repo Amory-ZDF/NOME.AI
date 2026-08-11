@@ -37,6 +37,18 @@ export const sessionIdSchema = z
 export const errorIdSchema = sessionIdSchema
 export const noteIdSchema = sessionIdSchema
 
+// Confirmation deterministically creates `note-${jobId}`. Keep upload ids
+// within the Note id's public 100-character contract before persistence.
+export const materialJobIdSchema = z
+  .string()
+  .min(1)
+  .max(95)
+  .refine((value) => value.trim().length > 0, { message: 'Must not be blank' })
+  .refine((value) => !/[\u0000-\u001f\u007f]/u.test(value), {
+    message: 'Control characters are not allowed',
+  })
+  .refine((value) => !isRawCarrier(value), { message: 'Raw carriers are not allowed' })
+
 function isCalendarDate(value: string): boolean {
   const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value)
   if (match === null) return false
@@ -770,7 +782,7 @@ export const materialFailureSchema = safeStrictObject({
 })
 
 export const materialUploadJobSchema = safeStrictObject({
-    id: nonEmptyString,
+    id: materialJobIdSchema,
     fileName: nonEmptyString,
     mimeType: z.enum([
       'application/pdf',
