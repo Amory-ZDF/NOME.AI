@@ -14,10 +14,12 @@ import { installErrorHandlers } from './common/http/error-handler.js'
 import { ok } from './common/http/envelope.js'
 import { serializeError } from './common/logging/error-serializer.js'
 import type { Env } from './config/env.js'
+import type { StudentPrisma } from './db/client.js'
 
 interface BuildAppOptions {
   env: Env
   loggerStream?: { write(message: string): void }
+  prisma: StudentPrisma
 }
 
 const corsMethods = ['GET', 'HEAD', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS']
@@ -30,7 +32,7 @@ const healthEnvelopeSchema = z.object({
   }),
 })
 
-export function buildApp({ env, loggerStream }: BuildAppOptions) {
+export function buildApp({ env, loggerStream, prisma }: BuildAppOptions) {
   const app = Fastify({
     logger: {
       level: env.LOG_LEVEL,
@@ -65,6 +67,8 @@ export function buildApp({ env, loggerStream }: BuildAppOptions) {
       },
     },
   }).withTypeProvider<ZodTypeProvider>()
+
+  app.decorate('prisma', prisma)
 
   app.setValidatorCompiler(validatorCompiler)
   app.setSerializerCompiler(serializerCompiler)

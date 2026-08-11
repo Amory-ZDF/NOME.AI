@@ -1,17 +1,20 @@
 import type { ZodTypeProvider } from 'fastify-type-provider-zod'
-import { afterEach, describe, expect, expectTypeOf, it } from 'vitest'
+import { afterAll, afterEach, describe, expect, expectTypeOf, it } from 'vitest'
 import { z } from 'zod'
 
 import { buildApp } from '../../src/app.js'
 import { AppError } from '../../src/common/errors/app-error.js'
 import { parseEnv } from '../../src/config/env.js'
+import { createPrisma } from '../../src/db/client.js'
 
 const testEnv = parseEnv({
   NODE_ENV: 'test',
-  DATABASE_URL: 'file:./foundation-test.db',
+  DATABASE_URL: 'file:./prisma/test.db',
   CORS_ORIGINS: 'https://student.example.com',
   LOG_LEVEL: 'silent',
 })
+
+const foundationPrisma = createPrisma(testEnv.DATABASE_URL)
 
 const openApps: Array<ReturnType<typeof buildApp>> = []
 
@@ -21,6 +24,7 @@ function createApp(loggerStream?: { write(message: string): void }) {
       ...testEnv,
       LOG_LEVEL: loggerStream === undefined ? 'silent' : 'error',
     },
+    prisma: foundationPrisma,
     ...(loggerStream === undefined ? {} : { loggerStream }),
   })
   openApps.push(app)
@@ -61,6 +65,10 @@ function registerStrictBodyRoute(
 
 afterEach(async () => {
   await Promise.all(openApps.splice(0).map((app) => app.close()))
+})
+
+afterAll(async () => {
+  await foundationPrisma.$disconnect()
 })
 
 describe('Fastify application foundation', () => {

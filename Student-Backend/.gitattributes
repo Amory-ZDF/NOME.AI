@@ -1,0 +1,2 @@
+# Prisma 7.9 emits generated documentation with intentional trailing spaces.
+src/generated/prisma/** -whitespace

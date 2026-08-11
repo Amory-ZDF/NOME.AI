@@ -1,0 +1,141 @@
+generator client {
+  provider     = "prisma-client"
+  output       = "../src/generated/prisma"
+  moduleFormat = "esm"
+}
+
+datasource db {
+  provider = "sqlite"
+}
+
+model Student {
+  id                 String              @id
+  name               String
+  avatar             String?
+  joinedDays         Int
+  gradeInfo          String
+  greeting           Json
+  moduleStats        Json
+  learningSummary    Json
+  tasks              Task[]
+  taskAdjustments    TaskAdjustment[]
+  exerciseSets       ExerciseSet[]
+  sessions           Session[]
+  errors             ErrorItem[]
+  notes              Note[]
+  noteFolders        NoteFolder[]
+  materialUploadJobs MaterialUploadJob[]
+  settings           StudentSettings?
+}
+
+model Task {
+  id          String
+  studentId   String
+  type        String
+  status      String
+  dueAt       DateTime?
+  payload     Json
+  student     Student          @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  adjustments TaskAdjustment[]
+  sessions    Session[]
+
+  @@id([studentId, id])
+  @@index([studentId, status, dueAt], map: "Student_Task_status_due_idx")
+  @@index([studentId, type, status], map: "Student_Task_type_status_idx")
+}
+
+model TaskAdjustment {
+  id        String
+  studentId String
+  taskId    String
+  status    String
+  createdAt DateTime
+  payload   Json
+  student   Student  @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  task      Task     @relation(fields: [studentId, taskId], references: [studentId, id], onDelete: Cascade)
+
+  @@id([studentId, id])
+  @@index([studentId, taskId, status], map: "Student_TaskAdjustment_task_status_idx")
+  @@index([studentId, status, createdAt], map: "Student_TaskAdjustment_status_created_idx")
+}
+
+model ExerciseSet {
+  id        String
+  studentId String
+  taskId    String?
+  kind      String
+  payload   Json
+  student   Student @relation(fields: [studentId], references: [id], onDelete: Cascade)
+
+  @@id([studentId, id])
+  @@index([studentId, kind], map: "Student_Exercise_kind_idx")
+  @@index([studentId, taskId], map: "Student_Exercise_task_idx")
+}
+
+model Session {
+  id          String
+  studentId   String
+  taskId      String
+  submittedAt DateTime
+  payload     Json
+  student     Student  @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  task        Task     @relation(fields: [studentId, taskId], references: [studentId, id], onDelete: Cascade)
+
+  @@id([studentId, id])
+  @@index([studentId, taskId, submittedAt], map: "Student_Session_task_submitted_idx")
+}
+
+model ErrorItem {
+  id             String
+  studentId      String
+  questionId     String
+  status         String
+  lastOccurredAt DateTime
+  payload        Json
+  student        Student  @relation(fields: [studentId], references: [id], onDelete: Cascade)
+
+  @@id([studentId, id])
+  @@unique([studentId, questionId], map: "Student_Error_question_key")
+  @@index([studentId, status, lastOccurredAt], map: "Student_Error_status_last_idx")
+}
+
+model Note {
+  id             String
+  studentId      String
+  version        Int
+  updatedAtValue DateTime
+  payload        Json
+  student        Student  @relation(fields: [studentId], references: [id], onDelete: Cascade)
+
+  @@id([studentId, id])
+  @@index([studentId, updatedAtValue], map: "Student_Note_updated_idx")
+}
+
+model NoteFolder {
+  id        String
+  studentId String
+  parentId  String?
+  payload   Json
+  student   Student @relation(fields: [studentId], references: [id], onDelete: Cascade)
+
+  @@id([studentId, id])
+  @@index([studentId, parentId], map: "Student_NoteFolder_parent_idx")
+}
+
+model MaterialUploadJob {
+  id             String
+  studentId      String
+  status         String
+  createdAtValue DateTime
+  payload        Json
+  student        Student  @relation(fields: [studentId], references: [id], onDelete: Cascade)
+
+  @@id([studentId, id])
+  @@index([studentId, status, createdAtValue], map: "Student_Material_status_created_idx")
+}
+
+model StudentSettings {
+  studentId String  @id
+  payload   Json
+  student   Student @relation(fields: [studentId], references: [id], onDelete: Cascade)
+}
