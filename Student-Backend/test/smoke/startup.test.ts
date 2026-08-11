@@ -26,11 +26,8 @@ function sanitize(value: string, databaseUrl: string, secret: string): string {
 }
 
 function waitForClose(child: ChildProcess, label: string): Promise<{ code: number | null; signal: NodeJS.Signals | null }> {
+  if (child.exitCode !== null || child.signalCode !== null) return Promise.resolve({ code: child.exitCode, signal: child.signalCode })
   return new Promise((resolvePromise, reject) => {
-    const timeout = setTimeout(() => {
-      cleanup()
-      reject(new Error(`Timed out waiting for ${label} to close`))
-    }, timeoutMilliseconds)
     const onClose = (code: number | null, signal: NodeJS.Signals | null) => {
       cleanup()
       resolvePromise({ code, signal })
@@ -40,7 +37,6 @@ function waitForClose(child: ChildProcess, label: string): Promise<{ code: numbe
       reject(error)
     }
     const cleanup = () => {
-      clearTimeout(timeout)
       child.removeListener('close', onClose)
       child.removeListener('error', onError)
     }
@@ -49,20 +45,21 @@ function waitForClose(child: ChildProcess, label: string): Promise<{ code: numbe
   })
 }
 
-async function terminateAndWait(child: ChildProcess, label: string): Promise<void> {
-  if (child.exitCode !== null) return
-  const terminated = waitForClose(child, `${label} after SIGTERM`)
+async function boundedClose(close: Promise<{ code: number | null; signal: NodeJS.Signals | null }>, label: string) {
+  return await Promise.race([close, new Promise<never>((_, reject) => setTimeout(() => reject(new Error(`Timed out waiting for ${label} to close`)), timeoutMilliseconds))])
+}
+
+async function terminateAndWait(child: ChildProcess, close: Promise<{ code: number | null; signal: NodeJS.Signals | null }>, label: string): Promise<void> {
+  if (child.exitCode !== null || child.signalCode !== null) { await close; return }
   child.kill('SIGTERM')
   try {
-    await terminated
+    await boundedClose(close, `${label} after SIGTERM`)
     return
-  } catch {
-    if (child.exitCode !== null) return
+  } catch (termError) {
+    if (child.exitCode !== null || child.signalCode !== null) { await close; return }
+    child.kill('SIGKILL')
+    try { await boundedClose(close, `${label} after SIGKILL`) } catch (killError) { throw new AggregateError([termError, killError], `${label} cleanup failed`) }
   }
-
-  const killed = waitForClose(child, `${label} after SIGKILL`)
-  child.kill('SIGKILL')
-  await killed
 }
 
 async function reservePort(): Promise<number> {
@@ -94,7 +91,7 @@ async function command(
     const result = await close
     if (result.code !== 0) throw new Error(`exited with ${result.code ?? result.signal}`)
   } catch (error) {
-    await terminateAndWait(child, `${executable} ${args.join(' ')}`).catch(() => undefined)
+    await terminateAndWait(child, close, `${executable} ${args.join(' ')}`)
     throw new Error(`Command failed (${executable} ${args.join(' ')}):\n${sanitize(`${error instanceof Error ? error.message : String(error)}\n${output}`, databaseUrl, secret)}`)
   } finally {
     child.stdout.removeListener('data', appendOutput)
@@ -127,10 +124,10 @@ async function waitForHealth(port: number, child: ChildProcess, databaseUrl: str
 }
 
 async function sendPlatformShutdownSignal(child: ChildProcess): Promise<void> {
-  await new Promise<void>((resolvePromise, reject) => {
+  await Promise.race([new Promise<void>((resolvePromise, reject) => {
     if (child.connected !== true || child.send === undefined) return reject(new Error('Production signal bridge is unavailable'))
     child.send('SIGTERM', (error) => error === null || error === undefined ? resolvePromise() : reject(error))
-  })
+  }), new Promise<never>((_, reject) => setTimeout(() => reject(new Error('Timed out sending production signal')), timeoutMilliseconds))])
 }
 
 describe('compiled production server startup', () => {
@@ -140,7 +137,7 @@ describe('compiled production server startup', () => {
   afterEach(async () => {
     await Promise.all([...activeChildren].map(async (child) => {
       activeChildren.delete(child)
-      await terminateAndWait(child, 'production server cleanup').catch(() => undefined)
+      await terminateAndWait(child, waitForClose(child, 'production server cleanup'), 'production server cleanup')
     }))
     await Promise.all(temporaryPaths.splice(0).map(async (temporaryPath) => rm(assertInsideSmokeRoot(temporaryPath), { recursive: true, force: true })))
     try {
@@ -160,6 +157,7 @@ describe('compiled production server startup', () => {
     const port = await reservePort()
     const environment = { ...process.env, NODE_ENV: 'production', HOST: '127.0.0.1', PORT: String(port), DATABASE_URL: databaseUrl, STUDENT_ID: 'smoke-student', CORS_ORIGINS: 'http://smoke.test', LOG_LEVEL: 'silent', SMOKE_SECRET: secret }
     let child: ChildProcess | undefined
+    let serverClose: Promise<{ code: number | null; signal: NodeJS.Signals | null }> | undefined
     let output = ''
     let closeResult: { code: number | null; signal: NodeJS.Signals | null } | undefined
 
@@ -179,6 +177,7 @@ describe('compiled production server startup', () => {
         windowsHide: true,
       })
       activeChildren.add(child)
+      serverClose = waitForClose(child, 'compiled production server')
       child.stdout?.on('data', (chunk: Buffer) => { output += chunk.toString() })
       child.stderr?.on('data', (chunk: Buffer) => { output += chunk.toString() })
 
@@ -187,9 +186,8 @@ describe('compiled production server startup', () => {
       expect(health.headers.get('access-control-allow-origin')).toBe('http://smoke.test')
       await expect(health.json()).resolves.toStrictEqual({ code: 0, message: 'ok', data: { status: 'ok' } })
 
-      const close = waitForClose(child, 'compiled production server')
       await Promise.all([sendPlatformShutdownSignal(child), sendPlatformShutdownSignal(child)])
-      closeResult = await close
+      closeResult = await boundedClose(serverClose, 'compiled production server')
       expect(closeResult).toStrictEqual({ code: 0, signal: null })
       expect(output).not.toContain(databaseUrl)
       expect(output).not.toContain(secret)
@@ -198,7 +196,7 @@ describe('compiled production server startup', () => {
       if (child !== undefined) {
         child.stdout?.removeAllListeners('data')
         child.stderr?.removeAllListeners('data')
-        if (closeResult === undefined) await terminateAndWait(child, 'production server cleanup').catch(() => undefined)
+        if (closeResult === undefined) await terminateAndWait(child, serverClose ?? waitForClose(child, 'production server cleanup'), 'production server cleanup')
         activeChildren.delete(child)
       }
       await rm(dirname(databasePath), { recursive: true, force: true })
