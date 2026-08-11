@@ -32,6 +32,10 @@ export const sessionIdSchema = z
     message: 'Control characters are not allowed',
   })
 
+// Error ids are public route parameters as well as persisted client ids. Keep
+// their ingress boundary identical to the router's reachable parameter limit.
+export const errorIdSchema = sessionIdSchema
+
 function isCalendarDate(value: string): boolean {
   const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value)
   if (match === null) return false
@@ -323,7 +327,7 @@ export const occurrenceRecordSchema = safeStrictObject({
 })
 
 export const errorItemSchema = safeStrictObject({
-    id: nonEmptyString,
+    id: errorIdSchema,
     questionId: nonEmptyString,
     sessionId: nullableNonEmptyString,
     subject: nonEmptyString,
@@ -1028,6 +1032,8 @@ export type ExerciseSet = z.infer<typeof exerciseSetSchema>
 export type Session = z.infer<typeof sessionSchema>
 export type SessionQuestion = z.infer<typeof sessionQuestionSchema>
 export type ErrorItem = z.infer<typeof errorItemSchema>
+export type RedoAttempt = z.infer<typeof redoAttemptSchema>
+export type VariantVerification = z.infer<typeof variantVerificationSchema>
 export type Note = z.infer<typeof noteSchema>
 export type NoteFolder = z.infer<typeof noteFolderSchema>
 export type MaterialUploadJob = z.infer<typeof materialUploadJobSchema>
