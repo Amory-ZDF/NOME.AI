@@ -87,6 +87,15 @@ describe('PATCH /api/notes/{id}', () => {
     await expect(prisma.note.count()).resolves.toBe(0)
   })
 
+  it('rejects an empty patch with the domain metadata error and zero writes', async () => {
+    await insertStudent(); await insertNote(); const before = await prisma.note.findUnique({ where: { studentId_id: { studentId, id: original.id } } }); const app = createApp()
+    const response = await app.inject({ method: 'PATCH', url: `/api/notes/${original.id}`, payload: {} })
+    await app.close()
+    expect(response.statusCode).toBe(400)
+    expect(response.json()).toEqual({ code: 'INVALID_CHANGE_METADATA', message: 'Change metadata is invalid', data: null })
+    await expect(prisma.note.findUnique({ where: { studentId_id: { studentId, id: original.id } } })).resolves.toEqual(before)
+  })
+
   it('cannot read or mutate another student note and keeps its payload byte-equivalent', async () => {
     const other = 'student-note-other'
     await insertStudent(); await insertStudent(other)

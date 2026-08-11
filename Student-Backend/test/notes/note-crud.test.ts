@@ -197,6 +197,14 @@ describe('notes create and list', () => {
     ['missing answer question', { ...note('schema-answer'), questionBlocks: [], answerBlocks: [{ id: 'a', questionId: 'missing', text: 'answer' }] }],
   ])('direct noteCreateSchema rejects %s', (_label, invalid) => expect(noteCreateSchema.safeParse(invalid).success).toBe(false))
 
+  it('rejects an enumerable accessor without invoking it', () => {
+    let calls = 0
+    const value = note('schema-accessor')
+    Object.defineProperty(value, 'title', { enumerable: true, get: () => { calls += 1; return 'unsafe' } })
+    expect(noteCreateSchema.safeParse(value).success).toBe(false)
+    expect(calls).toBe(0)
+  })
+
   it('migrates a valid legacy note once during GET without touching a different student', async () => {
     await insertStudent(); await insertStudent(otherStudentId)
     const legacy = note('legacy-note')
