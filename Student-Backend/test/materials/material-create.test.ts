@@ -212,6 +212,27 @@ describe('POST /api/material-uploads', () => {
     await app.close()
   })
 
+  it('rejects a hostile proxy before any JavaScript trap while retaining nonfinite size classification', () => {
+    const counters = { descriptor: 0, prototype: 0, keys: 0, get: 0 }
+    const hostile = new Proxy(metadata({ id: 'hostile-proxy' }), {
+      getOwnPropertyDescriptor() { counters.descriptor += 1; throw new Error('descriptor trap') },
+      getPrototypeOf() { counters.prototype += 1; throw new Error('prototype trap') },
+      ownKeys() { counters.keys += 1; throw new Error('keys trap') },
+      get() { counters.get += 1; throw new Error('get trap') },
+    })
+    expect(() => parseMaterialMetadata(hostile)).toThrow(/Upload metadata contains invalid fields/)
+    expect(counters).toEqual({ descriptor: 0, prototype: 0, keys: 0, get: 0 })
+
+    let accessorReads = 0
+    const accessor = Object.defineProperty(metadata({ id: 'accessor-safe' }), 'subject', {
+      enumerable: true, get: () => { accessorReads += 1; return 'Math' },
+    })
+    expect(() => parseMaterialMetadata(accessor)).toThrow(/Upload metadata contains invalid fields/)
+    expect(accessorReads).toBe(0)
+    expect(() => parseMaterialMetadata(metadata({ id: 'nan-size', size: Number.NaN }))).toThrow(/File must be 20 MB or smaller/)
+    expect(() => parseMaterialMetadata(metadata({ id: 'infinite-size', size: Infinity }))).toThrow(/File must be 20 MB or smaller/)
+  })
+
   it('keeps duplicate ids stable and student-scoped under concurrent creation', async () => {
     await insertStudent()
     await insertStudent(otherStudentId)

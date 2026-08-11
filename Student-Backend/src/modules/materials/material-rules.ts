@@ -1,4 +1,5 @@
 import { AppError } from '../../common/errors/app-error.js'
+import { isProxy } from 'node:util/types'
 import { cloneSafeJson, type JsonValue } from '../../common/json/safe-json.js'
 import { isoDateTimeSchema, materialTypeSchema, sessionIdSchema } from '../../contracts/student-contracts.js'
 
@@ -75,6 +76,7 @@ function validateTimestamp(value: JsonValue | undefined): string {
 
 /** Takes a descriptor-safe clone before selecting metadata fields. */
 export function parseMaterialMetadata(input: unknown): MaterialMetadata {
+  if (typeof input === 'object' && input !== null && isProxy(input)) invalidMetadata()
   if (hasNonFiniteOwnSize(input)) tooLarge()
   let source: JsonValue
   try {
