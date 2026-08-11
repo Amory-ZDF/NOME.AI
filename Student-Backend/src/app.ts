@@ -17,11 +17,13 @@ import type { Env } from './config/env.js'
 import type { StudentPrisma } from './db/client.js'
 import { bootstrapRoutes } from './modules/bootstrap/bootstrap.routes.js'
 import { settingsRoutes } from './modules/settings/settings.routes.js'
+import { taskRoutes } from './modules/tasks/task.routes.js'
 
 interface BuildAppOptions {
   env: Env
   loggerStream?: { write(message: string): void }
   prisma: StudentPrisma
+  now?: () => Date
 }
 
 const corsMethods = ['GET', 'HEAD', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS']
@@ -34,7 +36,7 @@ const healthEnvelopeSchema = z.object({
   }),
 })
 
-export function buildApp({ env, loggerStream, prisma }: BuildAppOptions) {
+export function buildApp({ env, loggerStream, prisma, now = () => new Date() }: BuildAppOptions) {
   const app = Fastify({
     logger: {
       level: env.LOG_LEVEL,
@@ -112,6 +114,7 @@ export function buildApp({ env, loggerStream, prisma }: BuildAppOptions) {
 
   app.register(bootstrapRoutes, { studentId: env.STUDENT_ID })
   app.register(settingsRoutes, { studentId: env.STUDENT_ID })
+  app.register(taskRoutes, { studentId: env.STUDENT_ID, now })
 
   return app
 }
