@@ -3,6 +3,7 @@ import { afterAll, beforeEach, describe, expect, it } from 'vitest'
 import { buildApp } from '../../src/app.js'
 import { parseEnv } from '../../src/config/env.js'
 import { toInputJson } from '../../src/db/json.js'
+import type { Prisma } from '../../src/generated/prisma/client.js'
 import {
   createTestPrisma,
   resetDatabase,
@@ -424,6 +425,35 @@ describe('GET /api/student/bootstrap', () => {
     expect(serialized).not.toContain('Other')
   })
 
+  it('returns every independently valid session when the trusted aggregate exceeds one payload budget', async () => {
+    await insertStudentFixture(primaryStudentId, 'Primary')
+    await prisma.session.deleteMany({ where: { studentId: primaryStudentId } })
+    const sessions = Array.from({ length: 200 }, (_, index) => {
+      const id = `bulk-session-${String(index).padStart(3, '0')}`
+      return session(id, 'task-a')
+    })
+    await prisma.session.createMany({
+      data: sessions.map((value) => ({
+        id: value.sessionId,
+        studentId: primaryStudentId,
+        taskId: value.taskId,
+        submittedAt: new Date(value.completedAt),
+        payload: toInputJson(value),
+      })),
+    })
+    const app = createApp()
+
+    const response = await app.inject({ method: 'GET', url: '/api/student/bootstrap' })
+    await app.close()
+
+    expect(response.statusCode).toBe(200)
+    const data = response.json().data
+    expect(Object.keys(data)).toHaveLength(14)
+    expect(Object.keys(data.sessions).sort()).toEqual(
+      sessions.map(({ sessionId }) => sessionId).sort(),
+    )
+  })
+
   it('returns 404 for a missing configured student without creating one', async () => {
     const app = createApp('missing-student')
 
@@ -457,6 +487,29 @@ describe('GET /api/student/bootstrap', () => {
       data: null,
     })
     expect(response.body).not.toMatch(/Zod|payload|expected|stack/i)
+  })
+
+  it('keeps the per-payload safety budget for a single oversized stored item', async () => {
+    await insertStudentFixture(primaryStudentId, 'Primary')
+    const oversizedPayload = {
+      ...task('task-a', 'Oversized task', 'completed'),
+      topicIds: Array.from({ length: 5_001 }, (_, index) => `topic-${index}`),
+    } as Prisma.InputJsonValue
+    await prisma.task.update({
+      where: { studentId_id: { studentId: primaryStudentId, id: 'task-a' } },
+      data: { payload: oversizedPayload },
+    })
+    const app = createApp()
+
+    const response = await app.inject({ method: 'GET', url: '/api/student/bootstrap' })
+    await app.close()
+
+    expect(response.statusCode).toBe(500)
+    expect(response.json()).toEqual({
+      code: 'STORED_DATA_INVALID',
+      message: 'Stored student data is invalid',
+      data: null,
+    })
   })
 
   it.each([
@@ -559,13 +612,26 @@ describe('GET /api/student/bootstrap', () => {
       .toMatchObject({ dueAt: '2026-08-20T13:00:00.000+01:00' })
   })
 
-  it('publishes the bootstrap route in OpenAPI', async () => {
+  it('publishes bootstrap success and error envelopes in OpenAPI', async () => {
     const app = createApp()
 
     const response = await app.inject({ method: 'GET', url: '/documentation/json' })
     await app.close()
 
     expect(response.statusCode).toBe(200)
-    expect(response.json().paths).toHaveProperty('/api/student/bootstrap.get')
+    const operation = response.json().paths['/api/student/bootstrap'].get
+    expect(Object.keys(operation.responses).sort()).toEqual(['200', '404', '500'])
+    const errorSchemas = ['404', '500'].map(
+      (status) => operation.responses[status].content['application/json'].schema,
+    )
+    expect(errorSchemas[1]).toEqual(errorSchemas[0])
+    expect(errorSchemas[0]).toMatchObject({
+      type: 'object',
+      required: expect.arrayContaining(['code', 'message', 'data']),
+      properties: {
+        code: { type: 'string' },
+        message: { type: 'string' },
+      },
+    })
   })
 })

@@ -2,7 +2,7 @@ import type { FastifyInstance } from 'fastify'
 import type { ZodTypeProvider } from 'fastify-type-provider-zod'
 import { z } from 'zod'
 
-import { ok } from '../../common/http/envelope.js'
+import { errorEnvelopeSchema, ok } from '../../common/http/envelope.js'
 import {
   settingsPatchSchema,
   settingsSchema,
@@ -33,7 +33,12 @@ export async function settingsRoutes(
         tags: ['student'],
         summary: 'Update student study preferences',
         body: settingsPatchSchema,
-        response: { 200: settingsEnvelopeSchema },
+        response: {
+          200: settingsEnvelopeSchema,
+          400: errorEnvelopeSchema,
+          404: errorEnvelopeSchema,
+          500: errorEnvelopeSchema,
+        },
       },
     },
     async (request) => ok({ settings: await service.patch(request.body) }),

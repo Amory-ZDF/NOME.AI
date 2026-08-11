@@ -1,19 +1,8 @@
-import { parseEnv } from '../src/config/env.js'
-import { createPrisma } from '../src/db/client.js'
-import { createStudentSeedData, seedStudentData } from './seed-data.js'
+import { env as seedEnvironment } from 'node:process'
 
-async function main(): Promise<void> {
-  const env = parseEnv(process.env)
-  const prisma = createPrisma(env.DATABASE_URL)
+import { runStudentSeed } from './seed-runner.js'
 
-  try {
-    await seedStudentData(prisma, createStudentSeedData(env.STUDENT_ID))
-  } finally {
-    await prisma.$disconnect()
-  }
-}
-
-main().catch(() => {
+runStudentSeed(seedEnvironment).catch(() => {
   console.error('Student seed failed')
   process.exitCode = 1
 })

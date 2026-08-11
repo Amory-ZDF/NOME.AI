@@ -2,7 +2,6 @@ import type { z } from 'zod'
 
 import { AppError } from '../../common/errors/app-error.js'
 import {
-  bootstrapDataSchema,
   defaultSettings,
   errorItemSchema,
   exerciseSetSchema,
@@ -17,6 +16,7 @@ import {
   studentSchema,
   taskAdjustmentSchema,
   taskSchema,
+  trustedBootstrapDataSchema,
   type BootstrapData,
 } from '../../contracts/student-contracts.js'
 import type { StudentPrisma } from '../../db/client.js'
@@ -255,7 +255,7 @@ export class BootstrapService {
         learningSummary,
       }
 
-      return parseStored(bootstrapDataSchema, data, 'bootstrap response')
+      return parseStored(trustedBootstrapDataSchema, data, 'bootstrap response')
     })
   }
 }

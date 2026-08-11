@@ -38,7 +38,7 @@ function isCalendarDate(value: string): boolean {
 }
 
 function isIsoDateTime(value: string): boolean {
-  const match = /^(\d{4}-\d{2}-\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.\d{1,9})?(Z|[+-](\d{2}):(\d{2}))?$/.exec(
+  const match = /^(\d{4}-\d{2}-\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.\d{1,9})?(Z|[+-](\d{2}):(\d{2}))$/.exec(
     value,
   )
   if (match === null || !isCalendarDate(match[1] ?? '')) return false
@@ -48,10 +48,16 @@ function isIsoDateTime(value: string): boolean {
   const second = Number(match[4])
   if (hour > 23 || minute > 59 || second > 59) return false
 
-  if (match[5] !== undefined && match[5] !== 'Z') {
+  if (match[5] !== 'Z') {
     const offsetHour = Number(match[6])
     const offsetMinute = Number(match[7])
-    if (offsetHour > 23 || offsetMinute > 59) return false
+    if (
+      offsetHour > 14 ||
+      offsetMinute > 59 ||
+      (offsetHour === 14 && offsetMinute !== 0)
+    ) {
+      return false
+    }
   }
 
   return Number.isFinite(Date.parse(value))
@@ -869,7 +875,10 @@ export const sessionSchema = safeStrictObject({
   questions: z.array(sessionQuestionSchema).min(1),
 })
 
-export const bootstrapDataSchema = safeStrictObject({
+// Bootstrap is a service-owned aggregate assembled from the individually
+// hardened schemas below. Keeping the aggregate itself unbudgeted avoids
+// applying one payload's ingress limit across an arbitrary number of records.
+export const trustedBootstrapDataSchema = z.strictObject({
   student: studentSchema,
   tasks: z.array(taskSchema),
   taskAdjustments: z.array(taskAdjustmentSchema),
@@ -885,6 +894,8 @@ export const bootstrapDataSchema = safeStrictObject({
   moduleStats: moduleStatsSchema,
   learningSummary: learningSummarySchema,
 })
+
+export const bootstrapDataSchema = trustedBootstrapDataSchema
 
 export type Student = z.infer<typeof studentSchema>
 export type Task = z.infer<typeof taskSchema>
@@ -902,4 +913,4 @@ export type SettingsPatch = z.infer<typeof settingsPatchSchema>
 export type Greeting = z.infer<typeof greetingSchema>
 export type ModuleStats = z.infer<typeof moduleStatsSchema>
 export type LearningSummary = z.infer<typeof learningSummarySchema>
-export type BootstrapData = z.infer<typeof bootstrapDataSchema>
+export type BootstrapData = z.infer<typeof trustedBootstrapDataSchema>

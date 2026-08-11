@@ -2,8 +2,8 @@ import type { FastifyInstance } from 'fastify'
 import type { ZodTypeProvider } from 'fastify-type-provider-zod'
 import { z } from 'zod'
 
-import { ok } from '../../common/http/envelope.js'
-import { bootstrapDataSchema } from '../../contracts/student-contracts.js'
+import { errorEnvelopeSchema, ok } from '../../common/http/envelope.js'
+import { trustedBootstrapDataSchema } from '../../contracts/student-contracts.js'
 import { BootstrapService } from './bootstrap.service.js'
 
 interface BootstrapRoutesOptions {
@@ -13,7 +13,7 @@ interface BootstrapRoutesOptions {
 const bootstrapEnvelopeSchema = z.strictObject({
   code: z.literal(0),
   message: z.literal('ok'),
-  data: bootstrapDataSchema,
+  data: trustedBootstrapDataSchema,
 })
 
 export async function bootstrapRoutes(
@@ -29,7 +29,11 @@ export async function bootstrapRoutes(
       schema: {
         tags: ['student'],
         summary: 'Load the complete configured student state',
-        response: { 200: bootstrapEnvelopeSchema },
+        response: {
+          200: bootstrapEnvelopeSchema,
+          404: errorEnvelopeSchema,
+          500: errorEnvelopeSchema,
+        },
       },
     },
     async () => ok(await service.getBootstrap()),

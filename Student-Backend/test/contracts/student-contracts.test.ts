@@ -4,8 +4,10 @@ import { z } from 'zod'
 import {
   exerciseSetSchema,
   errorItemSchema,
+  evidenceTimeSchema,
   greetingSchema,
   hintSchema,
+  isoDateTimeSchema,
   jsonObjectSchema,
   learningSummarySchema,
   materialClassificationResultSchema,
@@ -95,6 +97,38 @@ function expectStableTaskRejection(value: unknown) {
 }
 
 describe('student shared contracts', () => {
+  it('accepts absolute ISO datetimes with Z or realistic explicit offsets', () => {
+    const values = [
+      '2024-02-29T23:59:59Z',
+      '2026-08-10T10:06:00.000+08:00',
+      '2026-08-10T10:06:00.000+14:00',
+      '2026-08-10T10:06:00.000-14:00',
+    ]
+
+    for (const value of values) {
+      expect(isoDateTimeSchema.safeParse(value).success, value).toBe(true)
+    }
+    expect(evidenceTimeSchema.safeParse('2024-02-29').success).toBe(true)
+    expect(Date.parse('2026-08-10T02:06:00.000Z')).toBe(
+      Date.parse('2026-08-10T10:06:00.000+08:00'),
+    )
+  })
+
+  it('rejects local datetimes, unrealistic offsets, and invalid calendar values', () => {
+    const values = [
+      '2026-08-10T10:06:00.000',
+      '2026-08-10T10:06:00.000+14:01',
+      '2026-08-10T10:06:00.000+23:59',
+      '2026-08-10T10:06:00.000-14:01',
+      '2026-02-29T10:06:00.000Z',
+    ]
+
+    for (const value of values) {
+      expect(isoDateTimeSchema.safeParse(value).success, value).toBe(false)
+      expect(evidenceTimeSchema.safeParse(value).success, value).toBe(false)
+    }
+  })
+
   it('preserves optional-field presence while rejecting unknown mutation fields', () => {
     expect(settingsPatchSchema.parse({ reminderStudyTime: false })).toEqual({
       reminderStudyTime: false,

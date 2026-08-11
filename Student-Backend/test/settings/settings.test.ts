@@ -179,13 +179,32 @@ describe('PATCH /api/student/settings', () => {
     await expect(prisma.studentSettings.count()).resolves.toBe(0)
   })
 
-  it('publishes the settings route in OpenAPI', async () => {
+  it('publishes settings success and error envelopes in OpenAPI', async () => {
     const app = createApp()
 
     const response = await app.inject({ method: 'GET', url: '/documentation/json' })
     await app.close()
 
     expect(response.statusCode).toBe(200)
-    expect(response.json().paths).toHaveProperty('/api/student/settings.patch')
+    const operation = response.json().paths['/api/student/settings'].patch
+    expect(Object.keys(operation.responses).sort()).toEqual([
+      '200',
+      '400',
+      '404',
+      '500',
+    ])
+    const errorSchemas = ['400', '404', '500'].map(
+      (status) => operation.responses[status].content['application/json'].schema,
+    )
+    expect(errorSchemas[1]).toEqual(errorSchemas[0])
+    expect(errorSchemas[2]).toEqual(errorSchemas[0])
+    expect(errorSchemas[0]).toMatchObject({
+      type: 'object',
+      required: expect.arrayContaining(['code', 'message', 'data']),
+      properties: {
+        code: { type: 'string' },
+        message: { type: 'string' },
+      },
+    })
   })
 })
