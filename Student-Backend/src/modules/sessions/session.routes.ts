@@ -3,7 +3,10 @@ import type { ZodTypeProvider } from 'fastify-type-provider-zod'
 import { z } from 'zod'
 
 import { errorEnvelopeSchema, ok } from '../../common/http/envelope.js'
-import { sessionSchema } from '../../contracts/student-contracts.js'
+import {
+  sessionIdSchema,
+  sessionSchema,
+} from '../../contracts/student-contracts.js'
 import { SessionService } from './session.service.js'
 import { sessionSummarySchema } from './session-summary.js'
 
@@ -11,23 +14,15 @@ interface SessionRoutesOptions {
   studentId: string
 }
 
-const safePathIdSchema = z
-  .string()
-  .min(1)
-  .refine((value) => value.trim().length > 0, { message: 'Must not be blank' })
-  .refine((value) => !/[\u0000-\u001f\u007f]/u.test(value), {
-    message: 'Control characters are not allowed',
-  })
-
 const summaryParamsSchema = z.strictObject({
-  sessionId: safePathIdSchema,
+  sessionId: sessionIdSchema,
 })
 
 const createSessionEnvelopeSchema = z.strictObject({
   code: z.literal(0),
   message: z.literal('ok'),
   data: z.strictObject({
-    sessionId: z.string().min(1),
+    sessionId: sessionIdSchema,
   }),
 })
 

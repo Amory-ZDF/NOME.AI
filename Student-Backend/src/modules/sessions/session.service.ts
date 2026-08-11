@@ -99,24 +99,38 @@ function parseStoredTask(row: StoredTaskRow, studentId: string): Task {
   }
 }
 
+type StoredExerciseSetParseResult =
+  | { success: true; exerciseSet: ExerciseSet }
+  | { success: false }
+
+function tryParseStoredExerciseSet(
+  row: StoredExerciseSetRow,
+  studentId: string,
+): StoredExerciseSetParseResult {
+  const parsed = exerciseSetSchema.safeParse(row.payload)
+  if (!parsed.success) return { success: false }
+
+  const exerciseSet = parsed.data
+  if (
+    row.studentId !== studentId ||
+    (exerciseSet.id !== undefined && exerciseSet.id !== row.id) ||
+    exerciseSet.taskId !== row.taskId
+  ) {
+    return { success: false }
+  }
+
+  return { success: true, exerciseSet }
+}
+
 function parseStoredExerciseSet(
   row: StoredExerciseSetRow,
   studentId: string,
 ): ExerciseSet {
-  try {
-    const exerciseSet = exerciseSetSchema.parse(row.payload)
-    if (
-      row.studentId !== studentId ||
-      (exerciseSet.id !== undefined && exerciseSet.id !== row.id) ||
-      exerciseSet.taskId !== row.taskId
-    ) {
-      return storedDataInvalid(new Error('Stored exercise set metadata mismatch'))
-    }
-    return exerciseSet
-  } catch (cause) {
-    if (cause instanceof AppError) throw cause
-    return storedDataInvalid(new Error('Invalid stored exercise set', { cause }))
+  const parsed = tryParseStoredExerciseSet(row, studentId)
+  if (!parsed.success) {
+    return storedDataInvalid(new Error('Invalid stored exercise set'))
   }
+  return parsed.exerciseSet
 }
 
 function parseStoredSession(row: StoredSessionRow, studentId: string): Session {
@@ -221,23 +235,33 @@ export class SessionService {
       where: {
         studentId: this.studentId,
         taskId: null,
+        kind: 'bank',
       },
       orderBy: { id: 'asc' },
     })
 
-    const candidates = rows.map((row) => {
-      if (row.kind !== 'bank') {
-        return storedDataInvalid(new Error('A taskless exercise set has an invalid kind'))
+    let hasCorruptCandidate = false
+    const matches: ExerciseSet[] = []
+    for (const row of rows) {
+      const parsed = tryParseStoredExerciseSet(row, this.studentId)
+      if (!parsed.success) {
+        hasCorruptCandidate = true
+        continue
       }
-      return parseStoredExerciseSet(row, this.studentId)
-    })
-    const matches = candidates.filter((exerciseSet) =>
-      matchesExerciseSet(session, exerciseSet),
-    )
-    if (matches.length === 0) provenanceNotFound()
-    if (matches.length !== 1) {
+
+      if (matchesExerciseSet(session, parsed.exerciseSet)) {
+        matches.push(parsed.exerciseSet)
+      }
+    }
+
+    if (matches.length === 1) return
+    if (matches.length > 1) {
       return storedDataInvalid(new Error('Ambiguous bank exercise provenance'))
     }
+    if (hasCorruptCandidate) {
+      return storedDataInvalid(new Error('Invalid bank exercise provenance'))
+    }
+    provenanceNotFound()
   }
 
   async create(rawSession: Session): Promise<{ sessionId: string }> {

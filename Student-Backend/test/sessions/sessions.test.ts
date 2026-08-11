@@ -3,6 +3,8 @@ import { afterAll, beforeEach, describe, expect, it } from 'vitest'
 import { buildApp } from '../../src/app.js'
 import { parseEnv } from '../../src/config/env.js'
 import {
+  sessionIdSchema,
+  sessionSchema,
   sessionResultSchema,
   type SessionQuestion,
 } from '../../src/contracts/student-contracts.js'
@@ -347,6 +349,25 @@ describe('summarizeSession', () => {
   })
 })
 
+describe('session public id contract', () => {
+  it.each([
+    ['100 ASCII characters', 'a'.repeat(100)],
+    ['100 Unicode characters', '界'.repeat(100)],
+  ])('accepts the reachable route boundary: %s', (_case, sessionId) => {
+    expect(sessionIdSchema.safeParse(sessionId).success).toBe(true)
+    expect(sessionSchema.safeParse(makeSession({ sessionId })).success).toBe(true)
+  })
+
+  it.each([
+    ['101 characters', 'a'.repeat(101)],
+    ['a blank id', '   '],
+    ['a control character', 'session\u0000id'],
+  ])('rejects an unreachable or unsafe id: %s', (_case, sessionId) => {
+    expect(sessionIdSchema.safeParse(sessionId).success).toBe(false)
+    expect(sessionSchema.safeParse(makeSession({ sessionId })).success).toBe(false)
+  })
+})
+
 describe('session result state contract', () => {
   it.each([
     [
@@ -470,6 +491,53 @@ describe('POST /api/sessions', () => {
       submittedAt: new Date(String(session.completedAt)),
       payload: session,
     })
+  })
+
+  it('rejects a 101-character session id before any persistence', async () => {
+    await insertStudent()
+    await insertTaskAndSet()
+    const sessionId = 'x'.repeat(101)
+
+    const response = await postSession(makeSession({ sessionId }))
+
+    expect(response.statusCode).toBe(400)
+    expect(response.json()).toEqual({
+      code: 'INVALID_INPUT',
+      message: 'Invalid request',
+      data: null,
+    })
+    await expect(prisma.session.count()).resolves.toBe(0)
+  })
+
+  it.each([
+    ['100 ASCII characters', 'a'.repeat(100)],
+    ['100 Unicode characters', '界'.repeat(100)],
+  ])('persists and retrieves the exact %s session id', async (_case, sessionId) => {
+    await insertStudent()
+    await insertTaskAndSet()
+    const session = makeSession({ sessionId })
+
+    const submitted = await postSession(session)
+
+    expect(submitted.statusCode).toBe(200)
+    expect(submitted.json()).toMatchObject({ data: { sessionId } })
+    await expect(prisma.session.findUnique({
+      where: {
+        studentId_id: {
+          studentId: primaryStudentId,
+          id: sessionId,
+        },
+      },
+    })).resolves.toMatchObject({ id: sessionId, payload: session })
+
+    const app = createApp()
+    const summary = await app.inject({
+      method: 'GET',
+      url: `/api/summary/${encodeURIComponent(sessionId)}`,
+    })
+    await app.close()
+
+    expect(summary.statusCode).toBe(200)
   })
 
   it('persists a bank session with a null task id after proving one exact scoped set', async () => {
@@ -911,6 +979,97 @@ describe('POST /api/sessions', () => {
     await expect(prisma.session.count()).resolves.toBe(0)
   })
 
+  it('accepts one exact bank provenance when an unrelated bank row is corrupt', async () => {
+    await insertStudent()
+    const question = makeQuestion('question-bank-valid')
+    const bankSet = makeExerciseSet({
+      id: 'bank-valid',
+      taskId: null,
+      title: 'Bank practice',
+      questions: [question],
+    })
+    await insertExerciseSet(primaryStudentId, 'bank', bankSet)
+    await prisma.exerciseSet.create({
+      data: {
+        id: 'bank-corrupt-unrelated',
+        studentId: primaryStudentId,
+        taskId: null,
+        kind: 'bank',
+        payload: toInputJson({ malformed: true }),
+      },
+    })
+    const session = makeSession({
+      sessionId: 'session-bank-valid-with-corrupt',
+      taskId: null,
+      taskTitle: bankSet.title,
+      questions: [makeSessionQuestion(question)],
+    })
+
+    const response = await postSession(session)
+
+    expect(response.statusCode).toBe(200)
+    await expect(prisma.session.findMany()).resolves.toHaveLength(1)
+  })
+
+  it('fails closed when no bank provenance matches and a candidate is corrupt', async () => {
+    await insertStudent()
+    await prisma.exerciseSet.create({
+      data: {
+        id: 'bank-corrupt-only',
+        studentId: primaryStudentId,
+        taskId: null,
+        kind: 'bank',
+        payload: toInputJson({ malformed: true }),
+      },
+    })
+
+    const response = await postSession(makeSession({
+      sessionId: 'session-bank-corrupt-only',
+      taskId: null,
+      taskTitle: 'Missing bank practice',
+    }))
+
+    expect(response.statusCode).toBe(500)
+    expect(response.json()).toEqual({
+      code: 'INTERNAL_ERROR',
+      message: 'Internal server error',
+      data: null,
+    })
+    await expect(prisma.session.count()).resolves.toBe(0)
+  })
+
+  it('ignores unrelated taskless non-bank rows while resolving one exact bank set', async () => {
+    await insertStudent()
+    const question = makeQuestion('question-bank-kind-filter')
+    const bankSet = makeExerciseSet({
+      id: 'bank-kind-filter',
+      taskId: null,
+      title: 'Filtered bank practice',
+      questions: [question],
+    })
+    await insertExerciseSet(primaryStudentId, 'bank', bankSet)
+    await insertExerciseSet(
+      primaryStudentId,
+      'task',
+      makeExerciseSet({
+        id: 'taskless-task-kind',
+        taskId: null,
+        title: 'Unrelated taskless set',
+      }),
+    )
+    const session = makeSession({
+      sessionId: 'session-bank-kind-filter',
+      taskId: null,
+      taskTitle: bankSet.title,
+      questions: [makeSessionQuestion(question)],
+    })
+
+    const response = await postSession(session)
+
+    expect(response.statusCode).toBe(200)
+    await expect(prisma.session.count()).resolves.toBe(1)
+  })
+
   it('returns 404 when the configured student does not exist', async () => {
     const response = await postSession()
 
@@ -1238,5 +1397,14 @@ describe('session API transport contract', () => {
       '404',
       '500',
     ])
+
+    expect(
+      paths['/api/sessions'].post.requestBody.content['application/json'].schema.properties
+        .sessionId.maxLength,
+    ).toBe(100)
+    const summarySessionId = paths['/api/summary/{sessionId}'].get.parameters.find(
+      (parameter: { name?: string }) => parameter.name === 'sessionId',
+    )
+    expect(summarySessionId.schema.maxLength).toBe(100)
   })
 })

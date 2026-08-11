@@ -23,6 +23,15 @@ const nonEmptyString = z.string().min(1).refine((value) => value.trim().length >
 const optionalNonEmptyString = nonEmptyString.optional()
 const nullableNonEmptyString = nonEmptyString.nullable()
 
+export const sessionIdSchema = z
+  .string()
+  .min(1)
+  .max(100)
+  .refine((value) => value.trim().length > 0, { message: 'Must not be blank' })
+  .refine((value) => !/[\u0000-\u001f\u007f]/u.test(value), {
+    message: 'Control characters are not allowed',
+  })
+
 function isCalendarDate(value: string): boolean {
   const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value)
   if (match === null) return false
@@ -923,7 +932,7 @@ export const sessionQuestionSchema = safeStrictObject({
   .superRefine((value, context) => refineQuestion(value, context))
 
 export const sessionSchema = safeStrictObject({
-    sessionId: nonEmptyString,
+    sessionId: sessionIdSchema,
     taskId: nullableNonEmptyString,
     taskTitle: nonEmptyString,
     subject: nonEmptyString,
