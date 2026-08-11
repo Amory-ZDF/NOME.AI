@@ -1,12 +1,20 @@
 import { AppError } from '../../common/errors/app-error.js'
 import { ZodError } from 'zod'
 import {
+  materialClassificationResultSchema,
   materialUploadJobSchema,
+  noteSchema,
+  type MaterialClassificationResult,
   type MaterialUploadJob,
+  type Note,
 } from '../../contracts/student-contracts.js'
 import type { StudentPrisma } from '../../db/client.js'
 import { toInputJson } from '../../db/json.js'
-import { parseMaterialMetadata } from './material-rules.js'
+import {
+  containsRawCarrier,
+  parseMaterialClassificationPatch,
+  parseMaterialMetadata,
+} from './material-rules.js'
 import { sessionIdSchema } from '../../contracts/student-contracts.js'
 import { Prisma } from '../../generated/prisma/client.js'
 
@@ -22,8 +30,12 @@ interface StoredMaterialRow {
 }
 
 function duplicate(): never { throw new AppError('Material upload id already exists', 409, 'DUPLICATE_ID') }
+function duplicateNote(): never { throw new AppError('Note id already exists', 409, 'DUPLICATE_ID') }
 function notFound(): never { throw new AppError('Material upload not found', 404, 'NOT_FOUND') }
 function completed(): never { throw new AppError('This upload is already completed', 409, 'UPLOAD_ALREADY_COMPLETED') }
+function cancelled(): never { throw new AppError('This upload was cancelled', 409, 'UPLOAD_CANCELLED') }
+function invalidState(): never { throw new AppError('Only uploads awaiting confirmation can be confirmed', 409, 'INVALID_JOB_STATE') }
+function invalidPatch(): never { throw new AppError('Classification patch contains invalid fields', 400, 'INVALID_CLASSIFICATION_PATCH') }
 function invalidStored(cause: unknown): never {
   throw new AppError('Stored student data is invalid', 500, 'STORED_DATA_INVALID', null, { cause })
 }
@@ -73,10 +85,60 @@ function parseStored(row: StoredMaterialRow): MaterialUploadJob {
     if (job.id !== row.id || job.status !== row.status || Date.parse(job.createdAt) !== row.createdAtValue.getTime()) {
       return invalidStored(new Error(`Stored material ${row.id} metadata mismatch`))
     }
+    if (job.result !== undefined && containsRawCarrier(job.result)) {
+      return invalidStored(new Error(`Stored material ${row.id} contains a raw carrier`))
+    }
     return job
   } catch (cause) {
     if (cause instanceof AppError) throw cause
     return invalidStored(new Error(`Invalid stored material ${row.id}`, { cause }))
+  }
+}
+
+function parseConfirmedResult(value: unknown): MaterialClassificationResult {
+  try {
+    const result = materialClassificationResultSchema.parse(value)
+    if (containsRawCarrier(result)) invalidPatch()
+    return result
+  } catch (cause) {
+    if (cause instanceof AppError) throw cause
+    return invalidPatch()
+  }
+}
+
+function deriveNoteSource(materialType: MaterialClassificationResult['materialType']): Note['source'] {
+  if (materialType === 'handwritten_draft') return 'handwritten'
+  if (materialType === 'error_photo') return 'photo'
+  return 'typed'
+}
+
+function createConfirmationNote(job: MaterialUploadJob, result: MaterialClassificationResult): Note {
+  try {
+    return noteSchema.parse({
+      id: `note-${job.id}`,
+      title: result.suggestedTitle,
+      materialType: result.materialType,
+      examBoard: result.examBoard,
+      subject: result.subject,
+      chapter: result.chapter,
+      folderId: result.folderId,
+      folderPath: result.folderPath,
+      tags: [],
+      questionBlocks: result.questionBlocks,
+      answerBlocks: result.answerBlocks,
+      content: result.content,
+      linkedTopics: result.linkedTopics,
+      linkedErrors: result.linkedErrors,
+      aiSuggestions: [],
+      sourceJobId: job.id,
+      source: deriveNoteSource(result.materialType),
+      createdAt: job.createdAt,
+      updatedAt: job.updatedAt,
+      version: 1,
+      versions: [],
+    })
+  } catch (cause) {
+    return invalidStored(new Error(`Stored material ${job.id} cannot create a valid note`, { cause }))
   }
 }
 
@@ -133,5 +195,55 @@ export class MaterialService {
       })
       return cancelled
     }))
+  }
+
+  async confirm(id: string, rawPatch: unknown): Promise<{ job: MaterialUploadJob; note: Note }> {
+    const patch = parseMaterialClassificationPatch(rawPatch)
+    try {
+      return await this.retry(() => this.prisma.$transaction(async (transaction) => {
+        const row = await transaction.materialUploadJob.findUnique({
+          where: { studentId_id: { studentId: this.studentId, id } },
+        })
+        if (row === null) notFound()
+        const job = parseStored(row)
+        if (job.status === 'cancelled') cancelled()
+        if (job.status === 'completed') completed()
+        if (job.status !== 'needs_confirmation') invalidState()
+        if (job.result === undefined) invalidStored(new Error(`Stored material ${id} is missing result`))
+
+        const result = parseConfirmedResult({ ...job.result, ...patch })
+        const note = createConfirmationNote(job, result)
+        const confirmed = materialUploadJobSchema.parse({
+          ...job,
+          materialType: result.materialType,
+          examBoard: result.examBoard,
+          subject: result.subject,
+          chapter: result.chapter,
+          folderId: result.folderId,
+          folderPath: result.folderPath,
+          status: 'completed',
+          progress: 100,
+          result,
+        })
+        const existingNote = await transaction.note.findUnique({
+          where: { studentId_id: { studentId: this.studentId, id: note.id } }, select: { id: true },
+        })
+        if (existingNote !== null) duplicateNote()
+        await transaction.note.create({
+          data: {
+            id: note.id, studentId: this.studentId, version: note.version,
+            updatedAtValue: new Date(note.updatedAt), payload: toInputJson(note),
+          },
+        })
+        await transaction.materialUploadJob.update({
+          where: { studentId_id: { studentId: this.studentId, id } },
+          data: { status: confirmed.status, payload: toInputJson(confirmed) },
+        })
+        return { job: confirmed, note }
+      }))
+    } catch (cause) {
+      if (isPrismaCode(cause, 'P2002')) duplicateNote()
+      throw cause
+    }
   }
 }

@@ -29,6 +29,13 @@ export interface MaterialMetadata {
   createdAt?: string
 }
 
+export type MaterialClassificationPatch = Record<string, JsonValue>
+
+const classificationResultFields = new Set([
+  'suggestedTitle', 'materialType', 'examBoard', 'subject', 'chapter', 'folderId', 'folderPath',
+  'questionBlocks', 'answerBlocks', 'content', 'linkedTopics', 'linkedErrors', 'confidence',
+])
+
 function invalidMetadata(): never {
   throw new AppError('Upload metadata contains invalid fields', 400, 'INVALID_UPLOAD_METADATA')
 }
@@ -118,4 +125,34 @@ export function parseMaterialMetadata(input: unknown): MaterialMetadata {
 
 export function materialIdFromParam(value: string): string {
   return validateId(value)
+}
+
+/**
+ * Confirmation accepts a JSON-safe, strict partial result. Field-level and
+ * cross-field validation happens after it is merged with the stored result,
+ * so a patch cannot accidentally be treated as a generated classification.
+ */
+export function parseMaterialClassificationPatch(input: unknown): MaterialClassificationPatch {
+  if (typeof input === 'object' && input !== null && isProxy(input)) invalidConfirmationPatch()
+  let source: JsonValue
+  try {
+    source = cloneSafeJson(input)
+  } catch {
+    return invalidConfirmationPatch()
+  }
+  if (source === null || Array.isArray(source) || typeof source !== 'object') invalidConfirmationPatch()
+  if (Object.keys(source).some((key) => !classificationResultFields.has(key))) invalidConfirmationPatch()
+  if (containsRawCarrier(source)) invalidConfirmationPatch()
+  return source
+}
+
+export function containsRawCarrier(value: unknown): boolean {
+  if (typeof value === 'string') return isRawCarrier(value)
+  if (value === null || typeof value !== 'object') return false
+  if (Array.isArray(value)) return value.some(containsRawCarrier)
+  return Object.values(value).some(containsRawCarrier)
+}
+
+function invalidConfirmationPatch(): never {
+  throw new AppError('Classification patch contains invalid fields', 400, 'INVALID_CLASSIFICATION_PATCH')
 }

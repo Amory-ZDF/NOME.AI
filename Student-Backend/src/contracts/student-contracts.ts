@@ -784,6 +784,8 @@ export const materialUploadJobSchema = safeStrictObject({
     examBoard: optionalNonEmptyString,
     subject: optionalNonEmptyString,
     chapter: optionalNonEmptyString,
+    folderId: optionalNonEmptyString,
+    folderPath: optionalNonEmptyString,
     createdAt: isoDateTimeSchema,
     updatedAt: isoDateTimeSchema,
     progress: z.number().min(0).max(100),
@@ -837,6 +839,15 @@ export const materialUploadJobSchema = safeStrictObject({
         code: 'custom',
         path: ['result'],
         message: 'Unprocessed jobs cannot contain a classification result',
+      })
+    }
+
+    if ((value.folderId !== undefined || value.folderPath !== undefined)
+      && value.status !== 'needs_confirmation' && value.status !== 'completed') {
+      context.addIssue({
+        code: 'custom',
+        path: ['folderId'],
+        message: 'Classification folder metadata is only valid after processing',
       })
     }
   })
@@ -1081,6 +1092,7 @@ export type RedoAttempt = z.infer<typeof redoAttemptSchema>
 export type VariantVerification = z.infer<typeof variantVerificationSchema>
 export type Note = z.infer<typeof noteSchema>
 export type NoteFolder = z.infer<typeof noteFolderSchema>
+export type MaterialClassificationResult = z.infer<typeof materialClassificationResultSchema>
 export type MaterialUploadJob = z.infer<typeof materialUploadJobSchema>
 export type Settings = z.infer<typeof settingsSchema>
 export type SettingsPatch = z.infer<typeof settingsPatchSchema>
