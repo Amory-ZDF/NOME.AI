@@ -4,6 +4,7 @@ import { buildApp } from '../../src/app.js'
 import { parseEnv } from '../../src/config/env.js'
 import { errorItemSchema, type ErrorItem } from '../../src/contracts/student-contracts.js'
 import { toInputJson } from '../../src/db/json.js'
+import { parseStoredErrorAggregate } from '../../src/modules/errors/error-cards.js'
 import {
   createTestPrisma,
   resetDatabase,
@@ -327,7 +328,7 @@ describe('POST /api/errors/batch', () => {
       status: 'pending_review',
       lastOccurredAt: new Date(second.lastOccurredAt),
     })
-    expect(row.payload).toEqual(merged)
+    expect(parseStoredErrorAggregate(row.payload).error).toEqual(merged)
   })
 
   it('deduplicates exact request retries and duplicate items inside one batch', async () => {
@@ -438,6 +439,265 @@ describe('POST /api/errors/batch', () => {
     }
   })
 
+  it('binds a persisted occurrence to its complete fresh evidence and rejects a mutated replay', async () => {
+    await insertStudent()
+    const original = makeError({
+      id: 'error-evidence-bound',
+      questionId: 'question-evidence-bound',
+      occurrenceKey: 'session:bound:question:question-evidence-bound',
+    })
+    expect((await postBatch([original])).statusCode).toBe(200)
+    const before = await durableSnapshot()
+    const mutated = {
+      ...structuredClone(original),
+      id: 'error-evidence-bound-retry-id',
+      questionContent: '<p>Injected replacement question.</p>',
+      errorDescription: 'Injected replacement diagnosis.',
+      studentAnswer: 'injected answer',
+      analysis: 'Injected replacement analysis.',
+    }
+
+    const response = await postBatch([mutated])
+
+    expect(response.statusCode).toBe(409)
+    expect(response.json()).toEqual({
+      code: 'OCCURRENCE_CONFLICT',
+      message: 'Occurrence identity conflicts with persisted evidence',
+      data: null,
+    })
+    expect(await durableSnapshot()).toEqual(before)
+  })
+
+  it('rejects two same-occurrence items with conflicting fresh evidence before any batch write', async () => {
+    await insertStudent()
+    const original = makeError({
+      id: 'error-same-batch-bound',
+      questionId: 'question-same-batch-bound',
+      occurrenceKey: 'session:same-batch:question:question-same-batch-bound',
+    })
+    const mutated = {
+      ...structuredClone(original),
+      id: 'error-same-batch-mutated-id',
+      whyWrong: 'A conflicting root cause for the same occurrence.',
+      correctAnswer: 'a conflicting answer',
+    }
+    const before = await durableSnapshot()
+
+    const response = await postBatch([original, mutated])
+
+    expect(response.statusCode).toBe(409)
+    expect(response.json()).toMatchObject({ code: 'OCCURRENCE_CONFLICT', data: null })
+    expect(await durableSnapshot()).toEqual(before)
+  })
+
+  it('treats an exact old-occurrence replay as a no-op after a newer recurrence', async () => {
+    await insertStudent()
+    const first = makeError({
+      id: 'error-old-replay',
+      questionId: 'question-old-replay',
+      occurredAt: '2026-08-11T09:00:00.000Z',
+      occurrenceKey: 'session:old:question:question-old-replay',
+      errorDescription: 'Original diagnosis',
+      studentAnswer: 'original answer',
+    })
+    const latest = makeError({
+      id: 'error-new-recurrence',
+      questionId: first.questionId,
+      occurredAt: '2026-08-11T10:00:00.000Z',
+      occurrenceKey: 'session:new:question:question-old-replay',
+      errorDescription: 'Latest diagnosis',
+      studentAnswer: 'latest answer',
+    })
+    expect((await postBatch([first])).statusCode).toBe(200)
+    const latestResponse = await postBatch([latest])
+    expect(latestResponse.statusCode).toBe(200)
+    const beforeReplay = await durableSnapshot()
+
+    const replay = await postBatch([first])
+
+    expect(replay.statusCode).toBe(200)
+    expect(replay.body).toBe(latestResponse.body)
+    expect(replay.json().data.errors[0]).toMatchObject({
+      id: first.id,
+      errorDescription: 'Latest diagnosis',
+      studentAnswer: 'latest answer',
+      repeatCount: 2,
+    })
+    expect(await durableSnapshot()).toEqual(beforeReplay)
+  })
+
+  it('treats reordered nested JSON object keys as the same bound evidence', async () => {
+    await insertStudent()
+    const original = makeError({
+      id: 'error-canonical-json',
+      questionId: 'question-canonical-json',
+      occurrenceKey: 'session:canonical:question:question-canonical-json',
+      markSchemePoints: [{
+        rubric: { method: 'M1', accuracy: 'A1' },
+        score: 2,
+      }],
+    })
+    const replay = makeError({
+      ...structuredClone(original),
+      id: 'error-canonical-json-replay',
+      markSchemePoints: [{
+        score: 2,
+        rubric: { accuracy: 'A1', method: 'M1' },
+      }],
+    })
+    const firstResponse = await postBatch([original])
+    expect(firstResponse.statusCode).toBe(200)
+    const beforeReplay = await durableSnapshot()
+
+    const response = await postBatch([replay])
+
+    expect(response.statusCode).toBe(200)
+    expect(response.body).toBe(firstResponse.body)
+    expect(response.body).not.toContain('occurrenceEvidenceBindings')
+    expect(await durableSnapshot()).toEqual(beforeReplay)
+  })
+
+  it('binds a provable single-occurrence legacy row before accepting a replay', async () => {
+    await insertStudent()
+    const legacy = makeError({
+      id: 'error-legacy-single',
+      questionId: 'question-legacy-single',
+      occurrenceKey: 'session:legacy:question:question-legacy-single',
+    })
+    await prisma.errorItem.create({
+      data: {
+        id: legacy.id,
+        studentId: primaryStudentId,
+        questionId: legacy.questionId,
+        status: legacy.status,
+        lastOccurredAt: new Date(legacy.lastOccurredAt),
+        payload: toInputJson(legacy),
+      },
+    })
+    const before = await durableSnapshot()
+
+    const response = await postBatch([{
+      ...structuredClone(legacy),
+      id: 'error-legacy-single-replay',
+      analysis: 'Mutated legacy evidence.',
+    }])
+
+    expect(response.statusCode).toBe(409)
+    expect(response.json()).toEqual({
+      code: 'OCCURRENCE_CONFLICT',
+      message: 'Occurrence identity conflicts with persisted evidence',
+      data: null,
+    })
+    expect(await durableSnapshot()).toEqual(before)
+  })
+
+  it('fails closed for a legacy multi-occurrence row whose historical evidence cannot be proven', async () => {
+    await insertStudent()
+    const firstAt = '2026-08-11T09:00:00.000Z'
+    const secondAt = '2026-08-11T10:00:00.000Z'
+    const firstKey = 'session:legacy-one:question:question-legacy-multi'
+    const secondKey = 'session:legacy-two:question:question-legacy-multi'
+    const legacy = makeError({
+      id: 'error-legacy-multi',
+      questionId: 'question-legacy-multi',
+      firstOccurredAt: firstAt,
+      lastOccurredAt: secondAt,
+      occurrences: [firstAt, secondAt],
+      occurrenceKeys: [firstKey, secondKey],
+      occurrenceRecords: [
+        { key: firstKey, occurredAt: firstAt },
+        { key: secondKey, occurredAt: secondAt },
+      ],
+      repeatCount: 2,
+    })
+    await prisma.errorItem.create({
+      data: {
+        id: legacy.id,
+        studentId: primaryStudentId,
+        questionId: legacy.questionId,
+        status: legacy.status,
+        lastOccurredAt: new Date(legacy.lastOccurredAt),
+        payload: toInputJson(legacy),
+      },
+    })
+    const before = await durableSnapshot()
+
+    const response = await postBatch([legacy])
+
+    expect(response.statusCode).toBe(500)
+    expect(response.json()).toEqual({
+      code: 'INTERNAL_ERROR',
+      message: 'Internal server error',
+      data: null,
+    })
+    expect(response.body).not.toContain(legacy.id)
+    expect(await durableSnapshot()).toEqual(before)
+  })
+
+  it('rejects a v1 envelope with a missing occurrence binding as stored corruption', async () => {
+    await insertStudent()
+    const original = makeError({
+      id: 'error-missing-binding',
+      questionId: 'question-missing-binding',
+      occurrenceKey: 'session:binding:question:question-missing-binding',
+    })
+    expect((await postBatch([original])).statusCode).toBe(200)
+    const row = await prisma.errorItem.findFirstOrThrow()
+    const corrupted = structuredClone(row.payload) as {
+      occurrenceEvidenceBindings: unknown[]
+    }
+    corrupted.occurrenceEvidenceBindings = []
+    await prisma.errorItem.update({
+      where: {
+        studentId_id: { studentId: primaryStudentId, id: original.id },
+      },
+      data: { payload: toInputJson(corrupted) },
+    })
+    const before = await durableSnapshot()
+
+    const response = await postBatch([original])
+
+    expect(response.statusCode).toBe(500)
+    expect(response.json()).toEqual({
+      code: 'INTERNAL_ERROR',
+      message: 'Internal server error',
+      data: null,
+    })
+    expect(response.body).not.toContain(original.id)
+    expect(await durableSnapshot()).toEqual(before)
+  })
+
+  it.each([
+    ['all verification fields', ['verificationVariantId', 'variantVerifiedAt', 'variantVerification']],
+    ['verificationVariantId', ['verificationVariantId']],
+    ['variantVerifiedAt', ['variantVerifiedAt']],
+    ['variantVerification', ['variantVerification']],
+  ])('accepts fresh evidence omitting %s and normalizes the stored contract to null', async (
+    _case,
+    omittedFields,
+  ) => {
+    await insertStudent()
+    const item = structuredClone(makeError()) as Record<string, unknown>
+    for (const field of omittedFields) Reflect.deleteProperty(item, field)
+
+    const response = await postBatch([item])
+
+    expect(response.statusCode).toBe(200)
+    expect(response.json().data.errors[0]).toMatchObject({
+      verificationVariantId: null,
+      variantVerifiedAt: null,
+      variantVerification: null,
+    })
+    const stored = parseStoredErrorAggregate(
+      (await prisma.errorItem.findFirstOrThrow()).payload,
+    ).error
+    expect(stored).toMatchObject({
+      verificationVariantId: null,
+      variantVerifiedAt: null,
+      variantVerification: null,
+    })
+  })
+
   it('rejects out-of-order fresh recurrence without reopening the lifecycle', async () => {
     await insertStudent()
     const existing = makeError({
@@ -486,7 +746,9 @@ describe('POST /api/errors/batch', () => {
     expect(responses.map(({ statusCode }) => statusCode)).toEqual([200, 200])
     expect(responses[0]?.json()).toEqual(responses[1]?.json())
     await expect(prisma.errorItem.count()).resolves.toBe(1)
-    const stored = errorItemSchema.parse((await prisma.errorItem.findFirstOrThrow()).payload)
+    const stored = parseStoredErrorAggregate(
+      (await prisma.errorItem.findFirstOrThrow()).payload,
+    ).error
     expect(stored.repeatCount).toBe(1)
   })
 
@@ -514,7 +776,9 @@ describe('POST /api/errors/batch', () => {
 
     expect(responses.map(({ statusCode }) => statusCode).sort()).toEqual([200, 409])
     await expect(prisma.errorItem.count()).resolves.toBe(1)
-    const stored = errorItemSchema.parse((await prisma.errorItem.findFirstOrThrow()).payload)
+    const stored = parseStoredErrorAggregate(
+      (await prisma.errorItem.findFirstOrThrow()).payload,
+    ).error
     expect(stored.repeatCount).toBe(1)
     expect(stored.occurrenceKeys).toEqual(['shared-concurrent-key'])
   })

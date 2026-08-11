@@ -8,6 +8,7 @@ import {
   type RedoAttempt,
 } from '../../src/contracts/student-contracts.js'
 import { toInputJson } from '../../src/db/json.js'
+import { parseStoredErrorAggregate } from '../../src/modules/errors/error-cards.js'
 import {
   createTestPrisma,
   resetDatabase,
@@ -245,7 +246,12 @@ describe('POST /api/errors/{id}/redo', () => {
     })
     expect(row.status).toBe(status)
     expect(row.lastOccurredAt.getTime()).toBe(Date.parse(error.lastOccurredAt))
-    expect(row.payload).toEqual(error)
+    const stored = parseStoredErrorAggregate(row.payload)
+    expect(stored.error).toEqual(error)
+    expect(stored.occurrenceEvidenceBindings.map(({ key }) => key)).toEqual(
+      error.occurrenceRecords.map(({ key }: { key: string }) => key),
+    )
+    expect(response.body).not.toContain('occurrenceEvidenceBindings')
   })
 
   it.each([
@@ -416,7 +422,9 @@ describe('POST /api/errors/{id}/redo', () => {
     await app.close()
 
     expect(responses.map(({ statusCode }) => statusCode).sort()).toEqual([200, 400])
-    const stored = errorItemSchema.parse((await prisma.errorItem.findFirstOrThrow()).payload)
+    const stored = parseStoredErrorAggregate(
+      (await prisma.errorItem.findFirstOrThrow()).payload,
+    ).error
     expect(stored.redoHistory).toEqual([attempt])
   })
 })

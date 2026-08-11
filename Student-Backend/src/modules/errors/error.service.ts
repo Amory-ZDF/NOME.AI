@@ -1,6 +1,5 @@
 import { AppError } from '../../common/errors/app-error.js'
 import {
-  errorItemSchema,
   redoAttemptSchema,
   type ErrorItem,
   type RedoAttempt,
@@ -13,9 +12,13 @@ import {
   assertBatchIdentities,
   errorBatchBodySchema,
   hasConsistentOccurrenceBounds,
-  mergeErrorCards,
+  mergeErrorAggregates,
   OccurrenceConflictError,
   OutOfOrderOccurrenceError,
+  parseStoredErrorAggregate,
+  redoOccurrenceEvidenceBinding,
+  storedErrorPayload,
+  type StoredErrorAggregate,
 } from './error-cards.js'
 import { applyRedoAttempt, RedoChronologyError } from './mastery.js'
 
@@ -95,9 +98,10 @@ function isErrorItemCreateUniqueViolation(cause: unknown): boolean {
   )
 }
 
-function parseStoredError(row: StoredErrorRow, studentId: string): ErrorItem {
+function parseStoredError(row: StoredErrorRow, studentId: string): StoredErrorAggregate {
   try {
-    const error = errorItemSchema.parse(row.payload)
+    const aggregate = parseStoredErrorAggregate(row.payload)
+    const { error } = aggregate
     if (
       row.studentId !== studentId ||
       error.id !== row.id ||
@@ -113,7 +117,7 @@ function parseStoredError(row: StoredErrorRow, studentId: string): ErrorItem {
     ) {
       return storedDataInvalid(new Error('Stored error metadata mismatch'))
     }
-    return error
+    return aggregate
   } catch (cause) {
     if (cause instanceof AppError) throw cause
     return storedDataInvalid(new Error('Invalid stored error', { cause }))
@@ -128,24 +132,25 @@ function mapDomainError(cause: unknown): never {
   throw cause
 }
 
-function errorWrite(error: ErrorItem) {
+function errorWrite(aggregate: StoredErrorAggregate) {
+  const { error } = aggregate
   return {
     questionId: error.questionId,
     status: error.status,
     lastOccurredAt: new Date(error.lastOccurredAt),
-    payload: toInputJson(error),
+    payload: toInputJson(storedErrorPayload(aggregate)),
   }
 }
 
 async function readAllErrors(
   transaction: Prisma.TransactionClient,
   studentId: string,
-): Promise<Array<{ row: StoredErrorRow; error: ErrorItem }>> {
+): Promise<Array<{ row: StoredErrorRow; aggregate: StoredErrorAggregate }>> {
   const rows = await transaction.errorItem.findMany({
     where: { studentId },
     orderBy: { id: 'asc' },
   })
-  return rows.map((row) => ({ row, error: parseStoredError(row, studentId) }))
+  return rows.map((row) => ({ row, aggregate: parseStoredError(row, studentId) }))
 }
 
 export class ErrorService {
@@ -180,22 +185,23 @@ export class ErrorService {
 
       const stored = await readAllErrors(transaction, this.studentId)
       try {
-        assertBatchIdentities(stored.map(({ error }) => error), [])
+        assertBatchIdentities(stored.map(({ aggregate }) => aggregate.error), [])
       } catch (cause) {
         return storedDataInvalid(new Error('Invalid stored error identities', { cause }))
       }
-      let merged: ErrorItem[]
+      let merged: StoredErrorAggregate[]
       try {
-        merged = mergeErrorCards(stored.map(({ error }) => error), items)
+        merged = mergeErrorAggregates(stored.map(({ aggregate }) => aggregate), items)
       } catch (cause) {
         return mapDomainError(cause)
       }
 
       const currentByQuestion = new Map(
-        stored.map(({ error }) => [error.questionId, error] as const),
+        stored.map(({ aggregate }) => [aggregate.error.questionId, aggregate] as const),
       )
       const incomingQuestions = new Set(items.map(({ questionId }) => questionId))
-      for (const error of merged) {
+      for (const aggregate of merged) {
+        const { error } = aggregate
         if (!incomingQuestions.has(error.questionId)) continue
         const current = currentByQuestion.get(error.questionId)
         if (current === undefined) {
@@ -204,7 +210,7 @@ export class ErrorService {
               data: {
                 id: error.id,
                 studentId: this.studentId,
-                ...errorWrite(error),
+                ...errorWrite(aggregate),
               },
             })
           } catch (cause) {
@@ -218,16 +224,16 @@ export class ErrorService {
             where: {
               studentId_id: {
                 studentId: this.studentId,
-                id: current.id,
+                id: current.error.id,
               },
             },
-            data: errorWrite(error),
+            data: errorWrite(aggregate),
           })
         }
       }
 
       const result = await readAllErrors(transaction, this.studentId)
-      return { errors: result.map(({ error }) => error) }
+      return { errors: result.map(({ aggregate }) => aggregate.error) }
     })
   }
 
@@ -248,10 +254,23 @@ export class ErrorService {
 
       let error: ErrorItem
       try {
-        error = applyRedoAttempt(current, attempt)
+        error = applyRedoAttempt(current.error, attempt)
       } catch (cause) {
         return mapDomainError(cause)
       }
+
+      const currentKeys = new Set(
+        current.error.occurrenceRecords.map(({ key }) => key),
+      )
+      const addedRecords = error.occurrenceRecords.filter(({ key }) => !currentKeys.has(key))
+      if (addedRecords.length !== (attempt.isCorrect ? 0 : 1)) {
+        return storedDataInvalid(new Error('Redo occurrence transition is inconsistent'))
+      }
+      const occurrenceEvidenceBindings = [
+        ...current.occurrenceEvidenceBindings,
+        ...addedRecords.map((record) =>
+          redoOccurrenceEvidenceBinding(error.id, attempt, record)),
+      ]
 
       await transaction.errorItem.update({
         where: {
@@ -260,7 +279,10 @@ export class ErrorService {
             id: errorId,
           },
         },
-        data: errorWrite(error),
+        data: errorWrite({
+          error,
+          occurrenceEvidenceBindings,
+        }),
       })
 
       const updated = await transaction.errorItem.findUniqueOrThrow({
@@ -271,7 +293,7 @@ export class ErrorService {
           },
         },
       })
-      return { error: parseStoredError(updated, this.studentId) }
+      return { error: parseStoredError(updated, this.studentId).error }
     })
   }
 }

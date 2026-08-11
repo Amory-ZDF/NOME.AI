@@ -4,7 +4,6 @@ import { AppError } from '../../common/errors/app-error.js'
 import { isSafeJsonObjectKey } from '../../common/json/safe-json.js'
 import {
   defaultSettings,
-  errorItemSchema,
   exerciseSetSchema,
   greetingSchema,
   learningSummarySchema,
@@ -21,6 +20,7 @@ import {
   type BootstrapData,
 } from '../../contracts/student-contracts.js'
 import type { StudentPrisma } from '../../db/client.js'
+import { parseStoredErrorAggregate } from '../errors/error-cards.js'
 
 function storedDataInvalid(cause: unknown): never {
   throw new AppError(
@@ -188,7 +188,12 @@ export class BootstrapService {
       })
 
       const errors = errorRows.map((row) => {
-        const value = parseStored(errorItemSchema, row.payload, `error item ${row.id}`)
+        let value
+        try {
+          value = parseStoredErrorAggregate(row.payload).error
+        } catch (cause) {
+          return storedDataInvalid(new Error(`Invalid stored error item ${row.id}`, { cause }))
+        }
         assertStored(
           value.id === row.id &&
             value.questionId === row.questionId &&
