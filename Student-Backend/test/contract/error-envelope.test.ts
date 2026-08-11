@@ -21,10 +21,10 @@ function errorBody(response: { json(): unknown }) {
   return response.json() as { code: string; message: string; data: unknown }
 }
 
-function expectFailure(response: { statusCode: number; json(): unknown }, status: number, code: string, message: string) {
+function expectFailure(response: { statusCode: number; json(): unknown; headers?: Record<string, unknown> }, status: number, code: string, message: string) {
   expect(response.statusCode).toBe(status)
   expect(errorBody(response)).toEqual({ code, message, data: null })
-  expect(JSON.stringify(response.json())).not.toMatch(/stack|sqlite|prisma|PRIVATE_SQL_PATH_AND_SECRET/i)
+  expect(`${JSON.stringify(response.json())}${JSON.stringify(response.headers ?? {})}`).not.toMatch(/stack|sqlite|prisma|PRIVATE_SQL_PATH_AND_SECRET|C:\\|select\s/i)
 }
 
 async function insertStudent(id = studentId) {
@@ -107,6 +107,7 @@ describe('public error envelope and raw-router contract', () => {
   it('keeps CORS narrow while raw-router failures have the same JSON-only public envelope', async () => {
     const server = app()
     try {
+      const before = await durableSnapshot()
       const configured = await server.inject({ method: 'GET', url: '/health', headers: { origin: 'https://student.example.com' } })
       const attacker = await server.inject({ method: 'GET', url: '/health', headers: { origin: 'https://attacker.example.com' } })
       const raw = await server.inject({ method: 'GET', url: '/api/exercise-sets/%E0%A4%A', headers: { origin: 'https://attacker.example.com', authorization: `Bearer ${secret}` } })
@@ -115,6 +116,7 @@ describe('public error envelope and raw-router contract', () => {
       expect(raw.headers['access-control-allow-origin']).toBeUndefined()
       expect(raw.headers['content-type']).toContain('application/json')
       expectFailure(raw, 400, 'INVALID_INPUT', 'Invalid request')
+      expect(await durableSnapshot()).toBe(before)
     } finally { await server.close() }
   })
 })
