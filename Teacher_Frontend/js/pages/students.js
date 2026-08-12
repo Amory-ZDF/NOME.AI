@@ -2,8 +2,8 @@
  * NOME.AI - 页面: 学生列表
  */
 
-Pages.students = function() {
-  const data = MockData.students;
+Pages.students = async function() {
+  const data = await API.getStudents();
   const _ = (k) => t('students.' + k);
   const _c = (k) => t('common.' + k);
 

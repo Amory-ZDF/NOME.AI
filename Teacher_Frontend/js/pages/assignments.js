@@ -2,8 +2,9 @@
  * NOME.AI - 页面: 作业管理
  */
 
-Pages.assignments = function() {
-  const data = MockData.assignments;
+Pages.assignments = async function() {
+  const data = await API.getAssignments();
+  API._assignmentCache = data; // cache for openGradingModal
   const _ = (k) => t('assignments.' + k);
   const _c = (k) => t('common.' + k);
 
@@ -105,7 +106,10 @@ function toggleAssignmentExpand(row, id) {
 }
 
 function openGradingModal(assignmentId) {
-  const a = MockData.assignments.find(x => x.id === assignmentId);
+  // Use cached store or fetch via API
+  const a = (typeof API !== 'undefined' && API._assignmentCache)
+    ? API._assignmentCache.find(x => x.id === assignmentId)
+    : MockData.assignments.find(x => x.id === assignmentId);
   if (!a) return;
   const _ = (k) => t('assignments.' + k);
   const _c = (k) => t('common.' + k);

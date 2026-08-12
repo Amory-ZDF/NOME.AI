@@ -190,12 +190,29 @@ const App = {
     const main = $('#mainContent');
     if (!main) return;
 
-    if (typeof Pages[route] === 'function') {
-      main.innerHTML = Pages[route]();
+    const renderSync = (html) => {
+      main.innerHTML = html;
       if (typeof Pages[route + '_init'] === 'function') {
         setTimeout(() => Pages[route + '_init'](), 0);
       }
       window.scrollTo(0, 0);
+    };
+
+    if (typeof Pages[route] === 'function') {
+      const result = Pages[route]();
+      if (result && typeof result.then === 'function') {
+        const routeAtStart = route;
+        result.then(html => {
+          if (Router.current === routeAtStart) renderSync(html);
+        }).catch(err => {
+          console.error('Page load error:', err);
+          if (Router.current === routeAtStart) {
+            main.innerHTML = (Pages.notFound ? Pages.notFound() : '<div class="page"><div class="card"><h2>Error</h2><p>' + err.message + '</p></div></div>');
+          }
+        });
+      } else {
+        renderSync(result);
+      }
     } else {
       main.innerHTML = Pages.notFound();
     }

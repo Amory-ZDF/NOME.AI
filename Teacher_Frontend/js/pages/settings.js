@@ -49,10 +49,10 @@ Pages.settings = function() {
             <h2 class="card-title">${Icons.users} ${_('account')}</h2>
           </div>
           <div style="display:flex;align-items:center;gap:1rem;padding:0.5rem 0">
-            <div class="avatar avatar-lg" style="background:var(--deep-teal);color:white">${MockData.user.avatar}</div>
+            <div class="avatar avatar-lg" style="background:var(--deep-teal);color:white">${App.user.avatar}</div>
             <div>
-              <div style="font-size:1rem;font-weight:600">${MockData.user.name}</div>
-              <div class="text-secondary" style="font-size:0.8125rem">${MockData.user.role}</div>
+              <div style="font-size:1rem;font-weight:600">${App.user.name}</div>
+              <div class="text-secondary" style="font-size:0.8125rem">${App.user.role}</div>
             </div>
           </div>
         </div>

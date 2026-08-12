@@ -107,48 +107,10 @@ async def health():
 
 
 # ---- Router registration ----
-# Each domain has its own router file matching API_INTERFACE.md
+# This backend is the AI Agent service. CRUD endpoints (tasks, notes, errors,
+# settings, bootstrap, sessions storage, materials, etc.) are owned by the
+# TypeScript Student-Backend (Fastify + Prisma, port 3001).
 
 # Agent (AI pipeline — real implementation)
 from app.routers.student import agent as agent_router
 app.include_router(agent_router.router, prefix="/api")
-
-# Bootstrap
-from app.routers.student import bootstrap as bootstrap_router
-app.include_router(bootstrap_router.router, prefix="/api")
-
-# Tasks
-from app.routers.student import tasks as tasks_router
-app.include_router(tasks_router.router, prefix="/api")
-
-# Error book
-from app.routers.student import errors as errors_router
-app.include_router(errors_router.router, prefix="/api")
-
-# Notes
-from app.routers.student import notes as notes_router
-app.include_router(notes_router.router, prefix="/api")
-
-# Questions (variant generation)
-from app.routers.student import questions as questions_router
-app.include_router(questions_router.router, prefix="/api")
-
-# Settings
-from app.routers.student import settings as settings_router
-app.include_router(settings_router.router, prefix="/api")
-
-# Question bank
-from app.routers.student import bank as bank_router
-app.include_router(bank_router.router, prefix="/api")
-
-# Exercise sets
-from app.routers.student import exercise as exercise_router
-app.include_router(exercise_router.router, prefix="/api")
-
-# Profile
-from app.routers.student import profile as profile_router
-app.include_router(profile_router.router, prefix="/api")
-
-# Session summary
-from app.routers.student import summary as summary_router
-app.include_router(summary_router.router, prefix="/api")

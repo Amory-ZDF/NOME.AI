@@ -2,8 +2,8 @@
  * NOME.AI - 页面: 数据报告
  */
 
-Pages.reports = function() {
-  const data = MockData.reports;
+Pages.reports = async function() {
+  const data = await API.getReports();
   const _ = (k) => t('reports.' + k);
   const _c = (k) => t('common.' + k);
 

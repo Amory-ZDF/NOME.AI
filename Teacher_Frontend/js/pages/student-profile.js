@@ -2,8 +2,8 @@
  * NOME.AI - 页面: 学生档案详情
  */
 
-Pages['student-profile'] = function() {
-  const data = MockData.studentDetail;
+Pages['student-profile'] = async function() {
+  const data = await API.getStudentDetail('s1');
   const percentOfTarget = (data.currentScore / data.targetScoreNum) * 100;
   const gaugePercent = data.stressIndex / 100;
   const gaugeCircum = 2 * Math.PI * 35;

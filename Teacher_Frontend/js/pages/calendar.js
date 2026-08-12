@@ -2,7 +2,8 @@
  * NOME.AI - 页面: 课程日历
  */
 
-Pages.calendar = function() {
+Pages.calendar = async function() {
+  const calendarData = await API.getCalendar();
   const today = new Date();
   const weekStart = getWeekStart(today);
   const weekEnd = new Date(weekStart);
@@ -22,7 +23,7 @@ Pages.calendar = function() {
   const coursesByDay = {};
   for (let i = 0; i < 7; i++) {
     const dayStr = days[i].toDateString();
-    coursesByDay[dayStr] = MockData.calendar.weekCourses.filter(c => {
+    coursesByDay[dayStr] = calendarData.weekCourses.filter(c => {
       return new Date(c.start).toDateString() === dayStr;
     });
   }

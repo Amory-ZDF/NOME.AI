@@ -1,0 +1,16 @@
+generator client {
+  provider     = "prisma-client"
+  output       = "../src/generated/prisma"
+  moduleFormat = "esm"
+}
+
+datasource db {
+  provider = "sqlite"
+}
+
+model Teacher {
+  id        String @id
+  name      String
+  avatar    String?
+  createdAt DateTime @default(now())
+}

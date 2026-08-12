@@ -4,8 +4,9 @@
 
 Pages = window.Pages || {};
 
-Pages.dashboard = function() {
-  const data = MockData.dashboard;
+Pages.dashboard = async function() {
+  const data = await API.getDashboard();
+  API._dashboardCache = data; // cache for openCourseDetail
   const today = new Date();
   const weekDays = generateMiniWeek(today);
   const _ = (k) => t('dashboard.' + k);
@@ -194,7 +195,7 @@ function handlePendingClick(label) {
 }
 
 function openCourseDetail(courseId) {
-  const course = MockData.dashboard.courses.find(c => c.id === courseId);
+  const course = (API._dashboardCache ? API._dashboardCache.courses : MockData.dashboard.courses).find(c => c.id === courseId);
   if (!course) return;
   const _ = (k) => t('calendar.' + k);
 

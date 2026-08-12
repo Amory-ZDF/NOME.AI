@@ -1,11 +1,10 @@
 # backend/app/routers/student/__init__.py
-"""Student-side API routers.
+"""Student-side API routers — AI Agent service.
 
 Modules:
-    bootstrap   — GET  /api/student/bootstrap
-    tasks       — CRUD /api/tasks/*
-    errors      — CRUD /api/errors/*
-    sessions    — CRUD /api/sessions/*
-    notes       — CRUD /api/notes/*
-    agent       — POST /api/agent/hint, /api/agent/diagnose, /api/agent/framework
+    agent  — POST /api/agent/analyze, /api/agent/counter-reply-ext, /api/sessions
+
+CRUD endpoints (tasks, errors, notes, settings, bootstrap, sessions storage,
+materials, exercises, bank, profile, summary) are owned by the TypeScript
+Student-Backend (Fastify + Prisma, port 3001).
 """
