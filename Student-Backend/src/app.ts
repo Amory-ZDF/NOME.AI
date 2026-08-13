@@ -18,6 +18,7 @@ import type { Env } from './config/env.js'
 import type { StudentPrisma } from './db/client.js'
 import { createHttpStudentAgentClient } from './integrations/student-agent/http-student-agent.client.js'
 import type { StudentAgentClient } from './integrations/student-agent/student-agent.client.js'
+import { AgentDomainError } from './integrations/student-agent/student-agent.errors.js'
 import { bootstrapRoutes } from './modules/bootstrap/bootstrap.routes.js'
 import { exerciseRoutes } from './modules/exercises/exercise.routes.js'
 import { errorRoutes } from './modules/errors/error.routes.js'
@@ -130,13 +131,19 @@ export function buildApp({ env, loggerStream, prisma, now = () => new Date(), cr
   }
 
   app.decorate('prisma', prisma)
-  app.decorate(
-    'studentAgent',
-    studentAgentClient ?? createHttpStudentAgentClient({
+  const httpStudentAgent = createHttpStudentAgentClient({
       baseUrl: env.AGENT_BASE_URL,
       timeoutMs: env.AGENT_TIMEOUT_MS,
-    }),
-  )
+    })
+  app.decorate('studentAgent', studentAgentClient ?? {
+    async classifyMaterial() {
+      // The teammate Agent has not published an ingestion/reference contract yet.
+      // Do not fabricate classifications from browser-supplied metadata alone.
+      throw new AgentDomainError('CONTENT_UNAVAILABLE')
+    },
+    generateQuestionVariant: httpStudentAgent.generateQuestionVariant,
+    generateErrorVariant: httpStudentAgent.generateErrorVariant,
+  })
 
   app.setValidatorCompiler(validatorCompiler)
   app.setSerializerCompiler(serializerCompiler)
@@ -180,7 +187,7 @@ export function buildApp({ env, loggerStream, prisma, now = () => new Date(), cr
   app.register(exerciseRoutes, { studentId: env.STUDENT_ID })
   app.register(errorRoutes, { studentId: env.STUDENT_ID })
   app.register(noteRoutes, { studentId: env.STUDENT_ID })
-  app.register(materialRoutes, { studentId: env.STUDENT_ID, now, createId })
+  app.register(materialRoutes, { studentId: env.STUDENT_ID, databaseUrl: env.DATABASE_URL, now, createId })
   app.register(sessionRoutes, { studentId: env.STUDENT_ID })
   app.register(settingsRoutes, { studentId: env.STUDENT_ID })
   app.register(taskRoutes, { studentId: env.STUDENT_ID, now })

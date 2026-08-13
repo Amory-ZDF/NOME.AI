@@ -19,6 +19,7 @@ import { MaterialService } from './material.service.js'
 
 interface MaterialRoutesOptions {
   studentId: string
+  databaseUrl: string
   now: () => Date
   createId: () => string
 }
@@ -56,9 +57,20 @@ const materialEnvelopeSchema = z.strictObject({
 const confirmationEnvelopeSchema = z.strictObject({
   code: z.literal(0), message: z.literal('ok'), data: z.strictObject({ job: materialUploadJobSchema, note: noteSchema }),
 })
+const processErrorEnvelopeSchema = z.strictObject({
+  code: z.string(),
+  message: z.string(),
+  data: z.union([z.null(), z.strictObject({ job: materialUploadJobSchema })]),
+})
 const responseSchemas = {
   200: materialEnvelopeSchema, 400: errorEnvelopeSchema, 404: errorEnvelopeSchema, 409: errorEnvelopeSchema,
   413: errorEnvelopeSchema, 415: errorEnvelopeSchema, 500: errorEnvelopeSchema,
+}
+const processResponseSchemas = {
+  ...responseSchemas,
+  400: processErrorEnvelopeSchema,
+  502: errorEnvelopeSchema,
+  503: errorEnvelopeSchema,
 }
 const confirmationResponseSchemas = {
   200: confirmationEnvelopeSchema, 400: errorEnvelopeSchema, 404: errorEnvelopeSchema, 409: errorEnvelopeSchema,
@@ -67,7 +79,9 @@ const confirmationResponseSchemas = {
 
 export async function materialRoutes(app: FastifyInstance, options: MaterialRoutesOptions): Promise<void> {
   const routes = app.withTypeProvider<ZodTypeProvider>()
-  const service = new MaterialService(app.prisma, options.studentId, options.now, options.createId)
+  const service = new MaterialService(
+    app.prisma, options.studentId, options.now, options.createId, app.studentAgent, options.databaseUrl,
+  )
   // Validation is intentionally service-owned so documented upload domain codes
   // are retained while Swagger still publishes the exact JSON shape.
   const bypassAutomaticValidation = () => (value: unknown) => ({ value })
@@ -90,6 +104,21 @@ export async function materialRoutes(app: FastifyInstance, options: MaterialRout
       throw new AppError('Invalid request', 400, 'INVALID_INPUT')
     }
     return ok({ job: await service.cancel(parsed.data.id) })
+  })
+
+  routes.post('/api/material-uploads/:id/process', {
+    validatorCompiler: bypassAutomaticValidation,
+    schema: {
+      tags: ['materials'], summary: 'Classify a queued material job through the internal Agent',
+      params: materialParamsSchema, response: processResponseSchemas,
+    },
+    preValidation: async (request) => {
+      if (request.body !== undefined) throw new AppError('Invalid request', 400, 'INVALID_INPUT')
+    },
+  }, async (request) => {
+    const parsed = materialParamsSchema.safeParse(request.params as unknown)
+    if (!parsed.success) throw new AppError('Invalid request', 400, 'INVALID_INPUT')
+    return ok({ job: await service.process(parsed.data.id) })
   })
 
   routes.post('/api/material-uploads/:id/confirm', {

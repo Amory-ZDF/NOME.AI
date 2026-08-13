@@ -13,6 +13,7 @@ import {
 } from './student-agent.contracts.js'
 import type { AgentCallOptions, StudentAgentClient } from './student-agent.client.js'
 import {
+  AGENT_DOMAIN_MESSAGES,
   AgentDomainError,
   AgentOutputInvalidError,
   AgentUnavailableError,
@@ -25,18 +26,10 @@ const INTERNAL_PATHS = {
   error: '/internal/v1/student-agent/error-variants',
 } as const
 
-const safeDomainCodeSchema = z.enum([
-  'UNSUPPORTED_MATERIAL',
-  'CONTENT_UNAVAILABLE',
-  'CLASSIFICATION_FAILED',
-  'GENERATION_REJECTED',
+const safeDomainCodeSchema = z.enum(Object.keys(AGENT_DOMAIN_MESSAGES) as [
+  keyof typeof AGENT_DOMAIN_MESSAGES,
+  ...(keyof typeof AGENT_DOMAIN_MESSAGES)[],
 ])
-const safeDomainMessages: Record<z.infer<typeof safeDomainCodeSchema>, string> = {
-  UNSUPPORTED_MATERIAL: 'Material is not supported',
-  CONTENT_UNAVAILABLE: 'Material content is unavailable',
-  CLASSIFICATION_FAILED: 'Material classification failed',
-  GENERATION_REJECTED: 'Question generation was rejected',
-}
 const domainErrorEnvelopeSchema = z.strictObject({
   code: safeDomainCodeSchema,
   message: z.string().min(1).max(200),
@@ -164,7 +157,7 @@ export function createHttpStudentAgentClient({
     if (!response.ok) {
       const domain = domainErrorEnvelopeSchema.safeParse(payload)
       if (!domain.success) invalidOutput()
-      throw new AgentDomainError(domain.data.code, safeDomainMessages[domain.data.code])
+      throw new AgentDomainError(domain.data.code)
     }
 
     const envelope = successEnvelopeSchema(dataSchema).safeParse(payload)

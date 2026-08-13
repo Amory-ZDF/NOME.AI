@@ -16,12 +16,25 @@ export class AgentOutputInvalidError extends Error {
   }
 }
 
+export const AGENT_DOMAIN_MESSAGES = {
+  UNSUPPORTED_MATERIAL: 'Material is not supported',
+  CONTENT_UNAVAILABLE: 'Material content is unavailable',
+  CLASSIFICATION_FAILED: 'Material classification failed',
+  GENERATION_REJECTED: 'Question generation was rejected',
+} as const
+
+export type AgentDomainCode = keyof typeof AGENT_DOMAIN_MESSAGES
+
 export class AgentDomainError extends Error {
+  readonly safeMessage: string
+
   constructor(
-    readonly safeCode: string,
-    readonly safeMessage: string,
+    readonly safeCode: AgentDomainCode,
   ) {
+    const safeMessage: string | undefined = AGENT_DOMAIN_MESSAGES[safeCode]
+    if (safeMessage === undefined) throw new TypeError('Invalid Agent domain code')
     super(safeMessage)
     this.name = 'AgentDomainError'
+    this.safeMessage = safeMessage
   }
 }

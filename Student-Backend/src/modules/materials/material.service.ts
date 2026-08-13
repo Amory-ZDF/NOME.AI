@@ -1,4 +1,6 @@
 import { AppError } from '../../common/errors/app-error.js'
+import { cloneSafeJson } from '../../common/json/safe-json.js'
+import { createHash } from 'node:crypto'
 import { ZodError } from 'zod'
 import {
   materialClassificationResultSchema,
@@ -17,6 +19,13 @@ import {
 } from './material-rules.js'
 import { materialJobIdSchema } from '../../contracts/student-contracts.js'
 import { Prisma } from '../../generated/prisma/client.js'
+import {
+  AgentDomainError,
+  AgentOutputInvalidError,
+  AgentUnavailableError,
+} from '../../integrations/student-agent/student-agent.errors.js'
+import { materialClassificationRequestSchema } from '../../integrations/student-agent/student-agent.contracts.js'
+import type { StudentAgentClient } from '../../integrations/student-agent/student-agent.client.js'
 
 type Clock = () => Date
 type IdFactory = () => string
@@ -35,6 +44,7 @@ function notFound(): never { throw new AppError('Material upload not found', 404
 function completed(): never { throw new AppError('This upload is already completed', 409, 'UPLOAD_ALREADY_COMPLETED') }
 function cancelled(): never { throw new AppError('This upload was cancelled', 409, 'UPLOAD_CANCELLED') }
 function invalidState(): never { throw new AppError('Only uploads awaiting confirmation can be confirmed', 409, 'INVALID_JOB_STATE') }
+function invalidProcessState(): never { throw new AppError('Only queued or failed uploads can be processed', 409, 'INVALID_JOB_STATE') }
 function invalidPatch(): never { throw new AppError('Classification patch contains invalid fields', 400, 'INVALID_CLASSIFICATION_PATCH') }
 function invalidStored(cause: unknown): never {
   throw new AppError('Stored student data is invalid', 500, 'STORED_DATA_INVALID', null, { cause })
@@ -45,6 +55,7 @@ function isPrismaCode(cause: unknown, ...codes: string[]): boolean {
 }
 
 const transactionRetryDelaysMs = [25, 50, 100, 200] as const
+const activeMaterialProcesses = new Map<string, Promise<MaterialUploadJob>>()
 
 function isTransientTransactionContention(cause: unknown): boolean {
   if (cause instanceof AppError || cause instanceof ZodError) return false
@@ -148,6 +159,8 @@ export class MaterialService {
     private readonly studentId: string,
     private readonly now: Clock,
     private readonly createId: IdFactory,
+    private readonly agentClient?: StudentAgentClient,
+    private readonly processScope = '',
   ) {}
 
   private async retry<T>(operation: () => Promise<T>): Promise<T> {
@@ -195,6 +208,116 @@ export class MaterialService {
       })
       return cancelled
     }))
+  }
+
+  async process(id: string): Promise<MaterialUploadJob> {
+    if (this.agentClient === undefined) {
+      throw new AppError('Internal server error', 500, 'INTERNAL_ERROR')
+    }
+    const processKey = `${this.processScope}\0${this.studentId}\0${id}`
+    const active = activeMaterialProcesses.get(processKey)
+    if (active !== undefined) return active
+
+    const operation = this.processOnce(id, this.agentClient)
+    activeMaterialProcesses.set(processKey, operation)
+    try {
+      return await operation
+    } finally {
+      if (activeMaterialProcesses.get(processKey) === operation) activeMaterialProcesses.delete(processKey)
+    }
+  }
+
+  private async processOnce(id: string, agentClient: StudentAgentClient): Promise<MaterialUploadJob> {
+    const row = await this.prisma.materialUploadJob.findUnique({
+      where: { studentId_id: { studentId: this.studentId, id } },
+    })
+    if (row === null) notFound()
+    const snapshot = parseStored(row)
+    assertProcessable(snapshot)
+
+    const request = materialClassificationRequestSchema.parse({
+      contractVersion: 1,
+      operationKey: materialOperationKey(this.studentId, snapshot),
+      studentId: this.studentId,
+      job: materialAgentMetadata(snapshot),
+    })
+
+    let result: MaterialClassificationResult
+    try {
+      result = materialClassificationResultSchema.parse(
+        await agentClient.classifyMaterial(request),
+      )
+      if (containsRawCarrier(result)) throw new AgentOutputInvalidError()
+    } catch (cause) {
+      if (cause instanceof AgentDomainError) {
+        return this.persistAgentDomainFailure(id, snapshot, cause)
+      }
+      if (cause instanceof AgentUnavailableError) {
+        throw new AppError('Student Agent is unavailable', 503, 'AGENT_UNAVAILABLE')
+      }
+      if (cause instanceof AgentOutputInvalidError || cause instanceof ZodError) {
+        throw new AppError('Student Agent returned invalid output', 502, 'AGENT_OUTPUT_INVALID')
+      }
+      throw cause
+    }
+
+    return this.retry(() => this.prisma.$transaction(async (transaction) => {
+      const currentRow = await transaction.materialUploadJob.findUnique({
+        where: { studentId_id: { studentId: this.studentId, id } },
+      })
+      if (currentRow === null) notFound()
+      const current = parseStored(currentRow)
+      assertProcessable(current)
+      if (!sameProcessGeneration(snapshot, current)) invalidProcessState()
+      const { failure: _failure, ...base } = current
+      const next = materialUploadJobSchema.parse({
+        ...base,
+        status: 'needs_confirmation',
+        progress: 100,
+        result,
+        updatedAt: readClock(this.now),
+      })
+      await transaction.materialUploadJob.update({
+        where: { studentId_id: { studentId: this.studentId, id } },
+        data: { status: next.status, payload: toInputJson(next) },
+      })
+      return next
+    }))
+  }
+
+  private async persistAgentDomainFailure(
+    id: string,
+    snapshot: MaterialUploadJob,
+    failure: AgentDomainError,
+  ): Promise<never> {
+    const failed = await this.retry(() => this.prisma.$transaction(async (transaction) => {
+      const currentRow = await transaction.materialUploadJob.findUnique({
+        where: { studentId_id: { studentId: this.studentId, id } },
+      })
+      if (currentRow === null) notFound()
+      const current = parseStored(currentRow)
+      assertProcessable(current)
+      if (!sameProcessGeneration(snapshot, current)) invalidProcessState()
+      const { failure: _oldFailure, result: _oldResult, ...base } = current
+      const next = materialUploadJobSchema.parse({
+        ...base,
+        status: 'failed',
+        progress: Math.max(1, current.progress),
+        updatedAt: readClock(this.now),
+        failure: { code: failure.safeCode, message: failure.safeMessage },
+      })
+      await transaction.materialUploadJob.update({
+        where: { studentId_id: { studentId: this.studentId, id } },
+        data: { status: next.status, payload: toInputJson(next) },
+      })
+      return next
+    }))
+    throw new AppError(
+      failure.safeMessage,
+      400,
+      failure.safeCode,
+      cloneSafeJson({ job: failed }),
+    )
   }
 
   async confirm(id: string, rawPatch: unknown): Promise<{ job: MaterialUploadJob; note: Note }> {
@@ -245,5 +368,41 @@ export class MaterialService {
       if (isPrismaCode(cause, 'P2002')) duplicateNote()
       throw cause
     }
+  }
+}
+
+function assertProcessable(job: MaterialUploadJob): void {
+  if (job.status === 'cancelled') cancelled()
+  if (job.status === 'completed') completed()
+  if (job.status !== 'queued' && job.status !== 'failed') invalidProcessState()
+}
+
+function sameProcessGeneration(left: MaterialUploadJob, right: MaterialUploadJob): boolean {
+  return JSON.stringify(left) === JSON.stringify(right)
+}
+
+function materialOperationKey(studentId: string, job: MaterialUploadJob): string {
+  const digest = createHash('sha256')
+    .update(studentId)
+    .update('\0')
+    .update(job.id)
+    .update('\0')
+    .update(job.updatedAt)
+    .digest('hex')
+  return `material-process-v1:${digest}`
+}
+
+function materialAgentMetadata(job: MaterialUploadJob) {
+  return {
+    id: job.id,
+    fileName: job.fileName,
+    mimeType: job.mimeType,
+    size: job.size,
+    materialType: job.materialType,
+    ...(job.examBoard === undefined ? {} : { examBoard: job.examBoard }),
+    ...(job.subject === undefined ? {} : { subject: job.subject }),
+    ...(job.chapter === undefined ? {} : { chapter: job.chapter }),
+    createdAt: job.createdAt,
+    updatedAt: job.updatedAt,
   }
 }

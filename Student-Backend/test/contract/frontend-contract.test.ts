@@ -765,10 +765,10 @@ describe('documented non-Agent frontend contract', () => {
     } finally { await server.close() }
   })
 
-  it('keeps deliberately unimplemented Agent-owned process and variant routes absent', async () => {
+  it('keeps the two deliberately unimplemented Agent-owned variant routes absent', async () => {
     const server = app()
     try {
-      for (const url of ['/api/material-uploads/any/process', '/api/errors/any/variant', '/api/questions/any/variant']) {
+      for (const url of ['/api/errors/any/variant', '/api/questions/any/variant']) {
         const response = await server.inject({ method: 'POST', url, payload: {} })
         expect(response.statusCode).toBe(404)
         expect(response.json()).toStrictEqual({ code: 'NOT_FOUND', message: 'Route not found', data: null })
