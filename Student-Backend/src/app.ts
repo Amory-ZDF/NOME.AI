@@ -27,6 +27,7 @@ import { materialRoutes } from './modules/materials/material.routes.js'
 import { sessionRoutes } from './modules/sessions/session.routes.js'
 import { settingsRoutes } from './modules/settings/settings.routes.js'
 import { taskRoutes } from './modules/tasks/task.routes.js'
+import { questionVariantRoutes } from './modules/variants/question-variant.routes.js'
 
 interface BuildAppOptions {
   env: Env
@@ -191,6 +192,7 @@ export function buildApp({ env, loggerStream, prisma, now = () => new Date(), cr
   app.register(sessionRoutes, { studentId: env.STUDENT_ID })
   app.register(settingsRoutes, { studentId: env.STUDENT_ID })
   app.register(taskRoutes, { studentId: env.STUDENT_ID, now })
+  app.register(questionVariantRoutes, { studentId: env.STUDENT_ID, databaseUrl: env.DATABASE_URL, now })
 
   return app
 }
