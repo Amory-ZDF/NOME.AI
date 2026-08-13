@@ -22,7 +22,7 @@ import { questionVariantRequestSchema } from '../../integrations/student-agent/s
 import { questionVariantIds, questionVariantOperationKey } from './variant-ids.js'
 import { containsRawCarrier } from '../materials/material-rules.js'
 
-interface SourceSnapshot {
+export interface VariantSourceSnapshot {
   setId: string
   set: ExerciseSet
   question: Question
@@ -83,12 +83,16 @@ function parseSetRow(row: {
   }
 }
 
-async function resolveSource(prisma: StudentPrisma, studentId: string, questionId: string): Promise<SourceSnapshot> {
+export async function resolveVariantSource(
+  prisma: StudentPrisma,
+  studentId: string,
+  questionId: string,
+): Promise<VariantSourceSnapshot> {
   const rows = await prisma.exerciseSet.findMany({
     where: { studentId, kind: { in: ['task', 'bank'] } },
     orderBy: { id: 'asc' },
   })
-  const matches: SourceSnapshot[] = []
+  const matches: VariantSourceSnapshot[] = []
   for (const row of rows) {
     const set = parseSetRow(row)
     if (row.kind === 'task') {
@@ -111,10 +115,10 @@ async function resolveSource(prisma: StudentPrisma, studentId: string, questionI
   }
   if (matches.length === 0) notFound()
   if (matches.length !== 1) invalidStored(new Error(`Question ${questionId} is ambiguous`))
-  return matches[0] as SourceSnapshot
+  return matches[0] as VariantSourceSnapshot
 }
 
-function sameSource(left: SourceSnapshot, right: SourceSnapshot): boolean {
+export function sameVariantSource(left: VariantSourceSnapshot, right: VariantSourceSnapshot): boolean {
   return JSON.stringify(left) === JSON.stringify(right)
 }
 
@@ -159,7 +163,7 @@ export class QuestionVariantService {
   }
 
   private async createOnce(questionId: string): Promise<VariantResult> {
-    const source = await resolveSource(this.prisma, this.studentId, questionId)
+    const source = await resolveVariantSource(this.prisma, this.studentId, questionId)
     const existing = await this.readExisting(questionId, source)
     if (existing !== null) return existing
 
@@ -207,8 +211,8 @@ export class QuestionVariantService {
     const expected = { exerciseSet, task }
 
     return this.prisma.$transaction(async (transaction) => {
-      const current = await resolveSource(transaction as StudentPrisma, this.studentId, questionId)
-      if (!sameSource(source, current)) conflict()
+      const current = await resolveVariantSource(transaction as StudentPrisma, this.studentId, questionId)
+      if (!sameVariantSource(source, current)) conflict()
       const [taskRow, setRow] = await Promise.all([
         transaction.task.findUnique({ where: { studentId_id: { studentId: this.studentId, id: ids.taskId } } }),
         transaction.exerciseSet.findUnique({ where: { studentId_id: { studentId: this.studentId, id: ids.setId } } }),
@@ -227,7 +231,7 @@ export class QuestionVariantService {
     })
   }
 
-  private async readExisting(questionId: string, source: SourceSnapshot): Promise<VariantResult | null> {
+  private async readExisting(questionId: string, source: VariantSourceSnapshot): Promise<VariantResult | null> {
     const ids = questionVariantIds(this.studentId, questionId)
     const [taskRow, setRow] = await Promise.all([
       this.prisma.task.findUnique({ where: { studentId_id: { studentId: this.studentId, id: ids.taskId } } }),
@@ -240,7 +244,7 @@ export class QuestionVariantService {
       const task = taskSchema.parse(taskRow.payload)
       const question = exerciseSet.questions[0]
       if (
-        !sameSource(source, await resolveSource(this.prisma, this.studentId, questionId)) || exerciseSet.questions.length !== 1 ||
+        !sameVariantSource(source, await resolveVariantSource(this.prisma, this.studentId, questionId)) || exerciseSet.questions.length !== 1 ||
         question?.id !== ids.questionId || question.variantOf !== questionId || question.sourceQuestionId !== questionId ||
         task.id !== ids.taskId || task.title !== `Independent transfer: ${source.question.topic}` || task.type !== 'error_review' ||
         task.subject !== source.set.subject || task.estimatedMinutes !== 15 || task.dueAt !== null || task.assignedBy !== null ||

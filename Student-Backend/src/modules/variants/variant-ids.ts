@@ -19,3 +19,27 @@ export function questionVariantOperationKey(studentId: string, sourceQuestionId:
     .digest('hex')
   return `question-variant-v1:${value}`
 }
+
+export function errorVariantIds(
+  studentId: string,
+  errorId: string,
+  latestCorrectRedoAt: string,
+) {
+  const suffix = digest(['error-variant-v1', studentId, errorId, latestCorrectRedoAt])
+  return {
+    setId: `error-variant-${suffix}`,
+    taskId: `task-error-variant-${suffix}`,
+    questionId: `q-error-variant-${suffix}`,
+  }
+}
+
+export function errorVariantOperationKey(
+  studentId: string,
+  errorId: string,
+  latestCorrectRedoAt: string,
+): string {
+  const value = createHash('sha256')
+    .update(JSON.stringify(['error-variant-v1', studentId, errorId, latestCorrectRedoAt]))
+    .digest('hex')
+  return `error-variant-v1:${value}`
+}

@@ -32,8 +32,9 @@ import {
   recordVariantVerification,
   RedoChronologyError,
 } from './mastery.js'
+import { errorVariantIds } from '../variants/variant-ids.js'
 
-interface StoredErrorRow {
+export interface StoredErrorRow {
   id: string
   studentId: string
   questionId: string
@@ -171,7 +172,7 @@ async function runWithTransactionRetry<T>(operation: () => Promise<T>): Promise<
   }
 }
 
-function parseStoredError(row: StoredErrorRow, studentId: string): StoredErrorAggregate {
+export function parseStoredErrorRow(row: StoredErrorRow, studentId: string): StoredErrorAggregate {
   try {
     const aggregate = parseStoredErrorAggregate(row.payload)
     const { error } = aggregate
@@ -255,11 +256,23 @@ async function assertVerificationProvenance(
   if (setRow === null) invalidVerificationProvenance()
   const set = parseStoredExerciseSet(setRow, studentId)
   const variantQuestions = set.questions.filter(({ variantOf }) => variantOf !== undefined)
+  const latestCorrectRedo = error.redoHistory.at(-1)
+  const deterministicIds = latestCorrectRedo?.isCorrect === true
+    ? errorVariantIds(studentId, error.id, latestCorrectRedo.attemptedAt)
+    : undefined
   if (
     set.sourceQuestionId !== error.questionId ||
     set.taskId === null ||
     variantQuestions.length !== 1 ||
-    variantQuestions[0]?.variantOf !== error.questionId
+    variantQuestions[0]?.variantOf !== error.questionId ||
+    (
+      deterministicIds !== undefined &&
+      set.id === deterministicIds.setId &&
+      (
+        variantQuestions[0]?.id !== deterministicIds.questionId ||
+        variantQuestions[0]?.sourceQuestionId !== error.questionId
+      )
+    )
   ) {
     invalidVerificationProvenance()
   }
@@ -288,7 +301,7 @@ function mapDomainError(cause: unknown): never {
   throw cause
 }
 
-function errorWrite(aggregate: StoredErrorAggregate) {
+export function storedErrorWrite(aggregate: StoredErrorAggregate) {
   const { error } = aggregate
   return {
     questionId: error.questionId,
@@ -306,7 +319,7 @@ async function readAllErrors(
     where: { studentId },
     orderBy: { id: 'asc' },
   })
-  return rows.map((row) => ({ row, aggregate: parseStoredError(row, studentId) }))
+  return rows.map((row) => ({ row, aggregate: parseStoredErrorRow(row, studentId) }))
 }
 
 export class ErrorService {
@@ -357,7 +370,7 @@ export class ErrorService {
               data: {
                 id: error.id,
                 studentId: this.studentId,
-                ...errorWrite(aggregate),
+                ...storedErrorWrite(aggregate),
               },
             })
           } catch (cause) {
@@ -374,7 +387,7 @@ export class ErrorService {
                 id: current.error.id,
               },
             },
-            data: errorWrite(aggregate),
+            data: storedErrorWrite(aggregate),
           })
         }
       }
@@ -404,7 +417,7 @@ export class ErrorService {
         },
       })
       if (row === null) errorNotFound()
-      const current = parseStoredError(row, this.studentId)
+      const current = parseStoredErrorRow(row, this.studentId)
 
       let error: ErrorItem
       try {
@@ -433,7 +446,7 @@ export class ErrorService {
             id: errorId,
           },
         },
-        data: errorWrite({
+        data: storedErrorWrite({
           error,
           occurrenceEvidenceBindings,
         }),
@@ -447,7 +460,7 @@ export class ErrorService {
           },
         },
       })
-      return { error: parseStoredError(updated, this.studentId).error }
+      return { error: parseStoredErrorRow(updated, this.studentId).error }
     })
   }
 
@@ -468,14 +481,14 @@ export class ErrorService {
         where: { studentId_id: { studentId: this.studentId, id: errorId } },
       })
       if (row === null) errorNotFound()
-      const current = parseStoredError(row, this.studentId)
+      const current = parseStoredErrorRow(row, this.studentId)
       await assertVerificationProvenance(transaction, this.studentId, current.error, verification)
       const error = recordVariantVerification(current.error, verification)
       if (error === undefined) invalidVerification()
 
       await transaction.errorItem.update({
         where: { studentId_id: { studentId: this.studentId, id: errorId } },
-        data: errorWrite({ ...current, error }),
+        data: storedErrorWrite({ ...current, error }),
       })
       return { error }
     })
@@ -491,13 +504,13 @@ export class ErrorService {
         where: { studentId_id: { studentId: this.studentId, id: errorId } },
       })
       if (row === null) errorNotFound()
-      const current = parseStoredError(row, this.studentId)
+      const current = parseStoredErrorRow(row, this.studentId)
       if (!canMarkMastered(current.error)) masteryGateNotMet()
       const error = { ...current.error, status: 'mastered' as const }
 
       await transaction.errorItem.update({
         where: { studentId_id: { studentId: this.studentId, id: errorId } },
-        data: errorWrite({ ...current, error }),
+        data: storedErrorWrite({ ...current, error }),
       })
       return { error }
     })

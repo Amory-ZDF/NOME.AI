@@ -765,14 +765,12 @@ describe('documented non-Agent frontend contract', () => {
     } finally { await server.close() }
   })
 
-  it('keeps the deliberately unimplemented Agent-owned error variant route absent', async () => {
+  it('exposes the Student-Backend-owned error variant coordinator without accepting a request body', async () => {
     const server = app()
     try {
-      for (const url of ['/api/errors/any/variant']) {
-        const response = await server.inject({ method: 'POST', url, payload: {} })
-        expect(response.statusCode).toBe(404)
-        expect(response.json()).toStrictEqual({ code: 'NOT_FOUND', message: 'Route not found', data: null })
-      }
+      const response = await server.inject({ method: 'POST', url: '/api/errors/any/variant', payload: {} })
+      expect(response.statusCode).toBe(400)
+      expect(response.json()).toStrictEqual({ code: 'INVALID_INPUT', message: 'Invalid request', data: null })
     } finally { await server.close() }
   })
 })
