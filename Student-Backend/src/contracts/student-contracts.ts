@@ -237,9 +237,7 @@ export const hintSchema = safeStrictObject({
   content: nonEmptyString,
 })
 
-const questionShape = {
-  id: nonEmptyString,
-  order: z.number().int().positive(),
+const generatedQuestionShape = {
   type: questionTypeSchema,
   topic: nonEmptyString,
   difficulty: z.number().int().min(1).max(5),
@@ -250,13 +248,19 @@ const questionShape = {
   correctDisplay: nonEmptyString,
   errorType: errorTypeSchema,
   hints: z.array(hintSchema).length(5),
-  variantOf: optionalNonEmptyString,
-  sourceQuestionId: optionalNonEmptyString,
   understandingExplanation: optionalNonEmptyString,
   scoringExplanation: optionalNonEmptyString,
   markSchemePoints: z.array(jsonObjectSchema).optional(),
   passageEvidence: optionalNonEmptyString,
   errorPattern: optionalNonEmptyString,
+} as const
+
+const questionShape = {
+  id: nonEmptyString,
+  order: z.number().int().positive(),
+  ...generatedQuestionShape,
+  variantOf: optionalNonEmptyString,
+  sourceQuestionId: optionalNonEmptyString,
 } as const
 
 function refineQuestion(
@@ -298,6 +302,9 @@ function refineQuestion(
     })
   }
 }
+
+export const generatedQuestionSchema = safeStrictObject(generatedQuestionShape)
+  .superRefine(refineQuestion)
 
 export const questionSchema = safeStrictObject(questionShape).superRefine(refineQuestion)
 
@@ -542,6 +549,11 @@ function isRawCarrier(value: string): boolean {
   const normalized = value.trim()
   return /^(?:data|base64|raw):/i.test(normalized) || /;base64,/i.test(normalized)
 }
+
+export const materialMetadataStringSchema = nonEmptyString.refine(
+  (value) => !isRawCarrier(value),
+  { message: 'Raw/base64 carriers are not allowed in upload metadata' },
+)
 
 const plainNoteBlockSchema = safeStrictObject({
   t: z.enum(['p', 'h', 'formula']),
@@ -1094,6 +1106,7 @@ export const bootstrapDataSchema = trustedBootstrapDataSchema
 export type Student = z.infer<typeof studentSchema>
 export type Task = z.infer<typeof taskSchema>
 export type TaskAdjustment = z.infer<typeof taskAdjustmentSchema>
+export type GeneratedQuestion = z.infer<typeof generatedQuestionSchema>
 export type Question = z.infer<typeof questionSchema>
 export type Hint = z.infer<typeof hintSchema>
 export type ExerciseSet = z.infer<typeof exerciseSetSchema>

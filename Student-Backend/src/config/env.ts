@@ -4,6 +4,7 @@ import { normalizeSqliteDatabaseUrl } from '../db/database-url.js'
 
 const DEFAULT_CORS_ORIGIN = 'http://localhost:5173'
 const DEFAULT_STUDENT_ID = 'stu-001'
+const DEFAULT_AGENT_BASE_URL = 'http://127.0.0.1:8000'
 
 const sqliteDatabaseUrlSchema = z.string().transform((value, context) => {
   try {
@@ -57,6 +58,8 @@ const envSchema = z
     LOG_LEVEL: z
       .enum(['fatal', 'error', 'warn', 'info', 'debug', 'trace', 'silent'])
       .default('info'),
+    AGENT_BASE_URL: httpOriginSchema.optional(),
+    AGENT_TIMEOUT_MS: z.coerce.number().int().min(1).max(60_000).default(10_000),
   })
   .superRefine((value, context) => {
     if (value.NODE_ENV === 'production' && value.STUDENT_ID === undefined) {
@@ -66,10 +69,18 @@ const envSchema = z
         message: 'is required in production',
       })
     }
+    if (value.NODE_ENV === 'production' && value.AGENT_BASE_URL === undefined) {
+      context.addIssue({
+        code: 'custom',
+        path: ['AGENT_BASE_URL'],
+        message: 'is required in production',
+      })
+    }
   })
   .transform((value) => ({
     ...value,
     STUDENT_ID: value.STUDENT_ID ?? DEFAULT_STUDENT_ID,
+    AGENT_BASE_URL: value.AGENT_BASE_URL ?? DEFAULT_AGENT_BASE_URL,
   }))
 
 export type Env = z.infer<typeof envSchema>

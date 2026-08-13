@@ -340,7 +340,7 @@ describe('compiled production server startup', () => {
     const databaseUrl = `file:${databasePath.replaceAll('\\', '/')}`
     const secret = 'smoke-auth-secret-must-not-leak'
     const port = await reservePort()
-    const environment = { ...process.env, NODE_ENV: 'production', HOST: '127.0.0.1', PORT: String(port), DATABASE_URL: databaseUrl, STUDENT_ID: 'smoke-student', CORS_ORIGINS: 'http://smoke.test', LOG_LEVEL: 'silent', SMOKE_SECRET: secret }
+    const environment = { ...process.env, NODE_ENV: 'production', HOST: '127.0.0.1', PORT: String(port), DATABASE_URL: databaseUrl, STUDENT_ID: 'smoke-student', CORS_ORIGINS: 'http://smoke.test', LOG_LEVEL: 'silent', AGENT_BASE_URL: 'http://127.0.0.1:8000', SMOKE_SECRET: secret }
     let child: ChildProcess | undefined
     let serverState: ChildCloseState | undefined
     let output = ''

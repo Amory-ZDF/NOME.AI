@@ -16,6 +16,8 @@ import { fail, ok } from './common/http/envelope.js'
 import { serializeError } from './common/logging/error-serializer.js'
 import type { Env } from './config/env.js'
 import type { StudentPrisma } from './db/client.js'
+import { createHttpStudentAgentClient } from './integrations/student-agent/http-student-agent.client.js'
+import type { StudentAgentClient } from './integrations/student-agent/student-agent.client.js'
 import { bootstrapRoutes } from './modules/bootstrap/bootstrap.routes.js'
 import { exerciseRoutes } from './modules/exercises/exercise.routes.js'
 import { errorRoutes } from './modules/errors/error.routes.js'
@@ -31,6 +33,7 @@ interface BuildAppOptions {
   prisma: StudentPrisma
   now?: () => Date
   createId?: () => string
+  studentAgentClient?: StudentAgentClient
 }
 
 const corsMethods = ['GET', 'HEAD', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS']
@@ -43,7 +46,7 @@ const healthEnvelopeSchema = z.object({
   }),
 })
 
-export function buildApp({ env, loggerStream, prisma, now = () => new Date(), createId = () => crypto.randomUUID() }: BuildAppOptions) {
+export function buildApp({ env, loggerStream, prisma, now = () => new Date(), createId = () => crypto.randomUUID(), studentAgentClient }: BuildAppOptions) {
   let logRawRouterRejection = () => undefined
   const invalidRequestBody = JSON.stringify(fail('INVALID_INPUT', 'Invalid request'))
   const rejectRawRouterRequest = (
@@ -127,6 +130,13 @@ export function buildApp({ env, loggerStream, prisma, now = () => new Date(), cr
   }
 
   app.decorate('prisma', prisma)
+  app.decorate(
+    'studentAgent',
+    studentAgentClient ?? createHttpStudentAgentClient({
+      baseUrl: env.AGENT_BASE_URL,
+      timeoutMs: env.AGENT_TIMEOUT_MS,
+    }),
+  )
 
   app.setValidatorCompiler(validatorCompiler)
   app.setSerializerCompiler(serializerCompiler)

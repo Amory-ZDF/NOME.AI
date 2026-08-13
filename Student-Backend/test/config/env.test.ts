@@ -15,6 +15,8 @@ describe('parseEnv', () => {
       HOST: '127.0.0.1',
       STUDENT_ID: 'stu-001',
       CORS_ORIGINS: ['http://localhost:5173'],
+      AGENT_BASE_URL: 'http://127.0.0.1:8000',
+      AGENT_TIMEOUT_MS: 10_000,
     })
   })
 
@@ -40,16 +42,30 @@ describe('parseEnv', () => {
     expect(() => parseEnv(input)).toThrow(/^Invalid environment/)
   })
 
-  it('accepts an explicit production student id', () => {
-    expect(
+  it('requires an explicit production Agent origin', () => {
+    expect(() =>
       parseEnv({
         NODE_ENV: 'production',
         DATABASE_URL: 'file:./production.db',
         STUDENT_ID: 'stu-production',
       }),
+    ).toThrow(/AGENT_BASE_URL/)
+  })
+
+  it('accepts explicit production student and Agent configuration', () => {
+    expect(
+      parseEnv({
+        NODE_ENV: 'production',
+        DATABASE_URL: 'file:./production.db',
+        STUDENT_ID: 'stu-production',
+        AGENT_BASE_URL: 'https://agent.example.com',
+        AGENT_TIMEOUT_MS: '2500',
+      }),
     ).toMatchObject({
       NODE_ENV: 'production',
       STUDENT_ID: 'stu-production',
+      AGENT_BASE_URL: 'https://agent.example.com',
+      AGENT_TIMEOUT_MS: 2500,
     })
   })
 
@@ -98,6 +114,12 @@ describe('parseEnv', () => {
       { ...BASE_ENV, CORS_ORIGINS: 'https://example.com,' },
     ],
     ['an invalid LOG_LEVEL', { ...BASE_ENV, LOG_LEVEL: 'verbose' }],
+    ['a non-HTTP Agent URL', { ...BASE_ENV, AGENT_BASE_URL: 'file:///agent' }],
+    ['an Agent URL with credentials', { ...BASE_ENV, AGENT_BASE_URL: 'https://user:secret@example.com' }],
+    ['an Agent URL with a path', { ...BASE_ENV, AGENT_BASE_URL: 'https://example.com/internal' }],
+    ['a zero Agent timeout', { ...BASE_ENV, AGENT_TIMEOUT_MS: '0' }],
+    ['an excessive Agent timeout', { ...BASE_ENV, AGENT_TIMEOUT_MS: '60001' }],
+    ['a non-integral Agent timeout', { ...BASE_ENV, AGENT_TIMEOUT_MS: '10.5' }],
   ])('rejects %s in isolation', (_case, input) => {
     expect(() => parseEnv(input)).toThrow(/^Invalid environment/)
   })
