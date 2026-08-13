@@ -1,0 +1,43 @@
+{
+  "contractVersion": 1,
+  "operationKey": "error-variant-v1:7a4276a26948f6a83e118195cd070111f200f455fb403c19d497ca67a9b9c493",
+  "studentId": "fixture-student",
+  "source": {
+    "setId": "fixture-source-set",
+    "kind": "task",
+    "subject": "Mathematics",
+    "question": {
+      "id": "fixture-source-question",
+      "order": 1,
+      "type": "calculation",
+      "topic": "Differentiation",
+      "difficulty": 3,
+      "content": "Differentiate x^2.",
+      "acceptKeywords": ["2x"],
+      "correctDisplay": "2x",
+      "errorType": "method",
+      "hints": [
+        { "level": 1, "title": "Clarify", "content": "Identify the requested derivative." },
+        { "level": 2, "title": "Knowledge", "content": "Recall the power rule." },
+        { "level": 3, "title": "Method", "content": "Apply the rule term by term." },
+        { "level": 4, "title": "Key step", "content": "Multiply by the exponent." },
+        { "level": 5, "title": "Solution", "content": "The derivative is 2x." }
+      ]
+    }
+  },
+  "error": {
+    "id": "fixture-error",
+    "errorType": "method",
+    "questionSummary": "Differentiate a polynomial.",
+    "whereWrong": "The power-rule step.",
+    "whyWrong": "The exponent was not used as a multiplier.",
+    "studentAnswer": "x",
+    "correctAnswer": "2x",
+    "latestCorrectRedo": {
+      "attemptedAt": "2026-08-13T09:30:00.000Z",
+      "answer": "2x",
+      "isCorrect": true,
+      "timeSpent": 20
+    }
+  }
+}

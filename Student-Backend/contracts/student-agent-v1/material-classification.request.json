@@ -1,0 +1,17 @@
+{
+  "contractVersion": 1,
+  "operationKey": "material-process-v1:847c599dfe89ea266374e2bd6f70a14b2001ecb6ba311c8acc14e4fd2bcae208",
+  "studentId": "fixture-student",
+  "job": {
+    "id": "fixture-material",
+    "fileName": "calculus-notes.pdf",
+    "mimeType": "application/pdf",
+    "size": 4096,
+    "materialType": "class_note",
+    "examBoard": "Cambridge",
+    "subject": "Mathematics",
+    "chapter": "Differentiation",
+    "createdAt": "2026-08-13T08:00:00.000Z",
+    "updatedAt": "2026-08-13T08:00:00.000Z"
+  }
+}

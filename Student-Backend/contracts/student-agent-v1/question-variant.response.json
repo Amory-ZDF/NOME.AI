@@ -1,0 +1,18 @@
+{
+  "question": {
+    "type": "calculation",
+    "topic": "Differentiation",
+    "difficulty": 4,
+    "content": "Differentiate 3x^2.",
+    "acceptKeywords": ["6x"],
+    "correctDisplay": "6x",
+    "errorType": "method",
+    "hints": [
+      { "level": 1, "title": "Clarify", "content": "Identify the power." },
+      { "level": 2, "title": "Knowledge", "content": "Recall the power rule." },
+      { "level": 3, "title": "Method", "content": "Keep the coefficient." },
+      { "level": 4, "title": "Key step", "content": "Multiply 3 by 2." },
+      { "level": 5, "title": "Solution", "content": "The derivative is 6x." }
+    ]
+  }
+}

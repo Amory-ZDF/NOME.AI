@@ -1,0 +1,24 @@
+{
+  "classification": {
+    "suggestedTitle": "Differentiation notes",
+    "materialType": "class_note",
+    "examBoard": "Cambridge",
+    "subject": "Mathematics",
+    "chapter": "Differentiation",
+    "folderId": "folder-differentiation",
+    "folderPath": "A-Level / Mathematics / Differentiation",
+    "questionBlocks": [
+      { "id": "q1", "label": "Question 1", "text": "Differentiate x^2." }
+    ],
+    "answerBlocks": [
+      { "id": "a1", "questionId": "q1", "text": "2x" }
+    ],
+    "content": [
+      { "t": "h", "v": "Differentiation" },
+      { "t": "p", "v": "Use the power rule." }
+    ],
+    "linkedTopics": ["topic-differentiation"],
+    "linkedErrors": [],
+    "confidence": 0.96
+  }
+}

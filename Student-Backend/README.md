@@ -30,6 +30,8 @@ Copy `.env.example` to `.env`; do not commit it. There are no example secrets.
 | `STUDENT_ID` | default `stu-001` outside production; non-blank | Fixed current student scope; this is not authentication. |
 | `CORS_ORIGINS` | default `http://localhost:5173`; comma-separated HTTP(S) origins | Origins only: no credentials, paths, query, or fragments. |
 | `LOG_LEVEL` | `fatal`, `error`, `warn`, `info`, `debug`, `trace`, `silent`; default `info` | Request logs redact auth/cookie/database/secret-like fields. |
+| `AGENT_BASE_URL` | HTTP(S) origin; development default `http://127.0.0.1:8000`; required explicitly in production | Server-only URL for the teammate-owned internal Agent capability service. |
+| `AGENT_TIMEOUT_MS` | integer `1`-`60000`; default `10000` | End-to-end timeout for each internal Agent call, including response-body parsing. |
 
 ## Commands
 
@@ -58,11 +60,12 @@ Success responses use `{ "code": 0, "message": "ok", "data": ... }`; errors use 
 | Tasks | `POST /api/tasks`; `PATCH /api/tasks/:id`; `POST /api/tasks/:id/adjustment-request` |
 | Task/bank exercise reads | `GET /api/exercise-sets/:taskId`; `GET /api/bank/exercise/:setId` |
 | Session/summary | `POST /api/sessions`; `GET /api/summary/:sessionId` |
-| Error batch/redo/verification/mastery | `POST /api/errors/batch`; `POST /api/errors/:id/redo`; `POST /api/errors/:id/verification`; `PATCH /api/errors/:id` |
+| Error batch/redo/variant/verification/mastery | `POST /api/errors/batch`; `POST /api/errors/:id/redo`; `POST /api/errors/:id/variant`; `POST /api/errors/:id/verification`; `PATCH /api/errors/:id` |
 | Notes | `GET`/`POST /api/notes`; `PATCH /api/notes/:id`; `POST /api/notes/:id/organize`; `POST /api/notes/:id/undo` |
-| Materials | `POST /api/material-uploads`; `POST /api/material-uploads/:id/cancel`; `POST /api/material-uploads/:id/confirm` |
+| Materials | `POST /api/material-uploads`; `POST /api/material-uploads/:id/process`; `POST /api/material-uploads/:id/cancel`; `POST /api/material-uploads/:id/confirm` |
+| Agent-backed question variants | `POST /api/questions/:questionId/variant` |
 
-The teammate-owned paths `POST /api/material-uploads/{id}/process`, `POST /api/questions/{questionId}/variant`, and `POST /api/errors/{id}/variant` are intentionally absent and return this service's normal 404 envelope. They are supplied/routed by the separate teammate Agent service or integration layer—never 501 placeholders in Student-Backend. See [AGENT_HANDOFF.md](./AGENT_HANDOFF.md).
+Student-Backend is the one public Student API, including `POST /api/sessions` and all three Agent-backed coordinator routes above. It calls the teammate-owned Python service only through the internal, versioned contract described in [AGENT_HANDOFF.md](./AGENT_HANDOFF.md). The browser continues to use only `VITE_API_BASE_URL`; it never receives an Agent URL or model credential.
 
 ## Operational and security boundary
 

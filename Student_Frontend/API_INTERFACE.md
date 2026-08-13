@@ -12,6 +12,7 @@
 
 ## Conventions
 
+- Public service ownership: `Student-Backend` is the one public Student API. It owns every route in this document, including `POST /api/sessions` and the Agent-backed material/question/error coordinator routes. The browser uses only `VITE_API_BASE_URL`; the Python Agent is an internal capability service and is never called directly by frontend code.
 - Base URL: `{VITE_API_BASE_URL}`, e.g. `https://api.nome.ai`
 - Content type: `application/json`
 - Auth (future): `Authorization: Bearer <token>` header, issued by the backend; the frontend stores nothing else.

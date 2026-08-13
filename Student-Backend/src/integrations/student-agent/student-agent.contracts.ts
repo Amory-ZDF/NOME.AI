@@ -34,6 +34,10 @@ const operationKeySchema = z
   .max(200)
   .refine((value) => value.trim().length > 0)
   .refine((value) => !/[\u0000-\u001f\u007f]/u.test(value))
+  .refine(
+    (value) => !/^(?:data|base64|raw):/iu.test(value.trim()) && !/;base64,/iu.test(value),
+    { message: 'Raw/base64 carriers are not allowed in operation keys' },
+  )
 
 const operationShape = {
   contractVersion: z.literal(1),

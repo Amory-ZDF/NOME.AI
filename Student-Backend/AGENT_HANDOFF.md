@@ -1,27 +1,70 @@
-# Agent service handoff
+# Student Agent v1 handoff
 
-This document defines a service boundary, not an Agent implementation. The teammate Agent service supplies classification and variant outputs. Student-Backend owns strict validation, configured-student scoping, deterministic state transitions, and persistence.
+This document is the implementation boundary between `Student-Backend` and the teammate-owned Python Agent service. It does not prescribe prompts, memory, RAG, model choice, or orchestration.
 
-## Route ownership
+## Service ownership
 
-The following routes are owned by the teammate service/integration layer and are deliberately **not registered** in Student-Backend (therefore 404 here, never 501):
+`Student-Backend` is the one browser-facing Student API. It owns every public `/api/*` route, configured-student scoping, validation, lifecycle/provenance rules, deterministic identifiers, Prisma transactions, and persistence. This includes:
 
-- `POST /api/material-uploads/{id}/process`
-- `POST /api/questions/{questionId}/variant`
-- `POST /api/errors/{id}/variant`
+- `POST /api/material-uploads/:id/process`
+- `POST /api/questions/:questionId/variant`
+- `POST /api/errors/:id/variant`
+- deterministic session persistence at `POST /api/sessions`
 
-Student-Backend does not implement, proxy, import, or persist Agent prompts, model credentials, raw uploads/base64, or Agent internals. Results cross a strict JSON boundary only.
+The Python service is an internal capability provider. Its existing public `POST /api/sessions` conflicts with the deterministic Student contract and the teammate must rename or remove that route. The browser must never call the Python service directly.
 
-## Required contracts
+## Transport contract
 
-Use the canonical schemas, not a weaker copy: `Student-Backend/src/contracts/student-contracts.ts` names `materialClassificationResultSchema`, `MaterialClassificationResult`, `noteBlockSchema`, and the student-domain error categories. The frontend-facing contract is [Student_Frontend/API_INTERFACE.md](../Student_Frontend/API_INTERFACE.md).
+Student-Backend sends `POST` JSON to the following internal endpoints:
 
-`MaterialClassificationResult` is exactly `suggestedTitle`, `materialType`, `examBoard`, `subject`, `chapter`, `folderId`, `folderPath`, `questionBlocks`, `answerBlocks`, non-empty `content`, `linkedTopics`, `linkedErrors`, and `confidence` (inclusive 0–1). Question ids are unique; answer ids are unique and reference known question ids. `content` uses every canonical `NoteBlock` variant: `{ t: 'p' | 'h' | 'formula', v: string }`; `{ t: 'list' | 'highlight', v: string, reference?: string, alt?: string }`; or `{ t: 'image', v: string, reference: non-empty string, alt: non-empty string }`. Cross-service policy prohibits raw/base64 carriers. Canonically, list/highlight `reference` and image `reference`/`v` are checked for raw/base64 forms; plain/formula/list/highlight text `v` remains ordinary string content and must be handled by the integration policy.
+| Client responsibility | Internal path | Request fixture | Successful `data` fixture |
+|---|---|---|---|
+| `classifyMaterial` | `/internal/v1/student-agent/material-classifications` | `contracts/student-agent-v1/material-classification.request.json` | `contracts/student-agent-v1/material-classification.response.json` |
+| `generateQuestionVariant` | `/internal/v1/student-agent/question-variants` | `contracts/student-agent-v1/question-variant.request.json` | `contracts/student-agent-v1/question-variant.response.json` |
+| `generateErrorVariant` | `/internal/v1/student-agent/error-variants` | `contracts/student-agent-v1/error-variant.request.json` | `contracts/student-agent-v1/error-variant.response.json` |
 
-The student domain already expects six progressive hint levels: L1 clarify, L2 knowledge, L3 method, L4 key step, L5 full solution, and L6 independent transfer variant. The seven canonical error categories are `knowledge`, `method`, `calculation`, `reading`, `execution`, `expression`, and `habit`.
+Every request has:
 
-## Transaction and safety expectations
+```http
+Content-Type: application/json
+X-NOME-Agent-Contract-Version: 1
+```
 
-For material confirmation, validate the full classification result and atomically persist the completed job plus its deterministic linked Note; no half-state is observable. For variants, preserve provenance from source question/error through the independent set and task, make retries idempotent, and enforce the chronology: correct redo precedes the exact linked independent verification, which precedes mastery. Reject mismatched tenant/student scope, replay, out-of-order evidence, and invalid payloads using the common `{ code, message, data }` error envelope; roll back failed transactions completely.
+The request body must match its fixture exactly. The Agent success response uses the common envelope, with the matching response fixture as `data`:
 
-Integration must retain durable provenance/object references only, enforce idempotency keys where retries cross services, and never weaken Student-Backend validation or fixed student scoping. Authentication/tenant identity is a future boundary: the current service's configured `STUDENT_ID` is not request authentication.
+```json
+{
+  "code": 0,
+  "message": "ok",
+  "data": { "question": { "type": "calculation" } }
+}
+```
+
+The abbreviated value above only illustrates the envelope. Implementations must return every field shown by the checked-in response fixture. Domain failures use `{ "code": "<safe known code>", "message": "<bounded message>", "data": null }`. Student-Backend rejects non-JSON, oversized, malformed, redirected, or schema-incompatible responses.
+
+## Idempotency and authority
+
+The Agent must be idempotent for an identical `operationKey`: the same request produces the same logical generated content. The key is opaque and must not be parsed as authorization. `studentId` is bounded context, not trusted authentication.
+
+The Agent returns generated content only. It must never choose tenant identity, database ids, question `id`, question `order`, `variantOf`, `sourceQuestionId`, task/set ids, or persistence state. Student-Backend constructs those authoritative values, re-reads current state after the Agent call, validates the untrusted output, and persists atomically. A late Agent response cannot overwrite cancellation, a newer redo, or an already-created conflicting variant.
+
+## Material ingestion boundary
+
+The public upload contract currently carries safe metadata only; Student-Backend never stores or forwards file bytes or base64. Real OCR/classification therefore requires a teammate-owned ingestion mechanism that gives the Agent an opaque ingestion reference. Until that reference exists, the Agent must fail explicitly rather than fabricate a classification from filename metadata.
+
+An ingestion reference must be opaque, bounded, non-secret, non-`data:`/`raw:`/`base64:`, and must not expose a filesystem path, database URL, browser authorization, cookie, prompt, or model credential. Introducing that reference requires a versioned contract change on both sides.
+
+## Logging and security
+
+Neither service may log raw uploads, base64, prompt bodies, generated raw responses, authorization/cookies, database URLs, API keys, or model credentials. Safe logs are limited to fixed event names, operation type, bounded error codes, and safe correlation identifiers.
+
+Fixtures are synthetic and contain no secrets. Contract changes are explicit: add a new version and update both runtime schemas and fixtures. Do not silently make v1 more permissive.
+
+## Teammate acceptance checklist
+
+1. Implement all three `/internal/v1/student-agent/*` endpoints with the version header above.
+2. Validate v1 requests strictly and return the common envelope with fixture-compatible `data`.
+3. Make each operation idempotent by `operationKey` and return generated content only.
+4. Rename or remove Python's conflicting public `POST /api/sessions` route.
+5. Keep Prompt/Memory/RAG/model code and credentials entirely inside the Python service.
+6. Add the opaque material-ingestion reference as a future versioned contract before attempting OCR.

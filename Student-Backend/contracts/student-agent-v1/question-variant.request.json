@@ -1,0 +1,28 @@
+{
+  "contractVersion": 1,
+  "operationKey": "question-variant-v1:04a874668152ad84d19a8a5e2def19c2eb31c2de53822a5f8ea8c40ff309f438",
+  "studentId": "fixture-student",
+  "source": {
+    "setId": "fixture-source-set",
+    "kind": "task",
+    "subject": "Mathematics",
+    "question": {
+      "id": "fixture-source-question",
+      "order": 1,
+      "type": "calculation",
+      "topic": "Differentiation",
+      "difficulty": 3,
+      "content": "Differentiate x^2.",
+      "acceptKeywords": ["2x"],
+      "correctDisplay": "2x",
+      "errorType": "method",
+      "hints": [
+        { "level": 1, "title": "Clarify", "content": "Identify the requested derivative." },
+        { "level": 2, "title": "Knowledge", "content": "Recall the power rule." },
+        { "level": 3, "title": "Method", "content": "Apply the rule term by term." },
+        { "level": 4, "title": "Key step", "content": "Multiply by the exponent." },
+        { "level": 5, "title": "Solution", "content": "The derivative is 2x." }
+      ]
+    }
+  }
+}
