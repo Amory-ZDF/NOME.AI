@@ -37,6 +37,12 @@ class ProviderConfig:
         base = self.base_url.rstrip("/")
         return f"{base}/chat/completions"
 
+    @property
+    def embeddings_url(self) -> str:
+        """Full /v1/embeddings URL (Qwen only — DeepSeek has no endpoint)."""
+        base = self.base_url.rstrip("/")
+        return f"{base}/embeddings"
+
 
 # ---------------------------------------------------------------------------
 # Supported providers
@@ -51,6 +57,8 @@ DEEPSEEK_DEFAULT_MODEL = "deepseek-chat"
 # Custom endpoint: https://token-plan.cn-beijing.maas.aliyuncs.com/compatible-mode/v1
 QWEN_DEFAULT_BASE = "https://dashscope.aliyuncs.com/compatible-mode/v1"
 QWEN_DEFAULT_MODEL = "qwen-plus"
+# Qwen embeddings model for graph vectorization (DeepSeek offers no /embeddings).
+QWEN_DEFAULT_EMBEDDING_MODEL = "text-embedding-v3"
 
 
 def _load_providers() -> dict[str, ProviderConfig]:
@@ -105,6 +113,9 @@ class AppConfig:
     # Default provider — set LLM_PROVIDER in .env or defaults to first available
     llm_provider: str = field(default="")
 
+    # Embeddings — always served by Qwen (DeepSeek has no /embeddings endpoint)
+    qwen_embedding_model: str = QWEN_DEFAULT_EMBEDDING_MODEL
+
     # LLM parameters
     llm_temperature: float = 0.3
     llm_max_tokens: int = 1024
@@ -113,7 +124,10 @@ class AppConfig:
     memory_half_life_days: float = 21.0
 
     # Data
-    knowledge_graph_path: Path = PROJECT_ROOT / "data" / "knowledge_tree.json"
+    knowledge_graph_path: Path = PROJECT_ROOT / "data" / "as_physics_graph.json"
+
+    # Postgres persistence (memory_records). Empty → in-memory MemoryStore.
+    database_url: str = field(default="")
 
     def __post_init__(self) -> None:
         # Resolve default provider
@@ -134,3 +148,11 @@ class AppConfig:
         half_life = os.getenv("MEMORY_HALF_LIFE_DAYS")
         if half_life:
             self.memory_half_life_days = float(half_life)
+
+        emb_model = os.getenv("QWEN_EMBEDDING_MODEL")
+        if emb_model:
+            self.qwen_embedding_model = emb_model
+
+        db_url = os.getenv("DATABASE_URL", "").strip()
+        if db_url:
+            self.database_url = db_url

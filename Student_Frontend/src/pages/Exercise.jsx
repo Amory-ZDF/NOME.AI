@@ -8,6 +8,7 @@ import {
   createQuestionProgress,
   submitAttempt,
   unlockNextHint,
+  resolveGrading,
 } from '../features/exercise/exerciseEngine'
 import { isCompleteVariantResult, isRenderableExerciseSet } from '../features/exercise/exerciseContracts'
 import { Icon, Badge, Stars, MathHTML } from '../components/ui'
@@ -49,11 +50,48 @@ function ExplanationSection({ title, children }) {
   )
 }
 
+// ---------- AI diagnosis panel ----------
+// Shows the one-shot diagnosis (computed at settlement). The student asks
+// follow-up questions through the always-present TutorChat, not a forced reply.
+function AgentPanel({ agent }) {
+  if (!agent) return null
+
+  if (agent.pending) {
+    return (
+      <div className="flex items-center gap-2 rounded-comp border border-deep-teal/30 bg-teal-tint p-3 text-sm text-warm-stone" role="status">
+        <Icon name="auto_awesome" size={16} className="text-deep-teal" />
+        Diagnosing your mistake…
+      </div>
+    )
+  }
+
+  const diagnosis = agent.diagnosis
+  if (diagnosis) {
+    return (
+      <div className="flex flex-col gap-2 rounded-comp border border-warm-stone/15 bg-warm-paper p-3 text-sm">
+        <p className="font-semibold text-deep-ink flex items-center gap-1.5">
+          <Icon name="fact_check" size={16} className="text-deep-teal" /> What went wrong
+        </p>
+        {diagnosis.errorType && (
+          <div>
+            <Badge tone="amber">{diagnosis.errorType}</Badge>
+          </div>
+        )}
+        {diagnosis.whereWrong && <p className="leading-6 text-warm-stone">{diagnosis.whereWrong}</p>}
+        {diagnosis.whyWrong && <p className="leading-6 text-warm-stone">{diagnosis.whyWrong}</p>}
+      </div>
+    )
+  }
+
+  return null
+}
+
 // ---------- AI tutoring panel ----------
 function AiPanel({
   q,
   subject,
   state,
+  agent,
   onSubmit,
   onUnlockHint,
   onNext,
@@ -134,6 +172,16 @@ function AiPanel({
     )
   }
 
+  // State 1.5: free-response answer awaiting LLM grading
+  if (state.status === 'ungraded') {
+    return (
+      <div className="flex items-center gap-2 rounded-comp border border-deep-teal/30 bg-teal-tint p-3 text-sm text-warm-stone" role="status">
+        <Icon name="auto_awesome" size={16} className="text-deep-teal" />
+        Checking your answer…
+      </div>
+    )
+  }
+
   // State 2: wrong answer — progressive hint unlock
   return (
     <div className="flex flex-col gap-3">
@@ -141,16 +189,22 @@ function AiPanel({
         <p className="text-error-red font-medium flex items-center gap-1.5">
           <Icon name="cancel" size={16} /> That answer isn&apos;t quite right
         </p>
-        <p className="text-warm-stone text-xs mt-1">Don&apos;t be discouraged — mistakes are part of learning. Level 1 hint unlocked.</p>
+        <p className="text-warm-stone text-xs mt-1">Don&apos;t be discouraged — mistakes are part of learning.</p>
       </div>
+
+      <AgentPanel agent={agent} />
 
       <div className="flex flex-col gap-2.5 max-h-[38vh] overflow-y-auto pr-1">
         {q.hints.map((hint) => {
-          const unlocked = hint.level <= state.hintLevel
-          const isCurrent = hint.level === state.hintLevel
+          // The agent returns a sharper hint for one level; slot it in over the
+          // static fallback so the full 5-level ladder and lock states stay intact.
+          const agentHint = agent?.hints?.find((item) => item.level === hint.level)
+          const displayHint = agentHint ? { ...hint, ...agentHint } : hint
+          const unlocked = displayHint.level <= state.hintLevel
+          const isCurrent = displayHint.level === state.hintLevel
           return (
             <motion.div
-              key={hint.level}
+              key={displayHint.level}
               initial={isCurrent ? { opacity: 0, height: 0 } : false}
               animate={{ opacity: 1, height: 'auto' }}
               transition={{ duration: 0.2 }}
@@ -158,14 +212,14 @@ function AiPanel({
             >
               <div className="flex items-center gap-2 mb-1">
                 {unlocked
-                  ? <span className="w-5 h-5 rounded-full bg-deep-teal text-white text-xs flex items-center justify-center font-mono">{hint.level}</span>
+                  ? <span className="w-5 h-5 rounded-full bg-deep-teal text-white text-xs flex items-center justify-center font-mono">{displayHint.level}</span>
                   : <Icon name="lock" size={14} className="text-warm-stone/60" />}
                 <span className={`text-xs font-semibold ${unlocked ? 'text-deep-teal' : 'text-warm-stone/60'}`}>
-                  {unlocked ? `L${hint.level} · ${hint.title}` : `L${hint.level} · Locked hint`}
+                  {unlocked ? `L${displayHint.level} · ${displayHint.title}` : `L${displayHint.level} · Locked hint`}
                 </span>
               </div>
               <p className={`text-sm leading-6 text-deep-ink ${unlocked ? '' : 'hint-locked'}`}>
-                {unlocked ? hint.content : 'Unlock this level to view the hint.'}
+                {unlocked ? displayHint.content : 'Unlock this level to view the hint.'}
               </p>
             </motion.div>
           )
@@ -289,6 +343,86 @@ function MissingExercise({ error, onBack, onRetry }) {
   )
 }
 
+// ---------- Always-present tutor chat ----------
+// Independent of the diagnosis/counter-question loop: the student can ask the
+// agent anything about the current question (or a general question) at any time.
+function TutorChat({ question, subject, onSend }) {
+  const [messages, setMessages] = useState([])
+  const [draft, setDraft] = useState('')
+  const [pending, setPending] = useState(false)
+
+  const submit = async () => {
+    const text = draft.trim()
+    if (!text || pending) return
+    const history = messages.map(({ role, content }) => ({ role, content }))
+    setMessages((current) => [...current, { role: 'user', content: text }])
+    setDraft('')
+    setPending(true)
+    try {
+      const result = await onSend(question, text, history)
+      const reply = result?.reply
+      if (reply) setMessages((current) => [...current, { role: 'assistant', content: reply }])
+    } catch (error) {
+      setMessages((current) => [
+        ...current,
+        { role: 'assistant', content: error?.message || 'Sorry, I could not answer that. Please try again.' },
+      ])
+    } finally {
+      setPending(false)
+    }
+  }
+
+  return (
+    <div className="mt-5 pt-4 border-t border-whisper-line">
+      <p className="text-xs font-semibold text-deep-ink mb-2 flex items-center gap-1.5">
+        <Icon name="chat" size={14} className="text-deep-teal" /> Ask the tutor
+      </p>
+      {messages.length > 0 && (
+        <div className="flex flex-col gap-2 max-h-48 overflow-y-auto pr-1 mb-2">
+          {messages.map((message, index) => (
+            <div
+              key={index}
+              className={`rounded-comp px-3 py-2 text-sm leading-6 ${
+                message.role === 'user'
+                  ? 'bg-deep-teal/10 text-deep-ink self-end ml-6'
+                  : 'bg-warm-paper text-warm-stone self-start mr-6'
+              }`}
+            >
+              {message.content}
+            </div>
+          ))}
+        </div>
+      )}
+      <div className="flex items-start gap-2">
+        <textarea
+          className="zb-input resize-none flex-1"
+          rows={2}
+          placeholder={subject === 'A-Level Math'
+            ? 'Ask about this question or a concept…'
+            : 'Ask the tutor anything…'}
+          aria-label="Ask the tutor a question"
+          value={draft}
+          onChange={(event) => setDraft(event.target.value)}
+          onKeyDown={(event) => {
+            if (event.key === 'Enter' && !event.shiftKey) {
+              event.preventDefault()
+              submit()
+            }
+          }}
+        />
+        <button
+          className="zb-btn-primary !h-9 !px-3"
+          disabled={!draft.trim() || pending}
+          onClick={submit}
+          aria-label="Send message to the tutor"
+        >
+          <Icon name="send" size={16} />
+        </button>
+      </div>
+    </div>
+  )
+}
+
 // ---------- Exercise page ----------
 export default function Exercise({ bankMode = false }) {
   const { taskId, qId } = useParams()
@@ -300,6 +434,10 @@ export default function Exercise({ bankMode = false }) {
     saveSession,
     verifyErrorVariant,
     generateVariant,
+    diagnoseAnswer,
+    requestAgentHint,
+    diagnoseQuestion,
+    tutorChat,
     isActionPending,
   } = useApp()
   const loadKey = bankMode ? `bank:${qId}` : `task:${taskId}`
@@ -311,7 +449,11 @@ export default function Exercise({ bankMode = false }) {
     pageGenerationRef.current += 1
     currentPageRef.current = { loadKey, generation: pageGenerationRef.current }
   }
-  const secondsRef = useRef(0)
+  // Wall-clock start instant. The elapsed time is derived from this at submit
+  // (not from a setInterval counter, which the browser throttles in background
+  // tabs — an undercount would push the backend's computed start instant past
+  // the first attempt's submittedAt and fail session validation).
+  const startedAtRef = useRef(Date.now())
   const submitTransactionRef = useRef(false)
   const persistedSubmissionRef = useRef(null)
   const [submitTransactionPending, setSubmitTransactionPending] = useState(false)
@@ -322,7 +464,10 @@ export default function Exercise({ bankMode = false }) {
   const [current, setCurrent] = useState(0)
   const [progressById, setProgressById] = useState({})
   const [variantTasks, setVariantTasks] = useState({})
+  const [agentById, setAgentById] = useState({})
   const [loadRetry, setLoadRetry] = useState(0)
+  // Dedup for one-shot settlement diagnoses (see runSettlementDiagnosis).
+  const settlementDiagnosisRef = useRef({})
 
   useEffect(() => {
     mountedRef.current = true
@@ -347,7 +492,8 @@ export default function Exercise({ bankMode = false }) {
     setCurrent(0)
     setProgressById({})
     setVariantTasks({})
-    secondsRef.current = 0
+    setAgentById({})
+    startedAtRef.current = Date.now()
     submitTransactionRef.current = false
     persistedSubmissionRef.current = null
     setSubmitTransactionPending(false)
@@ -381,8 +527,9 @@ export default function Exercise({ bankMode = false }) {
   }, [bankMode, loadExerciseSet, loadKey, loadRetry, qId, taskId])
 
   useEffect(() => {
-    const interval = setInterval(() => { secondsRef.current += 1 }, 1000)
-    return () => clearInterval(interval)
+    // The display timer (useTimer above) handles the visual count; elapsed time
+    // for submission is derived from startedAtRef at submit time instead of a
+    // second ticking ref, so a background-throttled interval can't undercount it.
   }, [loadKey])
 
   if (loadStatus === 'loading' || settledLoadKey !== loadKey) return <LoadingExercise />
@@ -399,6 +546,13 @@ export default function Exercise({ bankMode = false }) {
   const questions = set.questions
   const q = questions[current]
   const state = progressById[q.id]
+  // Question context for the tutor chat: include the student's latest answer and
+  // the AI's diagnosis (once settled) so "why isn't C correct?" is answerable.
+  const tutorChatContext = {
+    ...q,
+    studentAnswer: state?.answer ?? '',
+    diagnosis: state?.diagnosis ?? null,
+  }
   const attemptedAll = canSubmitSession(progressById)
   const wholeSetSubmitting = submitTransactionPending
   const variantPending = isActionPending(`exercise:variant:${q.id}`)
@@ -430,14 +584,138 @@ export default function Exercise({ bankMode = false }) {
     showToast(message, code === 'ALREADY_SOLVED' ? 'info' : 'error')
   }
 
-  // Submit a single question (PRD §2.7)
-  const submitQuestion = () => {
+  // Submit a single question (PRD §2.7). Diagnosis is NOT run on wrong answers —
+  // it is deferred to settlement (solved-with-hints or still-wrong at submit) so
+  // we never re-generate a diagnosis on every wrong attempt.
+  const submitQuestion = async () => {
     const next = submitAttempt(state, q, state.answer, new Date().toISOString())
     if (next.transitionError) {
       reportTransitionError(next.transitionError)
       return
     }
     updateProgress(q.id, next)
+    if (next.status === 'ungraded') {
+      await runGrading(q, next)
+    } else if (next.status === 'correct' && next.hintLevel > 0) {
+      // Solved after using hints — an assisted solve worth an error-book entry.
+      runSettlementDiagnosis(q, next)
+    } else if (next.status === 'wrong' && next.hintLevel === 1 && state.hintLevel === 0) {
+      // First wrong attempt: surface the agent-generated L1 hint immediately.
+      fetchAgentHint(q, next)
+    }
+  }
+
+  // Free-response grading: the LLM grades the answer against the mark scheme.
+  // The same call returns the diagnosis (when wrong) or a bare correct verdict.
+  const runGrading = async (question, progress) => {
+    const actionPage = currentPageRef.current
+    setAgentById((current) => ({ ...current, [question.id]: { pending: true } }))
+    try {
+      const result = await diagnoseAnswer(question, progress)
+      if (!isCurrentPage(actionPage)) return
+      const isCorrect = Boolean(result?.isCorrect)
+      const resolved = resolveGrading(progress, isCorrect)
+      updateProgress(question.id, () => resolved)
+      if (isCorrect) {
+        setAgentById((current) => ({ ...current, [question.id]: null }))
+        if (resolved.hintLevel > 0) {
+          // Solved after hints — one-shot diagnosis for the error book.
+          runSettlementDiagnosis(question, resolved)
+        }
+      } else {
+        updateProgress(question.id, (current) => ({
+          ...current,
+          diagnosis: result?.diagnosis ?? null,
+        }))
+        setAgentById((current) => ({
+          ...current,
+          [question.id]: {
+            diagnosis: result?.diagnosis ?? null,
+            hints: result?.hint ? [result.hint] : [],
+          },
+        }))
+        // First wrong (free-response graded by the LLM): surface the agent L1 hint.
+        if (resolved.hintLevel === 1 && progress.hintLevel === 0) {
+          fetchAgentHint(question, resolved)
+        }
+      }
+    } catch (error) {
+      if (!isCurrentPage(actionPage)) return
+      showToast(error?.message || 'Grading failed. Please try again.', 'error')
+      // Revert to an editable unanswered state so the student can retry.
+      updateProgress(question.id, (current) => ({
+        ...current,
+        status: 'unanswered',
+        attempts: current.attempts.slice(0, -1),
+      }))
+      setAgentById((current) => ({ ...current, [question.id]: null }))
+    }
+  }
+
+  // One-shot diagnosis when a question's outcome is settled. Stores the result
+  // on progress (buildSession flattens it into the error book) and surfaces the
+  // "What went wrong" panel. Returns the diagnosis for callers that also need it.
+  // Deduped per question: concurrent callers (fire-and-forget on solve + the
+  // awaited submit loop) share one request, and the resolved diagnosis is cached
+  // so a later submit (whose progress closure may be stale) does not re-diagnose.
+  const runSettlementDiagnosis = async (question, progress) => {
+    if (progress?.diagnosis) return progress.diagnosis
+    const cached = settlementDiagnosisRef.current[question.id]
+    if (cached && typeof cached.then === 'function') return cached
+    if (cached) return cached
+    const actionPage = currentPageRef.current
+    setAgentById((current) => ({ ...current, [question.id]: { pending: true } }))
+    const run = async () => {
+      try {
+        const result = await diagnoseQuestion(question, progress)
+        if (!isCurrentPage(actionPage)) return null
+        const diagnosis = result?.diagnosis ?? null
+        if (diagnosis) {
+          updateProgress(question.id, (current) => ({ ...current, diagnosis }))
+          setAgentById((current) => ({
+            ...current,
+            [question.id]: { diagnosis, hints: [] },
+          }))
+        }
+        settlementDiagnosisRef.current[question.id] = diagnosis
+        return diagnosis
+      } catch (error) {
+        delete settlementDiagnosisRef.current[question.id]
+        if (!isCurrentPage(actionPage)) return null
+        showToast(error?.message || 'Diagnosis failed. Please try again.', 'error')
+        return null
+      }
+    }
+    const promise = run()
+    settlementDiagnosisRef.current[question.id] = promise
+    return promise
+  }
+
+  // Fetch the agent-generated hint for the level the student just reached and
+  // slot it in over the static ladder. The agent generates hint_level + 1, so we
+  // send the previously-seen level (progress.hintLevel - 1) to get the new one.
+  // Best-effort: the static hint stays if the agent is unavailable or slow.
+  const fetchAgentHint = async (question, progress) => {
+    const actionPage = currentPageRef.current
+    try {
+      const result = await requestAgentHint(question, {
+        ...progress,
+        hintLevel: Math.max(0, progress.hintLevel - 1),
+      })
+      if (!isCurrentPage(actionPage)) return
+      const hint = result?.hint ?? null
+      if (hint) {
+        setAgentById((current) => ({
+          ...current,
+          [question.id]: {
+            diagnosis: current[question.id]?.diagnosis ?? null,
+            hints: [...(current[question.id]?.hints ?? []).filter((item) => item.level !== hint.level), hint],
+          },
+        }))
+      }
+    } catch {
+      // Best-effort: keep the static ladder.
+    }
   }
 
   const unlockHint = () => {
@@ -447,6 +725,7 @@ export default function Exercise({ bankMode = false }) {
       return
     }
     updateProgress(q.id, next)
+    fetchAgentHint(q, next)
   }
 
   const submitAll = async () => {
@@ -471,12 +750,27 @@ export default function Exercise({ bankMode = false }) {
     submitTransactionRef.current = true
     setSubmitTransactionPending(true)
     try {
+      // Settlement diagnosis: any question that needs an error-book entry and
+      // still lacks a diagnosis gets its one-shot diagnosis now — both still-
+      // wrong questions and assisted solves (correct only after hints).
+      const settlementProgress = { ...progressById }
+      for (const question of questions) {
+        const progress = progressById[question.id]
+        const needsDiagnosis = progress
+          && !progress.diagnosis
+          && (progress.status === 'wrong' || (progress.status === 'correct' && progress.hintLevel > 0))
+        if (needsDiagnosis) {
+          const diagnosis = await runSettlementDiagnosis(question, progress)
+          if (!isCurrentPage(actionPage)) return
+          if (diagnosis) settlementProgress[question.id] = { ...progress, diagnosis }
+        }
+      }
       let persisted = cachedSubmission?.result ?? null
       if (!persisted) {
         persisted = await saveSession(buildSession({
           set,
-          progressById,
-          elapsedSeconds: secondsRef.current,
+          progressById: settlementProgress,
+          elapsedSeconds: Math.max(1, Math.floor((Date.now() - startedAtRef.current) / 1000)),
         }))
         if (!isCurrentPage(actionPage)) return
       }
@@ -652,6 +946,7 @@ export default function Exercise({ bankMode = false }) {
             q={q}
             subject={set.subject}
             state={state}
+            agent={agentById[q.id]}
             onSubmit={submitQuestion}
             onUnlockHint={unlockHint}
             onNext={goNext}
@@ -685,6 +980,16 @@ export default function Exercise({ bankMode = false }) {
               <span>Q1</span><span>Q{questions.length}</span>
             </div>
           </div>
+
+          {/* Always-present tutor chat (PRD: student asks the agent). The
+              question carries the student's latest answer + the AI's diagnosis
+              (if settled) so the tutor can answer context-specific questions. */}
+          <TutorChat
+            key={q.id}
+            question={tutorChatContext}
+            subject={set.subject}
+            onSend={tutorChat}
+          />
         </div>
       </div>
     </div>

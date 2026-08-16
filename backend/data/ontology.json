@@ -1,0 +1,100 @@
+{
+  "$comment": "Ontology for the AS-Level Physics (CAIE 9702) knowledge graph — the single source of truth for (a) the LLM extractor's allowed_nodes / allowed_relationships constraint and (b) output validation. Direction convention matches backend/tool/knowledge_graph.py: source PREREQUISITE_OF target means 'source is a prerequisite of target' (target depends on source). Three layers: concrete (Topic/Concept/Formula/Skill) + abstract (BigIdea). BigIdea nodes are teacher-curated (never LLM-extracted); Concept->BigIdea assignment (EXEMPLIFIES) is a classification task.",
+  "subject": "AS-Level Physics (CAIE 9702)",
+  "node_type_values": ["Topic", "Concept", "Formula", "Skill", "BigIdea"],
+  "entity_types": [
+    {
+      "type": "Topic",
+      "zh": "主题/章节",
+      "definition": "A syllabus topic or chapter heading. Forms the fixed skeleton of the graph, seeded by RULE from the syllabus (NOT LLM-extracted).",
+      "fields": ["name"],
+      "examples": ["Kinematics", "Dynamics", "Forces, Density and Pressure", "Electricity", "Waves", "Superposition"]
+    },
+    {
+      "type": "Concept",
+      "zh": "概念/物理量",
+      "definition": "A physical concept, quantity, or phenomenon a student must understand: scalar/vector quantities, conserved quantities, forces, wave phenomena, electrical quantities, etc.",
+      "fields": ["name", "definition"],
+      "examples": ["momentum", "impulse", "resultant force", "work", "kinetic energy", "electric current", "potential difference", "phase difference"]
+    },
+    {
+      "type": "Formula",
+      "zh": "公式/定律",
+      "definition": "A formula, equation, or law expressing a quantitative relationship between concepts. Put the symbolic form in the 'expression' field.",
+      "fields": ["name", "expression", "definition"],
+      "examples": ["F = ma", "p = mv", "Ek = 1/2 mv^2", "W = Fd cos(theta)", "V = IR", "P = VI", "Q = It", "I = Anvq"]
+    },
+    {
+      "type": "Skill",
+      "zh": "解题技能/方法",
+      "definition": "A transferable procedural skill or technique needed to solve problems, independent of any single topic.",
+      "fields": ["name", "definition"],
+      "examples": ["resolve a vector into components", "draw a free-body diagram", "convert units", "read a displacement-time graph", "area-under-graph = accumulated quantity"]
+    },
+    {
+      "type": "BigIdea",
+      "zh": "大概念/主题思想",
+      "definition": "An abstract, cross-topic organizing principle that unifies many concrete concepts and gives students the 'framework'. This layer turns a knowledge graph into a knowledge framework. CURATED by the teacher, NOT extracted by LLM — fixed small set to avoid abstraction drift.",
+      "fields": ["name", "definition"],
+      "examples": ["Conservation laws", "Energy & energy transfer", "Waves transfer energy without net matter transfer", "Modeling & idealization", "Macro-micro correspondence", "Measurement & uncertainty"]
+    }
+  ],
+  "relation_types": [
+    {
+      "type": "PREREQUISITE_OF",
+      "zh": "前置于",
+      "definition": "source is a prerequisite of target: target cannot be properly learned until source is mastered. Directed: source -> target.",
+      "symmetric": false,
+      "examples": ["Vector Resolution -> Projectile Motion", "SUVAT Equations -> Projectile Motion", "Progressive Waves -> Superposition"]
+    },
+    {
+      "type": "REQUIRES_SKILL",
+      "zh": "需要技能",
+      "definition": "source (a topic/concept/formula) requires the procedural skill target in order to be applied. Directed: source -> target.",
+      "symmetric": false,
+      "examples": ["Free-Body Diagrams -> resolve a vector into components", "Young modulus experiment -> measure uncertainty"]
+    },
+    {
+      "type": "BELONGS_TO",
+      "zh": "属于",
+      "definition": "source (a Concept/Formula/Skill) belongs to target (a Topic). Attaches extracted entities to the syllabus skeleton. Directed: source -> target.",
+      "symmetric": false,
+      "examples": ["F = ma -> Dynamics", "momentum -> Dynamics", "I = Anvq -> Electricity"]
+    },
+    {
+      "type": "EXEMPLIFIES",
+      "zh": "体现/例证",
+      "definition": "source (a Concept/Formula/Skill) exemplifies target (a BigIdea). How the concrete layer hangs under the abstract framework layer; enables knowledge_framework to 'walk up' from a weak concept to its unifying big idea. Assignment is a CLASSIFICATION over a closed label set (LLM does this reliably), NOT open extraction. Directed: source -> target.",
+      "symmetric": false,
+      "examples": ["momentum conservation -> Conservation laws", "work-energy theorem -> Energy & energy transfer", "I = Anvq -> Macro-micro correspondence"]
+    },
+    {
+      "type": "COMMONLY_CONFUSED",
+      "zh": "易混淆",
+      "definition": "Students frequently confuse source and target in actual answers (an ERROR pattern). Source of truth is error/错题 data, NOT the notes. Symmetric.",
+      "symmetric": true,
+      "examples": ["momentum <-> kinetic energy", "mass <-> weight", "speed <-> velocity", "scalar <-> vector"]
+    },
+    {
+      "type": "CONTRASTED_WITH",
+      "zh": "对立/辨析对",
+      "definition": "source and target form a conceptual opposition pair that the curriculum deliberately juxtaposes; understanding the distinction IS the learning objective. Source of truth is the notes/curriculum (unlike COMMONLY_CONFUSED, which is error-driven). A-Level physics leans heavily on these pairs, so mapping them is core to forming the framework. Symmetric.",
+      "symmetric": true,
+      "examples": ["transverse <-> longitudinal wave", "elastic <-> inelastic collision", "diffraction <-> interference", "progressive <-> stationary wave", "series <-> parallel circuit", "emf <-> terminal p.d.", "elastic <-> plastic deformation", "hadron <-> lepton"]
+    },
+    {
+      "type": "TESTED_TOGETHER",
+      "zh": "常同考",
+      "definition": "source and target frequently appear together in the same exam question or as consecutive steps of a solution. Symmetric.",
+      "symmetric": true,
+      "examples": ["SUVAT Equations <-> Motion Graphs", "Projectile Motion <-> Free-Body Diagrams"]
+    },
+    {
+      "type": "EQUIVALENT_ROUTE",
+      "zh": "同题多解/等价路径",
+      "definition": "The same class of problem can be solved using source OR target as alternative methods/starting points. The key 'which-tool' decision edge. Symmetric in practice; store one direction.",
+      "symmetric": true,
+      "examples": ["momentum approach <-> work-energy approach", "suvat method <-> energy method (motion under gravity)"]
+    }
+  ]
+}

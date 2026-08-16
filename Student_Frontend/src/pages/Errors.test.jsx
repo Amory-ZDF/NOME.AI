@@ -43,7 +43,10 @@ const bootData = (errors) => ({
 })
 
 const servicesFor = (errors) => createAppServices({
-  apiClient: { bootstrap: () => Promise.resolve(bootData(errors)) },
+  apiClient: {
+    bootstrap: () => Promise.resolve(bootData(errors)),
+    listSimilarBankQuestions: () => Promise.resolve([]),
+  },
   now: () => new Date('2026-08-06T12:34:56.000Z'),
   createId: () => 'generated-id',
 })

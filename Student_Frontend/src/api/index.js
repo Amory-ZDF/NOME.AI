@@ -15,6 +15,7 @@ import { isTaskAdjustmentEligible } from '../features/tasks/taskRules'
 import { createVariantExercise, normalizeVariantContent } from '../features/exercise/variantFactory'
 import { VARIANT_TEMPLATES } from '../data/variantTemplates'
 import { summarizeSession } from '../features/errors/sessionSummary'
+import { gradeAnswerLocal } from '../features/exercise/answerRules'
 import { mergeErrorCards } from '../features/errors/errorCards'
 import {
   applyRedoAttempt,
@@ -1432,6 +1433,183 @@ export const generateVariant = async (sourceQuestionId) => {
     }
   })
   return structuredClone(generated)
+}
+
+// ---------- Question bank ----------
+export const listBankQuestions = async () => {
+  if (!isMockMode) return http.get('/api/bank/questions')
+  return repository.read((current) => current.bankQuestions)
+}
+
+export const getBankRecommendations = async () => {
+  if (!isMockMode) return http.get('/api/bank/recommendations')
+  return repository.read((current) => current.bankRecommendations)
+}
+
+export const listSimilarBankQuestions = async (questionId) => {
+  if (!isNonemptyString(questionId)) throw invalid('Question id is required')
+  if (!isMockMode) return http.get(`/api/bank/similar/${encodeURIComponent(questionId)}`)
+  // Mock mode has no knowledge-graph wiring; the error book degrades gracefully.
+  return []
+}
+
+// ---------- Profile ----------
+export const getStudentProfile = async () => {
+  if (!isMockMode) return http.get('/api/student/profile')
+  return repository.read((current) => ({
+    profileOverview: current.profileOverview,
+    knowledgeGraph: current.knowledgeGraphData,
+    progressTimeline: current.progressTimeline,
+    errorPatterns: current.errorPatternData,
+    achievements: current.achievements,
+  }))
+}
+
+// ---------- Agent (AI diagnosis) ----------
+// The Agent service (Python backend) owns diagnosis → counter-question →
+// re-diagnosis → knowledge-framework → hint. Grading stays local (questions
+// carry answers), so these endpoints are called only AFTER a wrong answer.
+
+const AGENT_STUDENT_ID = 'stu-001' // TODO: replace once real auth lands
+
+const buildAgentRequest = (question, progress) => ({
+  studentId: AGENT_STUDENT_ID,
+  question: {
+    id: question.id,
+    topic: question.topic,
+    type: question.type,
+    difficulty: question.difficulty,
+    content: question.content,
+    options: question.options ?? null,
+    correctIndex: question.correctIndex ?? null,
+    correctDisplay: question.correctDisplay ?? '',
+    markScheme: question.markScheme ?? null,
+    imageDescription: question.imageDescription ?? null,
+    knowledgeNodeId: question.knowledgeNodeId ?? null,
+  },
+  progress: {
+    questionId: progress.questionId ?? question.id,
+    answer: progress.answer ?? '',
+    status: progress.status ?? 'wrong',
+    hintLevel: progress.hintLevel ?? 0,
+    solvedAtHintLevel: progress.solvedAtHintLevel ?? null,
+    attempts: (progress.attempts ?? []).map((attempt) => ({
+      answer: attempt.answer,
+      submittedAt: attempt.submittedAt,
+      isCorrect: attempt.isCorrect,
+    })),
+  },
+})
+
+// Deterministic mock fallback: reuse the question's pre-labelled errorType and
+// static hints so the full diagnosis loop demos without a live Agent service.
+// Grading uses the local keyword/choice matcher (the mock data predates
+// mark-scheme grading); the real Agent grades free-response via markScheme.
+const mockDiagnose = (question, progress) => {
+  const answer = progress?.answer ?? ''
+  const isCorrect = gradeAnswerLocal(question, answer).isCorrect
+  if (isCorrect) {
+    return { isCorrect: true, diagnosis: null, framework: null, hint: null, counterQuestion: null }
+  }
+  const hints = Array.isArray(question.hints) ? question.hints : []
+  const nextLevel = Math.min((progress?.hintLevel ?? 0) + 1, 5)
+  const hint = hints.find((item) => item.level === nextLevel) ?? hints[0] ?? null
+  return {
+    isCorrect: false,
+    diagnosis: {
+      isCorrect: false,
+      errorType: question.errorType ?? 'knowledge',
+      confidence: 0.9,
+      counterQuestion: null,
+      whereWrong: '',
+      whyWrong: '',
+      linkedKnowledge: [],
+      understandingExplanation: question.understandingExplanation ?? null,
+      scoringExplanation: question.scoringExplanation ?? null,
+    },
+    framework: null,
+    hint: hint
+      ? { level: hint.level, title: hint.title, content: hint.content, nextStep: null }
+      : null,
+    counterQuestion: null,
+  }
+}
+
+export const diagnoseAnswer = async (question, progress) => {
+  if (!isMockMode) return http.post('/api/agent/analyze', buildAgentRequest(question, progress))
+  return mockDiagnose(question, progress)
+}
+
+export const replyCounterQuestion = async (question, progress, counterReply) => {
+  if (!isNonemptyString(counterReply)) throw invalid('A reply to the counter-question is required')
+  if (!isMockMode) {
+    return http.post('/api/agent/counter-reply-ext', {
+      ...buildAgentRequest(question, progress),
+      counterReply,
+    })
+  }
+  // Mock: a reply resolves the ambiguity into a confident diagnosis.
+  return mockDiagnose(question, progress)
+}
+
+// ---------- Agent (per-layer hint + one-shot diagnosis) ----------
+// Per the separation decided with the product: the student unlocks a progressive
+// hint level → /api/agent/hint returns JUST that layer. Diagnosis is a separate,
+// one-shot call made when a question's outcome is settled (solved-with-hints or
+// still-wrong at submit) → /api/agent/diagnose. The old all-in-one analyze call
+// is kept for the free-response grading path but no longer drives hints.
+
+export const requestAgentHint = async (question, progress) => {
+  if (!isMockMode) return http.post('/api/agent/hint', buildAgentRequest(question, progress))
+  // Mock: hand back the static hint for the next unlocked layer.
+  const hints = Array.isArray(question.hints) ? question.hints : []
+  const nextLevel = Math.min((progress?.hintLevel ?? 0) + 1, 5)
+  const hint = hints.find((item) => item.level === nextLevel) ?? hints.at(-1) ?? null
+  return {
+    isCorrect: false,
+    diagnosis: null,
+    framework: null,
+    hint: hint ? { level: hint.level, title: hint.title, content: hint.content, nextStep: null } : null,
+    counterQuestion: null,
+  }
+}
+
+export const diagnoseQuestion = async (question, progress) => {
+  if (!isMockMode) return http.post('/api/agent/diagnose', buildAgentRequest(question, progress))
+  return mockDiagnose(question, progress)
+}
+
+// ---------- Agent (tutor chat) ----------
+// Student-initiated chat: with `question` → "explain this question"; without →
+// general Q&A. Always available, independent of the diagnosis/counter-question loop.
+const mockTutorChat = (question, message) => {
+  const reply = question
+    ? `Let's work through this ${question.topic ?? ''} question together. ` +
+      'Start by identifying what the question is asking, then choose the method that fits. ' +
+      'If you tell me where you got stuck, I can point you to the right step.'
+    : 'I\'m here to help with your study questions. You can ask me to explain a concept, ' +
+      'walk through a method, or talk through a question you\'ve pasted in.'
+  return { reply }
+}
+
+export const tutorChat = async (question, message, history = []) => {
+  if (!isNonemptyString(message)) throw invalid('A message is required')
+  if (!isMockMode) {
+    const baseQuestion = question ? buildAgentRequest(question, {}).question : null
+    return http.post('/api/agent/tutor-chat', {
+      studentId: AGENT_STUDENT_ID,
+      message,
+      // Carry the student's answer + the AI's diagnosis so the tutor can answer
+      // questions like "why isn't C correct?" with the actual context.
+      question: baseQuestion ? {
+        ...baseQuestion,
+        ...(question?.studentAnswer ? { studentAnswer: question.studentAnswer } : {}),
+        ...(question?.diagnosis ? { diagnosis: question.diagnosis } : {}),
+      } : null,
+      history: (history ?? []).map((turn) => ({ role: turn.role, content: turn.content })),
+    })
+  }
+  return mockTutorChat(question, message)
 }
 
 // ---------- Settings ----------

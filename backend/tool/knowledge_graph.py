@@ -5,7 +5,7 @@ skill queries for prerequisite chains, related concepts, and weak-link detection
 
 Backends are swappable (JSON → Neo4j → GraphRAG) — the interface stays the same.
 
-Current: in-memory adjacency list. Loads from data/knowledge_tree.json at startup,
+Current: in-memory adjacency list. Loads from data/as_physics_graph.json at startup,
 with support for programmatic node/edge addition (for testing and seeding).
 """
 
@@ -18,12 +18,12 @@ from typing import Any
 
 logger = logging.getLogger(__name__)
 
-# Edge types
+# Edge types (mirrors data/as_physics_graph.json)
 EDGE_PREREQUISITE_OF = "PREREQUISITE_OF"
 EDGE_REQUIRES_SKILL = "REQUIRES_SKILL"
-EDGE_COMMONLY_CONFUSED = "COMMONLY_CONFUSED"
-EDGE_TESTED_TOGETHER = "TESTED_TOGETHER"
+EDGE_CONTRASTED_WITH = "CONTRASTED_WITH"
 EDGE_BELONGS_TO = "BELONGS_TO"
+EDGE_EXEMPLIFIES = "EXEMPLIFIES"
 
 
 class KnowledgeGraph:
@@ -57,6 +57,14 @@ class KnowledgeGraph:
     @property
     def edge_count(self) -> int:
         return sum(len(edges) for edges in self._adj_out.values())
+
+    def list_edges(self) -> list[dict[str, Any]]:
+        """All edges as {source, target, type} — for rendering the full graph."""
+        edges: list[dict[str, Any]] = []
+        for source, targets in self._adj_out.items():
+            for target, edge_type in targets:
+                edges.append({"source": source, "target": target, "type": edge_type})
+        return edges
 
     # ------------------------------------------------------------------
     # Traversal
@@ -108,7 +116,7 @@ class KnowledgeGraph:
         return result
 
     def get_related(self, node_id: str) -> list[dict[str, Any]]:
-        """Nodes connected by COMMONLY_CONFUSED or TESTED_TOGETHER edges.
+        """Nodes connected by CONTRASTED_WITH edges (commonly-confused concepts).
 
         These are bidirectional — we check both outgoing and incoming.
         """
@@ -117,13 +125,39 @@ class KnowledgeGraph:
 
         for edge_set in (self._adj_out.get(node_id, []), self._adj_in.get(node_id, [])):
             for other_id, edge_type in edge_set:
-                if edge_type in (EDGE_COMMONLY_CONFUSED, EDGE_TESTED_TOGETHER):
+                if edge_type == EDGE_CONTRASTED_WITH:
                     if other_id not in seen:
                         node = self._nodes.get(other_id)
                         if node:
                             related.append(node)
                             seen.add(other_id)
         return related
+
+    def get_siblings(self, node_id: str) -> list[dict[str, Any]]:
+        """Sibling nodes — concepts that belong to the same topic chapter.
+
+        Follows BELONGS_TO edges up to the parent topic, then back down to
+        every other node that also belongs to that topic.
+        """
+        siblings: list[dict[str, Any]] = []
+        seen: set[str] = {node_id}
+
+        parents = [
+            target_id
+            for target_id, edge_type in self._adj_out.get(node_id, [])
+            if edge_type == EDGE_BELONGS_TO
+        ]
+        for parent_id in parents:
+            for source_id, edge_type in self._adj_in.get(parent_id, []):
+                if edge_type != EDGE_BELONGS_TO:
+                    continue
+                if source_id in seen:
+                    continue
+                node = self._nodes.get(source_id)
+                if node:
+                    siblings.append(node)
+                    seen.add(source_id)
+        return siblings
 
     def get_children(self, node_id: str) -> list[dict[str, Any]]:
         """Downstream nodes — who depends on this node?

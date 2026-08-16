@@ -306,6 +306,64 @@ class LLMClient:
         # Unreachable — kept for type checker
         raise LLMParseError("Unexpected: no retries exhausted but no result")
 
+    async def embed(
+        self,
+        provider: str,
+        text: str,
+        *,
+        model: str | None = None,
+    ) -> list[float]:
+        """Embed a single text via the provider's /embeddings endpoint.
+
+        Returns the embedding vector as a list of floats.
+        """
+        vectors = await self.embed_many(provider, [text], model=model)
+        return vectors[0]
+
+    async def embed_many(
+        self,
+        provider: str,
+        texts: list[str],
+        *,
+        model: str | None = None,
+        batch_size: int = 10,
+    ) -> list[list[float]]:
+        """Embed a list of texts, batched to respect provider limits.
+
+        Returns a list of vectors in the same order as `texts`. Empty input
+        returns an empty list. Qwen's /embeddings caps batch at 10 inputs.
+        """
+        if not texts:
+            return []
+
+        cfg = self._resolve_provider(provider)
+        model = model or cfg.default_model
+        http_client = self._clients[provider]
+
+        vectors: list[list[float]] = []
+        for i in range(0, len(texts), batch_size):
+            chunk = texts[i : i + batch_size]
+            body = {"model": model, "input": chunk}
+            response = await self._post(http_client, provider, cfg.embeddings_url, body)
+            vectors.extend(self._parse_embeddings_response(response))
+
+        return vectors
+
+    @staticmethod
+    def _parse_embeddings_response(data: dict[str, Any]) -> list[list[float]]:
+        """Extract embedding vectors from an /embeddings response.
+
+        Data is sorted by index (providers may return out of order).
+        Raises LLMError if the structure is unexpected.
+        """
+        try:
+            items = sorted(data["data"], key=lambda d: d.get("index", 0))
+            return [item["embedding"] for item in items]
+        except (KeyError, TypeError, ValueError) as exc:
+            raise LLMError(
+                f"Unexpected embeddings response structure: {str(exc)[:200]}"
+            ) from exc
+
     async def close(self) -> None:
         """Close all underlying httpx clients."""
         for name, client in self._clients.items():

@@ -10,6 +10,8 @@ dependencies = [
     "pydantic>=2.10",
     "httpx>=0.28",
     "networkx>=3.4",
+    "asyncpg>=0.29",
+    "chromadb>=0.5,<2",
     "python-dotenv>=1.0",
     "pyyaml>=6.0",
 ]
@@ -23,6 +25,7 @@ dev = [
 ]
 
 [tool.pytest.ini_options]
+asyncio_mode = "auto"
 markers = [
     "integration: tests that require a live LLM (skipped in CI with -m 'not integration')",
 ]

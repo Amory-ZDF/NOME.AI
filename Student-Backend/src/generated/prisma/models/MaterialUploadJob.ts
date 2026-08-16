@@ -380,6 +380,7 @@ export type MaterialUploadJobCreateOrConnectWithoutStudentInput = {
 
 export type MaterialUploadJobCreateManyStudentInputEnvelope = {
   data: Prisma.MaterialUploadJobCreateManyStudentInput | Prisma.MaterialUploadJobCreateManyStudentInput[]
+  skipDuplicates?: boolean
 }
 
 export type MaterialUploadJobUpsertWithWhereUniqueWithoutStudentInput = {
@@ -1159,6 +1160,7 @@ export type MaterialUploadJobCreateManyArgs<ExtArgs extends runtime.Types.Extens
    * The data used to create many MaterialUploadJobs.
    */
   data: Prisma.MaterialUploadJobCreateManyInput | Prisma.MaterialUploadJobCreateManyInput[]
+  skipDuplicates?: boolean
 }
 
 /**
@@ -1177,6 +1179,7 @@ export type MaterialUploadJobCreateManyAndReturnArgs<ExtArgs extends runtime.Typ
    * The data used to create many MaterialUploadJobs.
    */
   data: Prisma.MaterialUploadJobCreateManyInput | Prisma.MaterialUploadJobCreateManyInput[]
+  skipDuplicates?: boolean
   /**
    * Choose, which related nodes to fetch as well
    */

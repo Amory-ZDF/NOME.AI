@@ -295,6 +295,7 @@ describe('summarizeSession', () => {
       errorDistribution: {},
       topicOutcomes: [],
       wrongQuestions: [],
+      errorQuestions: [],
     })
   })
 
@@ -345,7 +346,45 @@ describe('summarizeSession', () => {
         { topic: 'IELTS Reading - Evidence location', correct: 0, wrong: 1 },
       ],
       wrongQuestions: [wrong, unanswered],
+      errorQuestions: [wrong, unanswered],
     })
+  })
+
+  it('surfaces a wrong-then-hint-corrected question as an error without changing its correct outcome', () => {
+    const firstTryCorrect = makeSessionQuestion(makeQuestion('question-clean'))
+    const redeemed = makeSessionQuestion(
+      makeQuestion('question-redeemed', { order: 2 }),
+      {
+        status: 'correct',
+        attempts: [
+          {
+            answer: 'x=1',
+            normalizedAnswer: 'x=1',
+            submittedAt: '2026-08-11T10:07:00.000Z',
+            isCorrect: false,
+          },
+          {
+            answer: 'x=2',
+            normalizedAnswer: 'x=2',
+            submittedAt: '2026-08-11T10:08:00.000Z',
+            isCorrect: true,
+          },
+        ],
+        hintsUsed: 1,
+        solvedAtHintLevel: 1,
+      },
+    )
+
+    const summary = summarizeSession({
+      questions: [firstTryCorrect, redeemed] as SessionQuestion[],
+    })
+
+    expect(summary.accuracy).toBe(100)
+    expect(summary.correctCount).toBe(2)
+    expect(summary.wrongCount).toBe(0)
+    expect(summary.wrongQuestions).toEqual([])
+    // The redemption is still worth surfacing as an error card.
+    expect(summary.errorQuestions).toEqual([redeemed])
   })
 })
 
@@ -1215,6 +1254,7 @@ describe('GET /api/summary/{sessionId}', () => {
           { topic: 'IELTS Reading - Evidence location', correct: 0, wrong: 1 },
         ],
         wrongQuestions: [wrong, unanswered],
+        errorQuestions: [wrong, unanswered],
       },
     })
     expect(response.json().data.wrongQuestions[0]).toHaveProperty('markSchemePoints')

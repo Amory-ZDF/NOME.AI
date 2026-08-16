@@ -27,6 +27,17 @@ export function validateAttempt(answer) {
 export function gradeAnswer(question, answer) {
   const normalizedAnswer = normalize(answer)
   if (question.options && Number.isInteger(question.correctIndex)) {
+    return gradeAnswerLocal(question, answer)
+  }
+  return { isCorrect: null, normalizedAnswer }
+}
+
+// Always-local grading: choice by correctIndex, open work by keyword match.
+// Used by the independent redo flow (PRD §4.4, no AI) and the frontend-only
+// mock grader. NOT the main exercise flow — see gradeAnswer.
+export function gradeAnswerLocal(question, answer) {
+  const normalizedAnswer = normalize(answer)
+  if (question.options && Number.isInteger(question.correctIndex)) {
     const letter = ['a', 'b', 'c', 'd'][question.correctIndex]
     const optionText = normalize(question.options[question.correctIndex].replace(/^[A-D][.、\s]*/, ''))
     return { isCorrect: normalizedAnswer === letter || normalizedAnswer === optionText || normalizedAnswer.startsWith(`${letter}.`), normalizedAnswer }

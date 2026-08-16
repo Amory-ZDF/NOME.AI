@@ -30,7 +30,8 @@ backend/
 │   └── knowledge_framework.py  Trace weak prerequisites
 │
 ├── tool/                   Deterministic tools (no LLM)
-│   └── knowledge_graph.py  Graph traversal (JSON → Neo4j/GraphRAG)
+│   ├── knowledge_graph.py  Graph traversal (JSON → Neo4j/GraphRAG)
+│   └── graph_vectorizer.py Chroma vector index over the graph
 │
 ├── memory/                 Long-term memory
 │   ├── models.py           MemoryRecord dataclass
@@ -43,7 +44,8 @@ backend/
 │   └── framework_templates.py  Evidence-chain explanation prompts
 │
 ├── data/                   Static data
-│   └── knowledge_tree.json Curated A-Level Physics knowledge graph
+│   ├── as_physics_graph.json      LLM-extracted AS-Level Physics knowledge graph
+│   └── as_physics_embeddings/     Chroma vector index (regenerable)
 │
 └── tests/                  Test suite
     ├── skill/              Per-skill tests
@@ -76,6 +78,7 @@ uvicorn app.main:app --reload --port 8000
 | `QWEN_MODEL` | Default Qwen model | `qwen-plus` |
 | `LLM_PROVIDER` | Default provider name | `deepseek` |
 | `LLM_TEMPERATURE` | LLM temperature | `0.3` |
+| `QWEN_EMBEDDING_MODEL` | Qwen embeddings model for graph vectorization | `text-embedding-v3` |
 | `MEMORY_HALF_LIFE_DAYS` | Decay half-life for memory | `21` |
 
 ## Build Order (recommended)
@@ -85,7 +88,7 @@ uvicorn app.main:app --reload --port 8000
 3. **skill/progressive_hint.py** — first working skill
 4. **prompts/diagnosis_templates.py** — error classification prompts
 5. **skill/error_diagnosis.py** — second skill
-6. **data/knowledge_tree.json** — curated physics knowledge graph
+6. **data/as_physics_graph.json** — LLM-extracted AS-Level Physics knowledge graph
 7. **tool/knowledge_graph.py** — graph traversal (JSON or Graph RAG)
 8. **prompts/framework_templates.py** — evidence-chain prompts
 9. **skill/knowledge_framework.py** — third skill
@@ -97,3 +100,21 @@ uvicorn app.main:app --reload --port 8000
 
 Skills 1-3 can be built and tested in isolation (no orchestrator, no HTTP).
 The orchestrator ties them together. Memory can be built in parallel.
+
+## Knowledge Graph → Vector Index
+
+The AS Physics knowledge graph is stored as JSON (`data/as_physics_graph.json`)
+and has a semantic twin: a Chroma vector index over every entity
+(`data/as_physics_embeddings/`). The JSON powers exact-id traversal
+(`tool/knowledge_graph.py`); the vectors power meaning-based retrieval
+(`tool/graph_vectorizer.py`).
+
+Rebuild the vector index (needs a valid `QWEN_API_KEY`):
+
+```bash
+python -m scripts.vectorize_graph          # incremental (skips if up-to-date)
+python -m scripts.vectorize_graph --reset  # force full rebuild
+```
+
+Embeddings are computed via Qwen `text-embedding-v3` (1024-dim, cosine) — DeepSeek
+has no `/embeddings` endpoint, so vectorization always uses Qwen.

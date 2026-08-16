@@ -19,11 +19,13 @@ import type { StudentPrisma } from './db/client.js'
 import { createHttpStudentAgentClient } from './integrations/student-agent/http-student-agent.client.js'
 import type { StudentAgentClient } from './integrations/student-agent/student-agent.client.js'
 import { AgentDomainError } from './integrations/student-agent/student-agent.errors.js'
+import { bankRoutes } from './modules/bank/bank.routes.js'
 import { bootstrapRoutes } from './modules/bootstrap/bootstrap.routes.js'
 import { exerciseRoutes } from './modules/exercises/exercise.routes.js'
 import { errorRoutes } from './modules/errors/error.routes.js'
 import { noteRoutes } from './modules/notes/note.routes.js'
 import { materialRoutes } from './modules/materials/material.routes.js'
+import { profileRoutes } from './modules/profile/profile.routes.js'
 import { sessionRoutes } from './modules/sessions/session.routes.js'
 import { settingsRoutes } from './modules/settings/settings.routes.js'
 import { taskRoutes } from './modules/tasks/task.routes.js'
@@ -187,6 +189,8 @@ export function buildApp({ env, loggerStream, prisma, now = () => new Date(), cr
 
   app.register(bootstrapRoutes, { studentId: env.STUDENT_ID })
   app.register(exerciseRoutes, { studentId: env.STUDENT_ID })
+  app.register(bankRoutes, { studentId: env.STUDENT_ID, agentUrl: env.AGENT_URL })
+  app.register(profileRoutes, { studentId: env.STUDENT_ID })
   app.register(errorRoutes, { studentId: env.STUDENT_ID })
   app.register(noteRoutes, { studentId: env.STUDENT_ID })
   app.register(materialRoutes, { studentId: env.STUDENT_ID, databaseUrl: env.DATABASE_URL, now, createId })

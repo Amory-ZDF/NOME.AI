@@ -16,7 +16,7 @@ CREATE TABLE "Task" (
     "studentId" TEXT NOT NULL,
     "type" TEXT NOT NULL,
     "status" TEXT NOT NULL,
-    "dueAt" DATETIME,
+    "dueAt" TIMESTAMP(3),
     "payload" JSONB NOT NULL,
 
     PRIMARY KEY ("studentId", "id"),
@@ -29,7 +29,7 @@ CREATE TABLE "TaskAdjustment" (
     "studentId" TEXT NOT NULL,
     "taskId" TEXT NOT NULL,
     "status" TEXT NOT NULL,
-    "createdAt" DATETIME NOT NULL,
+    "createdAt" TIMESTAMP(3) NOT NULL,
     "payload" JSONB NOT NULL,
 
     PRIMARY KEY ("studentId", "id"),
@@ -55,7 +55,7 @@ CREATE TABLE "Session" (
     "id" TEXT NOT NULL,
     "studentId" TEXT NOT NULL,
     "taskId" TEXT NOT NULL,
-    "submittedAt" DATETIME NOT NULL,
+    "submittedAt" TIMESTAMP(3) NOT NULL,
     "payload" JSONB NOT NULL,
 
     PRIMARY KEY ("studentId", "id"),
@@ -69,7 +69,7 @@ CREATE TABLE "ErrorItem" (
     "studentId" TEXT NOT NULL,
     "questionId" TEXT NOT NULL,
     "status" TEXT NOT NULL,
-    "lastOccurredAt" DATETIME NOT NULL,
+    "lastOccurredAt" TIMESTAMP(3) NOT NULL,
     "payload" JSONB NOT NULL,
 
     PRIMARY KEY ("studentId", "id"),
@@ -81,7 +81,7 @@ CREATE TABLE "Note" (
     "id" TEXT NOT NULL,
     "studentId" TEXT NOT NULL,
     "version" INTEGER NOT NULL,
-    "updatedAtValue" DATETIME NOT NULL,
+    "updatedAtValue" TIMESTAMP(3) NOT NULL,
     "payload" JSONB NOT NULL,
 
     PRIMARY KEY ("studentId", "id"),
@@ -105,7 +105,7 @@ CREATE TABLE "MaterialUploadJob" (
     "id" TEXT NOT NULL,
     "studentId" TEXT NOT NULL,
     "status" TEXT NOT NULL,
-    "createdAtValue" DATETIME NOT NULL,
+    "createdAtValue" TIMESTAMP(3) NOT NULL,
     "payload" JSONB NOT NULL,
 
     PRIMARY KEY ("studentId", "id"),

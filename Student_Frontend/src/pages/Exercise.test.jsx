@@ -5,6 +5,7 @@ import { useNavigate, useLocation } from 'react-router-dom'
 import { expect, test, vi } from 'vitest'
 import App from '../App'
 import { createSeedState } from '../data/mockData'
+import { gradeAnswerLocal } from '../features/exercise/answerRules'
 import { createAppServices } from '../store/services'
 import { renderStudentApp } from '../test/renderApp'
 
@@ -112,6 +113,36 @@ function generatedVariant(overrides = {}, sourceQuestionId = 'flow-q1') {
 function createApi(overrides = {}) {
   const taskSet = exerciseSet()
   const bankSet = exerciseSet({ taskId: null, title: 'Bank engine practice' })
+  // Mirrors src/api mockDiagnose: grade locally against acceptKeywords/correctIndex,
+  // then return the diagnosis/hint shape the Exercise page consumes.
+  const diagnoseAnswer = (question, progress) => {
+    const isCorrect = gradeAnswerLocal(question, progress?.answer ?? '').isCorrect
+    if (isCorrect) return Promise.resolve({ isCorrect: true, diagnosis: null, framework: null, hint: null, counterQuestion: null })
+    const nextLevel = Math.min((progress?.hintLevel ?? 0) + 1, 5)
+    const hint = question.hints.find((item) => item.level === nextLevel) ?? null
+    return Promise.resolve({
+      isCorrect: false,
+      diagnosis: { isCorrect: false, errorType: question.errorType ?? 'knowledge', confidence: 0.9, counterQuestion: null, whereWrong: '', whyWrong: '' },
+      framework: null,
+      hint: hint ? { level: hint.level, title: hint.title, content: hint.content, nextStep: null } : null,
+      counterQuestion: null,
+    })
+  }
+  // Per-layer hint: same ladder as the static question hints, so the assertions
+  // stay deterministic (the agent's real generation is covered end-to-end).
+  const requestAgentHint = (question, progress) => {
+    const nextLevel = Math.min((progress?.hintLevel ?? 0) + 1, 5)
+    const hint = question.hints.find((item) => item.level === nextLevel) ?? null
+    return Promise.resolve({
+      isCorrect: false,
+      diagnosis: null,
+      framework: null,
+      hint: hint ? { level: hint.level, title: hint.title, content: hint.content, nextStep: null } : null,
+      counterQuestion: null,
+    })
+  }
+  // One-shot diagnosis at settlement — same shape as the diagnoseAnswer stub.
+  const diagnoseQuestion = (question, progress) => diagnoseAnswer(question, progress)
   return {
     bootstrap: () => Promise.resolve(createSeedState()),
     completeTask: (id) => Promise.resolve({ task: { id, status: 'completed' } }),
@@ -127,6 +158,10 @@ function createApi(overrides = {}) {
     submitSession: (session) => Promise.resolve({ sessionId: session.sessionId }),
     generateVariant: (sourceQuestionId) => Promise.resolve(generatedVariant({}, sourceQuestionId)),
     updateSettings: (patch) => Promise.resolve({ settings: patch }),
+    diagnoseAnswer,
+    replyCounterQuestion: (question, progress) => diagnoseAnswer(question, progress),
+    requestAgentHint,
+    diagnoseQuestion,
     ...overrides,
   }
 }
@@ -243,8 +278,7 @@ test.each([
   ['a missing hint layer', exerciseSet({ questions: [question({ hints: hints.slice(0, 4) })] })],
   ['duplicate question IDs', exerciseSet({ questions: [question({ id: 'duplicate' }), question({ id: 'duplicate', order: 2 })] })],
   ['a non-finite question order', exerciseSet({ questions: [question({ order: Number.NaN })] })],
-  ['a missing correct display', exerciseSet({ questions: [question({ correctDisplay: '' })] })],
-  ['a missing error type', exerciseSet({ questions: [question({ errorType: '' })] })],
+  ['a missing correct display', exerciseSet({ questions: [question({ correctDisplay: '', markScheme: undefined })] })],
 ])('rejects malformed loaded sets with %s before rendering a question', async (_label, malformedSet) => {
   renderStudentApp(
     <App services={servicesFor(createApi({ getExerciseSet: () => Promise.resolve({ ...malformedSet, taskId: 'malformed' }) }))} />,
@@ -620,11 +654,25 @@ test('does not consume a pending variant result after the exercise app unmounts'
   expect(titleReads).toBe(0)
 })
 
-test('requires an attempt, reveals one hint level at a time, hides locked content, and records the solved level', async () => {
+test('requires an attempt, reveals one agent hint level at a time, and diagnoses once on assisted solve', async () => {
   const submitSession = vi.fn((session) => Promise.resolve({ sessionId: session.sessionId }))
+  const requestAgentHint = vi.fn((question, progress) => {
+    const nextLevel = Math.min((progress?.hintLevel ?? 0) + 1, 5)
+    const hint = question.hints.find((item) => item.level === nextLevel) ?? null
+    return Promise.resolve({
+      isCorrect: false, diagnosis: null, framework: null,
+      hint: hint ? { level: hint.level, title: hint.title, content: hint.content, nextStep: null } : null,
+      counterQuestion: null,
+    })
+  })
+  const diagnoseQuestion = vi.fn((question, progress) => Promise.resolve({
+    isCorrect: false,
+    diagnosis: { isCorrect: false, errorType: 'calculation', confidence: 0.9, counterQuestion: null, whereWrong: 'Wrong step', whyWrong: 'Arithmetic slip' },
+    framework: null, hint: null, counterQuestion: null,
+  }))
   renderStudentApp(
     <>
-      <App services={servicesFor(createApi({ submitSession }))} />
+      <App services={servicesFor(createApi({ submitSession, requestAgentHint, diagnoseQuestion }))} />
       <LocationProbe />
     </>,
     { route: '/exercise/t-flow' },
@@ -651,6 +699,8 @@ test('requires an attempt, reveals one hint level at a time, hides locked conten
   expect(screen.getByText('Private layer 1 guidance')).toBeInTheDocument()
   expect(screen.queryByText('Private layer 2 guidance')).not.toBeInTheDocument()
   expect(screen.getByText(/L2 · Locked hint/i)).toBeInTheDocument()
+  // The first wrong attempt triggers NO diagnosis — hints are independent.
+  expect(diagnoseQuestion).not.toHaveBeenCalled()
 
   for (let level = 2; level <= 5; level += 1) {
     await userEvent.click(screen.getByRole('button', { name: /Get a hint/i }))
@@ -658,14 +708,137 @@ test('requires an attempt, reveals one hint level at a time, hides locked conten
     if (level < 5) expect(screen.queryByText(`Private layer ${level + 1} guidance`)).not.toBeInTheDocument()
   }
   expect(screen.queryByRole('button', { name: /Get a hint/i })).not.toBeInTheDocument()
+  // Each unlocked level requested its own agent hint.
+  expect(requestAgentHint).toHaveBeenCalledTimes(5)
+  // Still no diagnosis while the question is unsettled (wrong).
+  expect(diagnoseQuestion).not.toHaveBeenCalled()
 
+  // Assisted solve (correct only after 5 hints). Free-response grading already
+  // produced the diagnosis, so no separate diagnoseQuestion call happens — the
+  // diagnosis is carried into the session/error book.
   await solve('42')
   expect(await screen.findByText('Correct!')).toBeInTheDocument()
   await userEvent.click(screen.getByRole('button', { name: 'Submit' }))
   await waitFor(() => expect(screen.getByTestId('location')).toHaveTextContent('/summary/page-session'))
   expect(submitSession).toHaveBeenCalledWith(expect.objectContaining({
     questions: [expect.objectContaining({
-      result: expect.objectContaining({ status: 'correct', hintsUsed: 5, solvedAtHintLevel: 5 }),
+      result: expect.objectContaining({
+        status: 'correct',
+        hintsUsed: 5,
+        solvedAtHintLevel: 5,
+        // The AI diagnosis from the assisted solve reaches the error book.
+        errorType: 'calculation',
+      }),
+    })],
+  }))
+  // No repeated diagnosis calls — diagnosis happened once during grading.
+  expect(diagnoseQuestion).not.toHaveBeenCalled()
+})
+
+test('diagnoses still-wrong questions once at submit, but not first-try-correct ones', async () => {
+  const submitSession = vi.fn((session) => Promise.resolve({ sessionId: session.sessionId }))
+  const diagnoseQuestion = vi.fn((question, progress) => Promise.resolve({
+    isCorrect: false,
+    diagnosis: { isCorrect: false, errorType: 'calculation', confidence: 0.9, counterQuestion: null, whereWrong: 'Wrong step', whyWrong: 'Arithmetic slip' },
+    framework: null, hint: null, counterQuestion: null,
+  }))
+  // Choice questions grade locally (no ungraded/LLM-grading path), so a wrong
+  // answer is definitively wrong and only the settlement diagnosis should run.
+  const choiceQ = () => ({
+    id: 'choice-q',
+    order: 1,
+    type: 'choice',
+    topic: 'Calculus - Differentiation',
+    difficulty: 3,
+    content: 'Pick the value of 6 × 7.',
+    options: ['42', '43', '44', '45'],
+    correctIndex: 0,
+    correctDisplay: '42',
+    errorType: 'calculation',
+    hints,
+  })
+  const twoQSet = exerciseSet({
+    taskId: 't-two',
+    questions: [
+      { ...choiceQ(), id: 'wrong-q' },
+      { ...choiceQ(), id: 'correct-q' },
+    ],
+  })
+  const api = createApi({ submitSession, diagnoseQuestion, getExerciseSet: () => Promise.resolve(twoQSet) })
+  renderStudentApp(
+    <>
+      <App services={servicesFor(api)} />
+      <LocationProbe />
+    </>,
+    { route: '/exercise/t-two' },
+  )
+
+  // Question 1: answer wrong (no hints) — remains wrong at submit.
+  await screen.findByText('Engine-backed practice')
+  await userEvent.click(screen.getByRole('radio', { name: /Your answer 2: 43/ }))
+  await userEvent.click(screen.getByRole('button', { name: /Submit answer from answer area.*check my answer/i }))
+  // Question 2: answer correct first try — no hints used.
+  await userEvent.click(screen.getByRole('button', { name: /Question 2 hint usage/i }))
+  await userEvent.click(screen.getByRole('radio', { name: /Your answer 1: 42/ }))
+  await userEvent.click(screen.getByRole('button', { name: /Submit answer from answer area.*check my answer/i }))
+  expect(await screen.findByText('Correct!')).toBeInTheDocument()
+  // First-try correct → no diagnosis.
+  expect(diagnoseQuestion).not.toHaveBeenCalled()
+
+  await userEvent.click(screen.getByRole('button', { name: 'Submit' }))
+  await waitFor(() => expect(diagnoseQuestion).toHaveBeenCalledTimes(1))
+  await waitFor(() => expect(screen.getByTestId('location')).toHaveTextContent('/summary/page-session'))
+  expect(submitSession).toHaveBeenCalled()
+})
+
+test('carries the assisted-solve diagnosis into the submitted session (not the fallback text)', async () => {
+  const submitSession = vi.fn((session) => Promise.resolve({ sessionId: session.sessionId }))
+  const diagnoseQuestion = vi.fn((question, progress) => Promise.resolve({
+    isCorrect: false,
+    diagnosis: {
+      isCorrect: false, errorType: 'method', confidence: 0.9, counterQuestion: null,
+      whereWrong: 'Selected the wrong option first', whyWrong: 'Confused stress units with a force product',
+    },
+    framework: null, hint: null, counterQuestion: null,
+  }))
+  // Choice question: wrong answer grades locally (definitively wrong), then a
+  // hint unlocks, then the student picks the correct option → assisted solve.
+  const choiceQ = () => ({
+    id: 'choice-q', order: 1, type: 'choice', topic: 'Calculus - Differentiation', difficulty: 3,
+    content: 'Pick the value of 6 × 7.', options: ['42', '43', '44', '45'], correctIndex: 0,
+    correctDisplay: '42', errorType: 'calculation', hints,
+  })
+  const api = createApi({ submitSession, diagnoseQuestion, getExerciseSet: () => Promise.resolve(exerciseSet({ taskId: 't-assisted', questions: [choiceQ()] })) })
+  renderStudentApp(
+    <>
+      <App services={servicesFor(api)} />
+      <LocationProbe />
+    </>,
+    { route: '/exercise/t-assisted' },
+  )
+
+  // Wrong first.
+  await screen.findByText('Engine-backed practice')
+  await userEvent.click(screen.getByRole('radio', { name: /Your answer 2: 43/ }))
+  await userEvent.click(screen.getByRole('button', { name: /Submit answer from answer area.*check my answer/i }))
+  // Unlock a hint, then answer correctly (assisted solve).
+  await userEvent.click(screen.getByRole('button', { name: /Get a hint.*L2/i }))
+  await userEvent.click(screen.getByRole('radio', { name: /Your answer 1: 42/ }))
+  await userEvent.click(screen.getByRole('button', { name: /Submit answer from answer area.*check my answer/i }))
+  expect(await screen.findByText('Correct!')).toBeInTheDocument()
+
+  await userEvent.click(screen.getByRole('button', { name: 'Submit' }))
+  await waitFor(() => expect(screen.getByTestId('location')).toHaveTextContent('/summary/page-session'))
+  expect(diagnoseQuestion).toHaveBeenCalledTimes(1)
+  expect(submitSession).toHaveBeenCalledWith(expect.objectContaining({
+    questions: [expect.objectContaining({
+      result: expect.objectContaining({
+        status: 'correct', hintsUsed: 2, solvedAtHintLevel: 2,
+        // The AI diagnosis reaches the error book, not the fallback text.
+        whereWrong: 'Selected the wrong option first',
+        whyWrong: 'Confused stress units with a force product',
+        errorType: 'method',
+      }),
     })],
   }))
 })

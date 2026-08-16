@@ -1008,6 +1008,7 @@ export type StudentSettingsCreateManyArgs<ExtArgs extends runtime.Types.Extensio
    * The data used to create many StudentSettings.
    */
   data: Prisma.StudentSettingsCreateManyInput | Prisma.StudentSettingsCreateManyInput[]
+  skipDuplicates?: boolean
 }
 
 /**
@@ -1026,6 +1027,7 @@ export type StudentSettingsCreateManyAndReturnArgs<ExtArgs extends runtime.Types
    * The data used to create many StudentSettings.
    */
   data: Prisma.StudentSettingsCreateManyInput | Prisma.StudentSettingsCreateManyInput[]
+  skipDuplicates?: boolean
   /**
    * Choose, which related nodes to fetch as well
    */

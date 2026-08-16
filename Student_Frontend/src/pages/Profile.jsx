@@ -1,38 +1,33 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { motion } from 'framer-motion'
 import { useApp } from '../store/AppStore'
-import {
-  student, profileOverview, knowledgeGraphData, progressTimeline,
-  errorPatternData, achievements, ERROR_TYPE_META,
-} from '../data/mockData'
+import { ERROR_TYPE_META } from '../data/mockData'
 import { Icon, Badge, Modal, ProgressBar, Toggle, staggerContainer, fadeUpItem } from '../components/ui'
 
 const masteryColor = (m) => (m >= 80 ? '#059669' : m >= 60 ? '#0D9488' : m >= 40 ? '#D97706' : '#DC2626')
 
 // ---------- Knowledge graph (SVG) ----------
-function KnowledgeGraph() {
-  const [subject, setSubject] = useState('A-Level Math')
+function KnowledgeGraph({ graph }) {
   const [selected, setSelected] = useState(null)
   const { notes, errors } = useApp()
-  const graph = knowledgeGraphData[subject]
+  const nodes = graph?.nodes ?? []
+  const edges = graph?.edges ?? []
 
   return (
     <section className="zb-card mb-4">
       <div className="flex items-center justify-between mb-4 flex-wrap gap-2">
         <h2 className="zb-section-title">Knowledge Graph</h2>
-        <select className="zb-input !w-auto !h-8 text-sm" value={subject} onChange={(e) => { setSubject(e.target.value); setSelected(null) }}>
-          {Object.keys(knowledgeGraphData).map((s) => <option key={s}>{s}</option>)}
-        </select>
       </div>
       <div className="grid lg:grid-cols-[1fr_260px] gap-4">
         <svg viewBox="0 0 540 320" className="w-full rounded-comp bg-warm-paper/60">
-          {graph.edges.map(([a, b]) => {
-            const na = graph.nodes.find((n) => n.id === a)
-            const nb = graph.nodes.find((n) => n.id === b)
+          {edges.map(([a, b]) => {
+            const na = nodes.find((n) => n.id === a)
+            const nb = nodes.find((n) => n.id === b)
+            if (!na || !nb) return null
             return <line key={`${a}-${b}`} x1={na.x} y1={na.y} x2={nb.x} y2={nb.y} stroke="rgba(120,113,108,0.18)" strokeWidth="1.5" />
           })}
-          {graph.nodes.map((n) => {
+          {nodes.map((n) => {
             const r = 14 + n.weight * 0.7
             const active = selected === n.id
             return (
@@ -49,7 +44,7 @@ function KnowledgeGraph() {
         {/* Node detail panel */}
         <div className="border border-whisper-line rounded-comp p-4 text-sm">
           {selected ? (() => {
-            const node = graph.nodes.find((n) => n.id === selected)
+            const node = nodes.find((n) => n.id === selected)
             const relatedNotes = notes.filter((n) => n.linkedTopics.some((t) => t.includes(node.name)) || n.folderPath.includes(node.name))
             const relatedErrors = errors.filter((e) => e.relatedTopic.includes(node.name))
             return (
@@ -85,10 +80,10 @@ function KnowledgeGraph() {
 }
 
 // ---------- Progress timeline (SVG line chart) ----------
-function ProgressChart() {
+function ProgressChart({ timeline }) {
   const W = 560; const H = 180; const P = 28
-  const points = progressTimeline.map((d, i) => {
-    const x = P + (i / (progressTimeline.length - 1)) * (W - P * 2)
+  const points = timeline.map((d, i) => {
+    const x = P + (i / (timeline.length - 1)) * (W - P * 2)
     const y = H - P - ((d.mastery - 40) / 50) * (H - P * 2)
     return { ...d, x, y }
   })
@@ -97,60 +92,70 @@ function ProgressChart() {
   return (
     <section className="zb-card mb-4">
       <h2 className="zb-section-title mb-4">Progress Timeline</h2>
-      <svg viewBox={`0 0 ${W} ${H}`} className="w-full">
-        {[50, 60, 70, 80].map((v) => {
-          const y = H - P - ((v - 40) / 50) * (H - P * 2)
-          return (
-            <g key={v}>
-              <line x1={P} y1={y} x2={W - P} y2={y} stroke="rgba(120,113,108,0.12)" />
-              <text x={P - 6} y={y + 3} textAnchor="end" fontSize="9" fill="#78716C" fontFamily="JetBrains Mono">{v}</text>
+      {timeline.length === 0 ? (
+        <p className="text-sm text-warm-stone">No practice sessions yet — your progress will appear here.</p>
+      ) : timeline.length === 1 ? (
+        <div className="text-sm text-warm-stone">First session recorded on <span className="text-deep-ink font-medium">{timeline[0].date}</span> — keep going to build a trend.</div>
+      ) : (
+        <svg viewBox={`0 0 ${W} ${H}`} className="w-full">
+          {[50, 60, 70, 80].map((v) => {
+            const y = H - P - ((v - 40) / 50) * (H - P * 2)
+            return (
+              <g key={v}>
+                <line x1={P} y1={y} x2={W - P} y2={y} stroke="rgba(120,113,108,0.12)" />
+                <text x={P - 6} y={y + 3} textAnchor="end" fontSize="9" fill="#78716C" fontFamily="JetBrains Mono">{v}</text>
+              </g>
+            )
+          })}
+          <path d={`${path} L${points[points.length - 1].x},${H - P} L${points[0].x},${H - P} Z`} fill="rgba(13,148,136,0.07)" />
+          <path d={path} fill="none" stroke="#0D9488" strokeWidth="2" strokeLinecap="round" />
+          {points.map((p, pointIndex) => (
+            // date (month-day) is not unique when several sessions land on the
+            // same day, so key by position.
+            <g key={`${p.date}-${pointIndex}`}>
+              <circle cx={p.x} cy={p.y} r={p.event ? 5 : 3} fill={p.event ? '#D97706' : '#0D9488'} />
+              {p.event && <text x={p.x} y={p.y - 10} textAnchor="middle" fontSize="9" fill="#D97706">{p.event}</text>}
+              <text x={p.x} y={H - 8} textAnchor="middle" fontSize="8" fill="#78716C" fontFamily="JetBrains Mono">{p.date}</text>
             </g>
-          )
-        })}
-        <path d={`${path} L${points[points.length - 1].x},${H - P} L${points[0].x},${H - P} Z`} fill="rgba(13,148,136,0.07)" />
-        <path d={path} fill="none" stroke="#0D9488" strokeWidth="2" strokeLinecap="round" />
-        {points.map((p) => (
-          <g key={p.date}>
-            <circle cx={p.x} cy={p.y} r={p.event ? 5 : 3} fill={p.event ? '#D97706' : '#0D9488'} />
-            {p.event && <text x={p.x} y={p.y - 10} textAnchor="middle" fontSize="9" fill="#D97706">{p.event}</text>}
-            <text x={p.x} y={H - 8} textAnchor="middle" fontSize="8" fill="#78716C" fontFamily="JetBrains Mono">{p.date}</text>
-          </g>
-        ))}
-      </svg>
-      <p className="text-sm text-warm-stone mt-2">
-        <Icon name="lightbulb" size={15} className="text-alert-amber mr-1" />
-        Milestone: <span className="text-deep-ink font-medium">trigonometry went from zero to fluent in 12 days</span> — your fastest-mastered complex topic so far.
-      </p>
+          ))}
+        </svg>
+      )}
     </section>
   )
 }
 
 // ---------- Error patterns ----------
-function ErrorPattern() {
-  const entries = Object.entries(errorPatternData.distribution)
+function ErrorPattern({ errorPatterns }) {
+  const entries = Object.entries(errorPatterns.distribution)
   return (
     <section className="zb-card mb-4">
       <h2 className="zb-section-title mb-4">Error Patterns</h2>
-      <div className="flex flex-col gap-3 mb-4">
-        {entries.map(([type, pct]) => (
-          <div key={type} className="flex items-center gap-3">
-            <span className="text-sm w-20 shrink-0">{ERROR_TYPE_META[type].label}</span>
-            <div className="flex-1 h-4 rounded-full bg-warm-stone/10 overflow-hidden">
-              <motion.div className="h-full rounded-full" style={{ backgroundColor: ERROR_TYPE_META[type].color }} initial={{ width: 0 }} animate={{ width: `${pct}%` }} transition={{ type: 'spring', stiffness: 100, damping: 20 }} />
-            </div>
-            <span className="font-mono text-sm w-10 text-right">{pct}%</span>
+      {entries.length === 0 ? (
+        <p className="text-sm text-warm-stone">No error patterns yet — review your wrong answers to unlock insights.</p>
+      ) : (
+        <>
+          <div className="flex flex-col gap-3 mb-4">
+            {entries.map(([type, pct]) => (
+              <div key={type} className="flex items-center gap-3">
+                <span className="text-sm w-20 shrink-0">{ERROR_TYPE_META[type]?.label ?? type}</span>
+                <div className="flex-1 h-4 rounded-full bg-warm-stone/10 overflow-hidden">
+                  <motion.div className="h-full rounded-full" style={{ backgroundColor: ERROR_TYPE_META[type]?.color ?? '#78716C' }} initial={{ width: 0 }} animate={{ width: `${pct}%` }} transition={{ type: 'spring', stiffness: 100, damping: 20 }} />
+                </div>
+                <span className="font-mono text-sm w-10 text-right">{pct}%</span>
+              </div>
+            ))}
           </div>
-        ))}
-      </div>
-      <div className="bg-alert-amber/10 border border-alert-amber/20 rounded-comp p-3.5 text-sm leading-6 text-warm-stone">
-        <span className="font-semibold text-alert-amber">Insight: </span>{errorPatternData.insight}
-      </div>
+          <div className="bg-alert-amber/10 border border-alert-amber/20 rounded-comp p-3.5 text-sm leading-6 text-warm-stone">
+            <span className="font-semibold text-alert-amber">Insight: </span>{errorPatterns.insight}
+          </div>
+        </>
+      )}
     </section>
   )
 }
 
 // ---------- Achievements ----------
-function Achievements() {
+function Achievements({ achievements }) {
   return (
     <section className="zb-card mb-4">
       <h2 className="zb-section-title mb-4">Achievements</h2>
@@ -228,22 +233,33 @@ function SettingsModal({ open, onClose }) {
 export default function Profile() {
   const [searchParams] = useSearchParams()
   const [settingsOpen, setSettingsOpen] = useState(searchParams.get('settings') === '1')
-  const o = profileOverview
+  const { student, profile, loadProfile } = useApp()
+
+  useEffect(() => { loadProfile() }, [loadProfile])
+
+  const name = student?.name ?? 'Student'
+  const initial = (name[0] ?? 'S').toUpperCase()
+  const joinedDays = student?.joinedDays ?? 0
+  const gradeInfo = student?.gradeInfo ?? ''
+  const o = profile?.profileOverview
+
+  const graphSubject = profile?.knowledgeGraph ? Object.keys(profile.knowledgeGraph)[0] : undefined
+  const graph = graphSubject ? profile.knowledgeGraph[graphSubject] : { nodes: [], edges: [] }
 
   return (
     <div className="max-w-content mx-auto px-4 lg:px-0 py-8">
       {/* User header */}
       <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} className="flex items-center gap-4 mb-6">
         <div className="relative">
-          <div className="w-16 h-16 rounded-full bg-deep-teal text-white text-2xl font-semibold flex items-center justify-center">{student.name[0]}</div>
+          <div className="w-16 h-16 rounded-full bg-deep-teal text-white text-2xl font-semibold flex items-center justify-center">{initial}</div>
           <span className="absolute bottom-0.5 right-0.5 w-3.5 h-3.5 rounded-full bg-success-green border-2 border-warm-paper" />
         </div>
         <div className="flex-1">
           <div className="flex items-center gap-2">
-            <h1 className="text-2xl font-bold tracking-tight">{student.name}</h1>
+            <h1 className="text-2xl font-bold tracking-tight">{name}</h1>
             <Badge tone="teal">Premium Learner</Badge>
           </div>
-          <p className="text-sm text-warm-stone mt-0.5">On NOME.AI for {student.joinedDays} days · {student.gradeInfo}</p>
+          <p className="text-sm text-warm-stone mt-0.5">On NOME.AI for {joinedDays} days · {gradeInfo}</p>
         </div>
         <button className="p-2 rounded-comp text-warm-stone hover:text-deep-ink hover:bg-teal-tint" onClick={() => setSettingsOpen(true)}>
           <Icon name="settings" size={22} />
@@ -254,31 +270,31 @@ export default function Profile() {
       <motion.section variants={staggerContainer} initial="hidden" animate="show" className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-4">
         <motion.div variants={fadeUpItem} className="zb-card !p-5">
           <p className="text-xs text-warm-stone mb-1.5">Mastery score</p>
-          <p className="font-mono text-2xl text-deep-teal mb-2">{o.currentScore}%</p>
-          <ProgressBar value={(o.currentScore / o.targetScore) * 100} />
-          <p className="text-xs text-warm-stone mt-1.5">Target <span className="font-mono">{o.targetScore}%</span></p>
+          <p className="font-mono text-2xl text-deep-teal mb-2">{o?.currentScore ?? 0}%</p>
+          <ProgressBar value={((o?.currentScore ?? 0) / (o?.targetScore || 1)) * 100} />
+          <p className="text-xs text-warm-stone mt-1.5">Target <span className="font-mono">{o?.targetScore ?? 0}%</span></p>
         </motion.div>
         <motion.div variants={fadeUpItem} className="zb-card !p-5">
           <p className="text-xs text-warm-stone mb-1.5">Daily average</p>
-          <p className="font-mono text-2xl">{o.dailyHours}<span className="text-sm text-warm-stone">h/day</span></p>
+          <p className="font-mono text-2xl">{o?.dailyHours ?? 0}<span className="text-sm text-warm-stone">h/day</span></p>
           <p className="text-xs text-success-green mt-1.5">+12% vs last week</p>
         </motion.div>
         <motion.div variants={fadeUpItem} className="zb-card !p-5">
           <p className="text-xs text-warm-stone mb-1.5">Study streak</p>
-          <p className="font-mono text-2xl">🔥 {o.streak}<span className="text-sm text-warm-stone"> days</span></p>
-          <p className="text-xs text-warm-stone mt-1.5">Personal best: {o.bestStreak} days</p>
+          <p className="font-mono text-2xl">🔥 {o?.streak ?? 0}<span className="text-sm text-warm-stone"> days</span></p>
+          <p className="text-xs text-warm-stone mt-1.5">Personal best: {o?.bestStreak ?? 0} days</p>
         </motion.div>
         <motion.div variants={fadeUpItem} className="zb-card !p-5">
           <p className="text-xs text-warm-stone mb-1.5">Total practice</p>
-          <p className="font-mono text-2xl">{o.totalQuestions}<span className="text-sm text-warm-stone"> questions</span></p>
-          <p className="text-xs text-warm-stone mt-1.5">Overall accuracy <span className="font-mono">{o.overallAccuracy}%</span></p>
+          <p className="font-mono text-2xl">{o?.totalQuestions ?? 0}<span className="text-sm text-warm-stone"> questions</span></p>
+          <p className="text-xs text-warm-stone mt-1.5">Overall accuracy <span className="font-mono">{o?.overallAccuracy ?? 0}%</span></p>
         </motion.div>
       </motion.section>
 
-      <KnowledgeGraph />
-      <ProgressChart />
-      <ErrorPattern />
-      <Achievements />
+      <KnowledgeGraph graph={graph} />
+      <ProgressChart timeline={profile?.progressTimeline ?? []} />
+      <ErrorPattern errorPatterns={profile?.errorPatterns ?? { distribution: {}, insight: '' }} />
+      <Achievements achievements={profile?.achievements ?? []} />
 
       <SettingsModal open={settingsOpen} onClose={() => setSettingsOpen(false)} />
     </div>

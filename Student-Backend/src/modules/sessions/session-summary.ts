@@ -33,31 +33,46 @@ export const sessionSummarySchema = z.strictObject({
     wrong: countSchema,
   })),
   wrongQuestions: z.array(sessionQuestionSchema),
+  // Questions worth surfacing as errors: anything the student did not solve
+  // cleanly — either it never reached 'correct', or it took a wrong attempt
+  // (with hints) before they recovered. First-try-correct questions are excluded.
+  errorQuestions: z.array(sessionQuestionSchema),
 })
 
 export type SessionSummary = z.infer<typeof sessionSummarySchema>
 
 type SummaryInput = Pick<Session, 'questions'>
-type ErrorType = SessionQuestion['errorType']
+type ErrorType = NonNullable<SessionQuestion['errorType']>
 
 function summaryErrorType(question: SessionQuestion): ErrorType {
   // The backend aggregates already-submitted evidence. It does not grade an
   // answer or infer a diagnosis. An unanswered question follows the frontend's
-  // deterministic execution bucket; every other value is the submitted type.
-  return question.result.status === 'unanswered' ? 'execution' : question.errorType
+  // deterministic execution bucket; otherwise prefer the agent's re-classified
+  // errorType (carried on result) over the template's pre-labelled value.
+  const diagnosed = question.result.errorType
+  if (question.result.status === 'unanswered') return 'execution'
+  return (diagnosed ?? question.errorType ?? 'knowledge')
+}
+
+// A question that needed any wrong attempt before solving (and therefore any
+// hint) is an error worth surfacing. First-try-correct questions are not.
+function isErrorQuestion(question: SessionQuestion): boolean {
+  return question.result.solvedAtHintLevel !== 0
+    || question.result.status !== 'correct'
 }
 
 export function summarizeSession(session: SummaryInput): SessionSummary {
   const questions = session.questions
   const correctQuestions = questions.filter(({ result }) => result.status === 'correct')
   const wrongQuestions = questions.filter(({ result }) => result.status !== 'correct')
+  const errorQuestions = questions.filter(isErrorQuestion)
   const totalHints = questions.reduce(
     (total, { result }) => total + result.hintsUsed,
     0,
   )
 
   const errorDistribution: Partial<Record<ErrorType, number>> = {}
-  for (const question of wrongQuestions) {
+  for (const question of errorQuestions) {
     const errorType = summaryErrorType(question)
     errorDistribution[errorType] = (errorDistribution[errorType] ?? 0) + 1
   }
@@ -90,5 +105,6 @@ export function summarizeSession(session: SummaryInput): SessionSummary {
     errorDistribution,
     topicOutcomes: [...outcomes.values()],
     wrongQuestions,
+    errorQuestions,
   }
 }

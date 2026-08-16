@@ -133,6 +133,7 @@ const upsertById = (items, replacement, { prepend = false } = {}) => {
 export function AppProvider({ children, services = defaultAppServices }) {
   const [bootStatus, setBootStatus] = useState('loading')
   const [bootError, setBootError] = useState(null)
+  const [student, setStudent] = useState(null)
   const [tasks, setTasks] = useState([])
   const [taskAdjustments, setTaskAdjustments] = useState([])
   const [greeting, setGreeting] = useState(null)
@@ -147,6 +148,9 @@ export function AppProvider({ children, services = defaultAppServices }) {
   const [sessions, setSessions] = useState({})
   const [sessionSummaries, setSessionSummaries] = useState({})
   const [lastSession, setLastSession] = useState(null)
+  const [bankQuestions, setBankQuestions] = useState([])
+  const [bankRecommendations, setBankRecommendations] = useState([])
+  const [profile, setProfile] = useState(null)
   const [toast, setToast] = useState(null)
   const [pendingActions, setPendingActions] = useState(() => new Set())
   const toastTimer = useRef(null)
@@ -158,6 +162,8 @@ export function AppProvider({ children, services = defaultAppServices }) {
   const pendingActionCounts = useRef(new Map())
   const collectionQueues = useRef(new Map())
   const exerciseLoads = useRef(new Map())
+  const bankLoad = useRef(null)
+  const profileLoad = useRef(null)
   const persistedSessionIds = useRef(new Set())
   const canonicalSessionIds = useRef(new Map())
   const tasksRef = useRef([])
@@ -170,11 +176,17 @@ export function AppProvider({ children, services = defaultAppServices }) {
   const sessionsRef = useRef({})
   const sessionSummariesRef = useRef({})
   const lastSessionRef = useRef(null)
+  const bankQuestionsRef = useRef([])
+  const bankRecommendationsRef = useRef([])
+  const profileRef = useRef(null)
   const getNow = useCallback(() => services.now(), [services])
 
   const replaceTasks = useCallback((next) => {
     tasksRef.current = next
     setTasks(next)
+  }, [])
+  const replaceStudent = useCallback((next) => {
+    setStudent(next)
   }, [])
   const replaceTaskAdjustments = useCallback((next) => {
     taskAdjustmentsRef.current = next
@@ -231,6 +243,7 @@ export function AppProvider({ children, services = defaultAppServices }) {
     try {
       const data = await services.api.bootstrap()
       if (!mounted.current || requestId !== bootRequest.current) return data
+      replaceStudent(data.student || null)
       replaceTasks(data.tasks)
       replaceTaskAdjustments(data.taskAdjustments || [])
       setGreeting(data.greeting || null)
@@ -257,7 +270,7 @@ export function AppProvider({ children, services = defaultAppServices }) {
       }
       return undefined
     }
-  }, [replaceErrors, replaceExerciseCache, replaceNotes, replaceSessionSummaries, replaceSessions, replaceSettings, replaceTaskAdjustments, replaceTasks, replaceUploadJobs, services])
+  }, [replaceErrors, replaceExerciseCache, replaceNotes, replaceSessionSummaries, replaceSessions, replaceSettings, replaceStudent, replaceTaskAdjustments, replaceTasks, replaceUploadJobs, services])
 
   useEffect(() => {
     mounted.current = true
@@ -559,6 +572,54 @@ export function AppProvider({ children, services = defaultAppServices }) {
       rollback: replaceSessionSummaries,
     }))
   }, [replaceSessionSummaries, runAction, services])
+
+  const loadBank = useCallback(() => {
+    if (bankQuestionsRef.current.length > 0 || bankRecommendationsRef.current.length > 0) {
+      return Promise.resolve()
+    }
+    if (bankLoad.current) return bankLoad.current
+    const load = runAction('bank:load', 'bank', () => ({
+      snapshot: null,
+      optimistic: () => {},
+      request: async () => {
+        const [questions, recommendations] = await Promise.all([
+          services.api.listBankQuestions(),
+          services.api.getBankRecommendations(),
+        ])
+        return { questions, recommendations }
+      },
+      commit: ({ questions, recommendations }) => {
+        bankQuestionsRef.current = questions ?? []
+        bankRecommendationsRef.current = recommendations ?? []
+        setBankQuestions(bankQuestionsRef.current)
+        setBankRecommendations(bankRecommendationsRef.current)
+      },
+      rollback: () => {},
+    })).finally(() => {
+      if (bankLoad.current === load) bankLoad.current = null
+    })
+    bankLoad.current = load
+    return load
+  }, [runAction, services])
+
+  const loadProfile = useCallback(() => {
+    if (profileRef.current) return Promise.resolve(profileRef.current)
+    if (profileLoad.current) return profileLoad.current
+    const load = runAction('profile:load', 'profile', () => ({
+      snapshot: null,
+      optimistic: () => {},
+      request: () => services.api.getStudentProfile(),
+      commit: (result) => {
+        profileRef.current = result
+        setProfile(result)
+      },
+      rollback: () => {},
+    })).finally(() => {
+      if (profileLoad.current === load) profileLoad.current = null
+    })
+    profileLoad.current = load
+    return load
+  }, [runAction, services])
 
   const addNote = useCallback((note) => {
     const actionNow = services.now()
@@ -946,6 +1007,38 @@ export function AppProvider({ children, services = defaultAppServices }) {
     rollback: replaceSettings,
   })), [replaceSettings, runAction, services])
 
+  // Agent diagnosis is a read-only AI call (no collection mutation), so it
+  // bypasses runAction's optimistic/rollback machinery and goes straight to
+  // the API layer. Pending state is tracked locally in Exercise.jsx.
+  const diagnoseAnswer = useCallback((question, progress) => (
+    services.api.diagnoseAnswer(question, progress)
+  ), [services])
+
+  const replyCounterQuestion = useCallback((question, progress, counterReply) => (
+    services.api.replyCounterQuestion(question, progress, counterReply)
+  ), [services])
+
+  // Per-layer progressive hint (independent of diagnosis) — read-only agent call.
+  const requestAgentHint = useCallback((question, progress) => (
+    services.api.requestAgentHint(question, progress)
+  ), [services])
+
+  // One-shot diagnosis when a question's outcome is settled (solved-with-hints
+  // or still-wrong at submit). Read-only agent call; results feed the error book.
+  const diagnoseQuestion = useCallback((question, progress) => (
+    services.api.diagnoseQuestion(question, progress)
+  ), [services])
+
+  const tutorChat = useCallback((question, message, history) => (
+    services.api.tutorChat(question, message, history)
+  ), [services])
+
+  // Similar-question lookup is a read-only AI call (same shape as diagnoseAnswer),
+  // so it bypasses runAction and leaves caching to the error card.
+  const loadSimilarQuestions = useCallback((questionId) => (
+    services.api.listSimilarBankQuestions(questionId)
+  ), [services])
+
   const isActionPending = useCallback((key) => {
     if (pendingActions.has(key)) return true
     if (key.startsWith('updateNote:')) {
@@ -957,11 +1050,12 @@ export function AppProvider({ children, services = defaultAppServices }) {
   return (
     <AppContext.Provider value={{
       booted: bootStatus === 'ready', bootStatus, bootError, pendingActions, retryBootstrap, isActionPending,
-      tasks, taskAdjustments, greeting, moduleStats, learningSummary, errors, notes, uploadJobs, noteFolders, settings, exerciseCache, sessions, sessionSummaries, lastSession, toast,
+      student, tasks, taskAdjustments, greeting, moduleStats, learningSummary, errors, notes, uploadJobs, noteFolders, settings, exerciseCache, sessions, sessionSummaries, lastSession, bankQuestions, bankRecommendations, profile, toast,
       getNow, showToast, completeTask, requestTaskAdjustment, addTask,
       addErrors, addSessionErrors, markErrorMastered, recordRedo, scheduleErrorVariant, verifyErrorVariant, loadSessionSummary,
       addNote, reserveMaterialUploadId, startMaterialUpload, processMaterialUpload, confirmMaterialUpload, cancelMaterialUpload,
-      updateNote, organizeNote, undoNote, loadExerciseSet, saveSession, generateVariant, updateSettings,
+      updateNote, organizeNote, undoNote, loadExerciseSet, saveSession, generateVariant, updateSettings, loadBank, loadProfile,
+      diagnoseAnswer, replyCounterQuestion, requestAgentHint, diagnoseQuestion, tutorChat, loadSimilarQuestions,
     }}>
       {children}
     </AppContext.Provider>

@@ -452,6 +452,7 @@ export type TaskAdjustmentCreateOrConnectWithoutStudentInput = {
 
 export type TaskAdjustmentCreateManyStudentInputEnvelope = {
   data: Prisma.TaskAdjustmentCreateManyStudentInput | Prisma.TaskAdjustmentCreateManyStudentInput[]
+  skipDuplicates?: boolean
 }
 
 export type TaskAdjustmentUpsertWithWhereUniqueWithoutStudentInput = {
@@ -504,6 +505,7 @@ export type TaskAdjustmentCreateOrConnectWithoutTaskInput = {
 
 export type TaskAdjustmentCreateManyTaskInputEnvelope = {
   data: Prisma.TaskAdjustmentCreateManyTaskInput | Prisma.TaskAdjustmentCreateManyTaskInput[]
+  skipDuplicates?: boolean
 }
 
 export type TaskAdjustmentUpsertWithWhereUniqueWithoutTaskInput = {
@@ -1319,6 +1321,7 @@ export type TaskAdjustmentCreateManyArgs<ExtArgs extends runtime.Types.Extension
    * The data used to create many TaskAdjustments.
    */
   data: Prisma.TaskAdjustmentCreateManyInput | Prisma.TaskAdjustmentCreateManyInput[]
+  skipDuplicates?: boolean
 }
 
 /**
@@ -1337,6 +1340,7 @@ export type TaskAdjustmentCreateManyAndReturnArgs<ExtArgs extends runtime.Types.
    * The data used to create many TaskAdjustments.
    */
   data: Prisma.TaskAdjustmentCreateManyInput | Prisma.TaskAdjustmentCreateManyInput[]
+  skipDuplicates?: boolean
   /**
    * Choose, which related nodes to fetch as well
    */

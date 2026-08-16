@@ -410,6 +410,7 @@ export type ErrorItemCreateOrConnectWithoutStudentInput = {
 
 export type ErrorItemCreateManyStudentInputEnvelope = {
   data: Prisma.ErrorItemCreateManyStudentInput | Prisma.ErrorItemCreateManyStudentInput[]
+  skipDuplicates?: boolean
 }
 
 export type ErrorItemUpsertWithWhereUniqueWithoutStudentInput = {
@@ -1200,6 +1201,7 @@ export type ErrorItemCreateManyArgs<ExtArgs extends runtime.Types.Extensions.Int
    * The data used to create many ErrorItems.
    */
   data: Prisma.ErrorItemCreateManyInput | Prisma.ErrorItemCreateManyInput[]
+  skipDuplicates?: boolean
 }
 
 /**
@@ -1218,6 +1220,7 @@ export type ErrorItemCreateManyAndReturnArgs<ExtArgs extends runtime.Types.Exten
    * The data used to create many ErrorItems.
    */
   data: Prisma.ErrorItemCreateManyInput | Prisma.ErrorItemCreateManyInput[]
+  skipDuplicates?: boolean
   /**
    * Choose, which related nodes to fetch as well
    */

@@ -102,5 +102,8 @@ export function normalizeErrorType(question, result) {
   if (isUnanswered(safeResult)) return 'execution'
   if (hasRepeatedAvoidablePattern(safeResult)) return 'habit'
   if (hasCorrectMethodButMissingMarkSchemePhrases(safeQuestion, safeResult)) return 'expression'
-  return validErrorTypes.has(safeQuestion.errorType) ? safeQuestion.errorType : 'knowledge'
+  // The agent re-classifies the error type from the actual answer; prefer that
+  // verdict over the template's pre-labelled errorType, then fall back to it.
+  const diagnosedType = safeResult.errorType ?? safeQuestion.errorType
+  return validErrorTypes.has(diagnosedType) ? diagnosedType : 'knowledge'
 }

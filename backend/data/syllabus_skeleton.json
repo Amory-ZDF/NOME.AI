@@ -1,0 +1,24 @@
+{
+  "$comment": "Rule-generated syllabus skeleton for AS-Level Physics (CAIE 9702). Topic nodes mirror the corpus chapter headers (backend/data/AS-level-phy-note.txt). BigIdea nodes are teacher-curated (6, fixed). Concept/Formula/Skill nodes and ALL edges are added later by the LLM extractor (per ontology.json) + teacher — NOT here. Loader-compatible with backend/tool/knowledge_graph.py (_load pops 'id', keeps the rest).",
+  "subject": "AS-Level Physics (CAIE 9702)",
+  "entities": [
+    {"id": "topic-ch01", "name": "Physical Quantities and Units", "type": "Topic"},
+    {"id": "topic-ch02", "name": "Kinematics", "type": "Topic"},
+    {"id": "topic-ch03", "name": "Dynamics", "type": "Topic"},
+    {"id": "topic-ch04", "name": "Forces, Density and Pressure", "type": "Topic"},
+    {"id": "topic-ch05", "name": "Work, Energy and Power", "type": "Topic"},
+    {"id": "topic-ch06", "name": "Deformation of Solids", "type": "Topic"},
+    {"id": "topic-ch07", "name": "Waves", "type": "Topic"},
+    {"id": "topic-ch08", "name": "Superposition", "type": "Topic"},
+    {"id": "topic-ch09", "name": "Electricity", "type": "Topic"},
+    {"id": "topic-ch10", "name": "D.C. Circuits", "type": "Topic"},
+    {"id": "topic-ch11", "name": "Particle Physics", "type": "Topic"},
+    {"id": "bigidea-conservation", "name": "Conservation laws", "type": "BigIdea"},
+    {"id": "bigidea-energy", "name": "Energy & energy transfer", "type": "BigIdea"},
+    {"id": "bigidea-waves", "name": "Waves transfer energy without net matter transfer", "type": "BigIdea"},
+    {"id": "bigidea-modeling", "name": "Modeling & idealization", "type": "BigIdea"},
+    {"id": "bigidea-macro-micro", "name": "Macro-micro correspondence", "type": "BigIdea"},
+    {"id": "bigidea-measurement", "name": "Measurement & uncertainty", "type": "BigIdea"}
+  ],
+  "relations": []
+}

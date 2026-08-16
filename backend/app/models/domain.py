@@ -15,7 +15,7 @@ from __future__ import annotations
 from enum import StrEnum
 from typing import Any
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 
 # ============================================================================
@@ -141,11 +141,42 @@ class CounterReplyRequest(BaseModel):
     counter_reply: str = Field(..., min_length=1, alias="counterReply")
 
 
+class TutorChatRequest(BaseModel):
+    """POST /api/agent/tutor-chat — student asks the agent directly.
+
+    With `question` → "explain this question" (讲解这道题).
+    Without `question` → general Q&A (泛答疑 / 其他问题 / 复制粘贴的题).
+    """
+    student_id: str = Field(default="default", alias="studentId")
+    message: str = Field(..., min_length=1)
+    question: dict | None = None
+    history: list[dict] = Field(default_factory=list)
+
+
+class TutorChatResponse(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+    reply: str
+
+
+class GraphChatRequest(BaseModel):
+    """POST /api/agent/graph-chat — graph-grounded Q&A for the demo page.
+
+    The agent grounds its answer in the knowledge graph: the referenced nodes,
+    their edges, prerequisite chains and weak links. `graph_node_ids` pin the
+    context to specific nodes (the demo page sends the currently selected one);
+    otherwise node ids are fuzzy-matched from the message.
+    """
+    student_id: str = Field(default="default", alias="studentId")
+    message: str = Field(..., min_length=1)
+    graph_node_ids: list[str] = Field(default_factory=list, alias="graphNodeIds")
+
+
 # ============================================================================
 # Agent response types
 # ============================================================================
 
 class HintResponse(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
     level: int
     title: str
     content: str
@@ -153,6 +184,8 @@ class HintResponse(BaseModel):
 
 
 class DiagnosisResponse(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+    is_correct: bool | None = Field(default=None, alias="isCorrect")
     error_type: str | None = Field(default=None, alias="errorType")
     confidence: float = 1.0
     counter_question: str | None = Field(default=None, alias="counterQuestion")
@@ -164,6 +197,7 @@ class DiagnosisResponse(BaseModel):
 
 
 class WeakLinkResponse(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
     node_id: str = Field(..., alias="nodeId")
     node_name: str = Field(..., alias="nodeName")
     depth: int
@@ -172,11 +206,14 @@ class WeakLinkResponse(BaseModel):
 
 
 class FrameworkResponse(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
     weak_links: list[WeakLinkResponse] = Field(default_factory=list, alias="weakLinks")
     explanation: str = ""
 
 
 class AnalyzeResponse(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+    is_correct: bool | None = Field(default=None, alias="isCorrect")
     diagnosis: DiagnosisResponse | None = None
     framework: FrameworkResponse | None = None
     hint: HintResponse | None = None
@@ -188,6 +225,7 @@ class AnalyzeResponse(BaseModel):
 # ============================================================================
 
 class SessionResultQuestion(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
     question_id: str = Field(..., alias="questionId")
     status: str
     diagnosis: DiagnosisResponse | None = None

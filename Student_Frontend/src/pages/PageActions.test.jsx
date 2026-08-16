@@ -2,13 +2,27 @@ import { act, fireEvent, screen, waitFor, within } from '@testing-library/react'
 import { useLocation } from 'react-router-dom'
 import { afterEach, expect, test, vi } from 'vitest'
 import App from '../App'
-import { bankExerciseSets, createSeedState, exerciseSets } from '../data/mockData'
+import { bankExerciseSets, bankQuestions, bankRecommendations, createSeedState, exerciseSets } from '../data/mockData'
+import { gradeAnswerLocal } from '../features/exercise/answerRules'
 import { createAppServices } from '../store/services'
 import { renderStudentApp } from '../test/renderApp'
 
 afterEach(() => vi.useRealTimers())
 
 function createApi(overrides = {}) {
+  const diagnoseAnswer = (question, progress) => {
+    const isCorrect = gradeAnswerLocal(question, progress?.answer ?? '').isCorrect
+    if (isCorrect) return Promise.resolve({ isCorrect: true, diagnosis: null, framework: null, hint: null, counterQuestion: null })
+    const nextLevel = Math.min((progress?.hintLevel ?? 0) + 1, 5)
+    const hint = question.hints.find((item) => item.level === nextLevel) ?? null
+    return Promise.resolve({
+      isCorrect: false,
+      diagnosis: { isCorrect: false, errorType: question.errorType ?? 'knowledge', confidence: 0.9, counterQuestion: null, whereWrong: '', whyWrong: '' },
+      framework: null,
+      hint: hint ? { level: hint.level, title: hint.title, content: hint.content, nextStep: null } : null,
+      counterQuestion: null,
+    })
+  }
   return {
     bootstrap: () => Promise.resolve(createSeedState()),
     completeTask: (id) => Promise.resolve({ task: { id, status: 'completed' } }),
@@ -21,6 +35,18 @@ function createApi(overrides = {}) {
     updateNote: () => Promise.resolve({}),
     getExerciseSet: (taskId) => Promise.resolve(Object.values(exerciseSets).find((set) => set.taskId === taskId)),
     getBankExerciseSet: (setId) => Promise.resolve(bankExerciseSets[setId]),
+    listBankQuestions: () => Promise.resolve(bankQuestions),
+    getBankRecommendations: () => Promise.resolve(bankRecommendations),
+    getStudentProfile: () => {
+      const seed = createSeedState()
+      return {
+        profileOverview: seed.profileOverview,
+        knowledgeGraph: seed.knowledgeGraphData,
+        progressTimeline: seed.progressTimeline,
+        errorPatterns: seed.errorPatternData,
+        achievements: seed.achievements,
+      }
+    },
     submitSession: (session) => Promise.resolve({ sessionId: session.sessionId }),
     generateVariant: (sourceQuestionId) => Promise.resolve({
       exerciseSet: {
@@ -34,6 +60,8 @@ function createApi(overrides = {}) {
       task: { id: `variant-task-${sourceQuestionId}`, title: 'Independent transfer practice', exerciseSetId: `variant-${sourceQuestionId}`, type: 'ai_recommended', status: 'pending', sourceQuestionId },
     }),
     updateSettings: (patch) => Promise.resolve({ settings: patch }),
+    diagnoseAnswer,
+    replyCounterQuestion: (question, progress) => diagnoseAnswer(question, progress),
     ...overrides,
   }
 }
@@ -67,8 +95,12 @@ async function attemptTaskExercise() {
   fireEvent.click(screen.getByRole('button', { name: /Submit answer from answer area.*check my answer/i }))
 
   fireEvent.click(screen.getByTitle('Question 3'))
-  fireEvent.change(screen.getByRole('textbox'), { target: { value: '25%' } })
-  fireEvent.click(screen.getByRole('button', { name: /Submit answer from answer area.*check my answer/i }))
+  fireEvent.change(screen.getByLabelText('Your answer'), { target: { value: '25%' } })
+  // Q3 is free-response: grading is delegated to the (mocked) agent and resolves
+  // asynchronously, so flush the microtask chain before the caller inspects state.
+  await act(async () => {
+    fireEvent.click(screen.getByRole('button', { name: /Submit answer from answer area.*check my answer/i }))
+  })
 }
 
 function LocationProbe() {

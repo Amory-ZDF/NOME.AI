@@ -8,6 +8,7 @@ import type { FastifyInstance } from 'fastify'
 import { buildApp } from './app.js'
 import { parseEnv } from './config/env.js'
 import { createPrisma } from './db/client.js'
+import { InsightsRepo } from './data/insights-repo.js'
 
 interface CloseableApp {
   close(): Promise<unknown>
@@ -207,9 +208,13 @@ export async function runServer(): Promise<{
 }> {
   const env = parseEnv(process.env)
   const prisma = createPrisma(env.DATABASE_URL)
+  const insightsRepo = new InsightsRepo(env.INSIGHTS_DATABASE_URL)
+  if (insightsRepo.enabled) {
+    await insightsRepo.connect()
+  }
   let app: ReturnType<typeof buildApp>
   try {
-    app = buildApp({ env, prisma })
+    app = buildApp({ env, insightsRepo })
   } catch (startupError) {
     try {
       await prisma.$disconnect()

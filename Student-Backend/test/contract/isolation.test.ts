@@ -123,6 +123,7 @@ function expectedSummary(label: string) {
       errorDistribution: {},
       topicOutcomes: [{ topic: 'Algebra', correct: 1, wrong: 0 }],
       wrongQuestions: [],
+      errorQuestions: [],
     }
   }
   return {
@@ -134,6 +135,7 @@ function expectedSummary(label: string) {
     errorDistribution: { calculation: 1 },
     topicOutcomes: [{ topic: 'Algebra', correct: 0, wrong: 1 }],
     wrongQuestions: submitted.questions,
+    errorQuestions: submitted.questions,
   }
 }
 

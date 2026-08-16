@@ -4,6 +4,15 @@ from pydantic import BaseModel, Field
 
 
 class DiagnosisOutput(BaseModel):
+    is_correct: bool | None = Field(
+        default=None,
+        description=(
+            "Grading verdict: whether the student's answer is correct against "
+            "the mark scheme / correct answer. Only filled when the caller has "
+            "NOT pre-graded the answer (free-response questions graded by LLM). "
+            "Null when grading is already settled (e.g. choice questions)."
+        ),
+    )
     error_type: str | None = Field(
         default=None,
         description=(

@@ -55,12 +55,16 @@ export default function Summary() {
 
   const summary = sessionSummaries[sessionId] || summarizeSession(session)
   const wrongQuestions = summary.wrongQuestions
-  const errorCards = useMemo(() => wrongQuestions.map((question) => buildErrorCard({
+  // Questions to surface in the error book: anything that needed a wrong attempt
+  // or a hint before solving, plus the still-wrong/unanswered. First-try-correct
+  // questions are excluded.
+  const errorQuestions = summary.errorQuestions ?? wrongQuestions
+  const errorCards = useMemo(() => errorQuestions.map((question) => buildErrorCard({
     question,
     session,
     id: `error-${question.id}`,
     occurredAt: session?.completedAt,
-  })), [session, wrongQuestions])
+  })), [session, errorQuestions])
 
   // Exact occurrence identity makes re-clicks idempotent without hiding a later recurrence.
   const persistedOccurrenceKeys = useMemo(() => new Set(errors.flatMap((error) => [
@@ -89,9 +93,9 @@ export default function Summary() {
   const assistedCount = total - independentCount
   const avgHints = summary.hintDependency.averageHints.toFixed(1)
 
-  // Error cause distribution (based on actually wrong questions)
+  // Error cause distribution (over error questions: still-wrong + hint-assisted)
   const distribution = Object.entries(summary.errorDistribution).map(([type, count]) => ({
-    type, count, pct: Math.round((count / Math.max(1, wrongQuestions.length)) * 100),
+    type, count, pct: Math.round((count / Math.max(1, errorQuestions.length)) * 100),
   }))
 
   return (
@@ -118,14 +122,12 @@ export default function Summary() {
       <motion.section variants={staggerContainer} initial="hidden" animate="show" className="zb-card mb-4">
         <div className="flex items-center justify-between mb-4">
           <h2 className="zb-section-title">Error Analysis</h2>
-          <span className="text-xs text-warm-stone font-mono">{wrongQuestions.length} wrong</span>
+          <span className="text-xs text-warm-stone font-mono">{errorQuestions.length} error{errorQuestions.length === 1 ? '' : 's'}</span>
         </div>
 
-        {wrongQuestions.length === 0 ? (
+        {errorQuestions.length === 0 ? (
           <p className="text-sm text-warm-stone py-4 text-center">
-            {independentCount === total
-              ? 'No mistakes in this session — all solved independently 🎉'
-              : `No unresolved mistakes in this session. ${assistedCount} ${assistedCount === 1 ? 'question was' : 'questions were'} solved with hints or after retrying.`}
+            No mistakes in this session — every question was solved independently 🎉
           </p>
         ) : (
           <>
@@ -146,28 +148,32 @@ export default function Summary() {
 
             {/* Error detail cards */}
             <div className="flex flex-col gap-3">
-              {wrongQuestions.map((q, i) => (
-                <motion.div key={q.id} variants={fadeUpItem} className="border border-whisper-line rounded-comp p-4">
-                  <div className="flex items-center gap-2 mb-2 flex-wrap">
-                    <Badge tone="amber">{ERROR_TYPE_META[errorCards[i]?.errorType]?.label}</Badge>
-                    <span className="text-sm font-medium">Question {q.order}</span>
-                    {q.result.attempts.length > 1 && <Badge tone="red">{q.result.attempts.length} attempts</Badge>}
-                  </div>
-                  <div className="grid md:grid-cols-2 gap-3 text-sm">
-                    <div className="bg-error-red/5 rounded-comp p-3">
-                      <p className="text-xs font-semibold text-error-red mb-1">Your answer</p>
-                      <p className="text-warm-stone leading-6">{q.result.attempts[q.result.attempts.length - 1]?.answer || '(no answer)'}</p>
+              {errorQuestions.map((q, i) => {
+                const solvedAfterRedemption = q.result.status === 'correct'
+                return (
+                  <motion.div key={q.id} variants={fadeUpItem} className="border border-whisper-line rounded-comp p-4">
+                    <div className="flex items-center gap-2 mb-2 flex-wrap">
+                      {solvedAfterRedemption && <Badge tone="green">Solved after hints</Badge>}
+                      <Badge tone="amber">{ERROR_TYPE_META[errorCards[i]?.errorType]?.label}</Badge>
+                      <span className="text-sm font-medium">Question {q.order}</span>
+                      {q.result.attempts.length > 1 && <Badge tone="red">{q.result.attempts.length} attempts</Badge>}
                     </div>
-                    <div className="bg-success-green/5 rounded-comp p-3">
-                      <p className="text-xs font-semibold text-success-green mb-1">Correct approach</p>
-                      <p className="text-warm-stone leading-6">{q.correctDisplay}</p>
+                    <div className="grid md:grid-cols-2 gap-3 text-sm">
+                      <div className="bg-error-red/5 rounded-comp p-3">
+                        <p className="text-xs font-semibold text-error-red mb-1">Your answer</p>
+                        <p className="text-warm-stone leading-6">{q.result.attempts[q.result.attempts.length - 1]?.answer || '(no answer)'}</p>
+                      </div>
+                      <div className="bg-success-green/5 rounded-comp p-3">
+                        <p className="text-xs font-semibold text-success-green mb-1">Correct approach</p>
+                        <p className="text-warm-stone leading-6">{q.correctDisplay}</p>
+                      </div>
                     </div>
-                  </div>
-                  <p className="text-xs text-warm-stone mt-2">
-                    Topic: <Link to="/profile" className="text-deep-teal hover:underline">{q.topic}</Link>
-                  </p>
-                </motion.div>
-              ))}
+                    <p className="text-xs text-warm-stone mt-2">
+                      Topic: <Link to="/profile" className="text-deep-teal hover:underline">{q.topic}</Link>
+                    </p>
+                  </motion.div>
+                )
+              })}
             </div>
           </>
         )}
@@ -187,10 +193,10 @@ export default function Summary() {
       </motion.section>
 
       {/* Error cards */}
-      {wrongQuestions.length > 0 && (
+      {errorCards.length > 0 && (
         <motion.section variants={fadeUpItem} initial="hidden" animate="show" className="zb-card mb-4">
           <div className="flex items-center justify-between gap-3 mb-4 flex-wrap">
-            <h2 className="zb-section-title">Error Cards ({wrongQuestions.length})</h2>
+            <h2 className="zb-section-title">Error Cards ({errorCards.length})</h2>
             <button
               className={`zb-btn !h-9 text-xs ${allErrorsAdded ? 'zb-btn-ghost text-success-green' : 'zb-btn-primary'}`}
               disabled={allErrorsAdded || isActionPending('errors:add')}
@@ -208,11 +214,16 @@ export default function Summary() {
             </button>
           </div>
           <div className="flex flex-col gap-3">
-            {wrongQuestions.map((q, index) => {
+            {errorQuestions.map((q, index) => {
               const card = errorCards[index]
               const added = isErrorCardAdded(card)
+              const solvedAfterRedemption = q.result.status === 'correct'
               return (
                 <div key={q.id} className="border-l-[3px] border-alert-amber border border-whisper-line border-l-[3px] rounded-comp p-4">
+                  <div className="flex items-center gap-2 mb-2">
+                    {solvedAfterRedemption && <Badge tone="green">Solved after hints</Badge>}
+                    {q.result.attempts.length > 1 && <Badge tone="red">{q.result.attempts.length} attempts</Badge>}
+                  </div>
                   <p className="text-sm leading-6 mb-2"><MathHTML html={q.content} /></p>
                   <p className="text-xs text-warm-stone mb-1"><span className="font-semibold text-deep-ink">What went wrong: </span>{card.whereWrong}</p>
                   <p className="text-xs text-warm-stone"><span className="font-semibold text-deep-ink">Why: </span>{card.whyWrong}</p>

@@ -1,0 +1,122 @@
+{
+  "subject": "AS Physics",
+  "exerciseSets": [
+    {
+      "id": "bank-kinematics-suvat",
+      "title": "Kinematics — SUVAT equations",
+      "topic": "Kinematics",
+      "questions": [
+        {
+          "id": "q-kin-suvat-01",
+          "type": "calculation",
+          "difficulty": 3,
+          "content": "A car accelerates uniformly from rest at 2.0 m/s² for 5.0 s. Find the distance travelled.",
+          "correctDisplay": "s = ½at² = ½ × 2.0 × 5.0² = 25 m",
+          "markScheme": "Correct SUVAT equation s = ut + ½at² (1); substitution u=0, a=2.0, t=5.0 (1); answer 25 m with units (1)",
+          "knowledgeNodeId": "suvat-equations",
+          "understandingExplanation": "When acceleration is constant and the initial speed is zero, the distance travelled in time t is s = ½at².",
+          "scoringExplanation": "Award method credit for selecting the correct SUVAT equation, then for correct substitution and units.",
+          "hints": [
+            { "level": 1, "title": "Clarify", "content": "List the given quantities: u = 0, a = 2.0 m/s², t = 5.0 s. You need the distance s." },
+            { "level": 2, "title": "Knowledge", "content": "This is constant-acceleration motion, so the SUVAT equations apply." },
+            { "level": 3, "title": "Formula", "content": "Which SUVAT equation links s, u, a and t without needing the final velocity v?" },
+            { "level": 4, "title": "Method", "content": "Use s = ut + ½at² with u = 0, so s = ½at²." },
+            { "level": 5, "title": "Solution", "content": "s = ½ × 2.0 × 5.0² = 25 m." }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "bank-measurement-prefixes",
+      "title": "Physical Quantities — SI prefixes",
+      "topic": "Physical Quantities and Units",
+      "questions": [
+        {
+          "id": "q-meas-prefix-01",
+          "type": "choice",
+          "difficulty": 2,
+          "content": "Which SI prefix means 10⁻⁶?",
+          "options": ["nano", "micro", "milli", "mega"],
+          "correctIndex": 1,
+          "correctDisplay": "micro (µ)",
+          "knowledgeNodeId": "prefixes",
+          "understandingExplanation": "micro (µ) represents a factor of 10⁻⁶; nano is 10⁻⁹, milli 10⁻³, mega 10⁶.",
+          "scoringExplanation": "One mark for correctly recalling the SI prefix meaning."
+        }
+      ]
+    },
+    {
+      "id": "bank-momentum-pmv",
+      "title": "Momentum — p = mv",
+      "topic": "Momentum",
+      "questions": [
+        {
+          "id": "q-mom-choice-01",
+          "type": "choice",
+          "difficulty": 2,
+          "content": "Which of the following is the correct SI unit of momentum?",
+          "options": [
+            "kg m s⁻¹",
+            "kg m s⁻²",
+            "N m",
+            "J s"
+          ],
+          "correctIndex": 0,
+          "correctDisplay": "kg m s⁻¹ (equivalent to N s)",
+          "knowledgeNodeId": "p-mv",
+          "understandingExplanation": "Momentum p = mv has units kg × m s⁻¹ = kg m s⁻¹.",
+          "scoringExplanation": "One mark for selecting the correct SI unit of momentum."
+        },
+        {
+          "id": "q-mom-calc-01",
+          "type": "calculation",
+          "difficulty": 2,
+          "content": "A body of mass 5 kg moves with velocity 4 m/s. Calculate its momentum, stating the units.",
+          "correctDisplay": "p = mv = 5 × 4 = 20 kg m s⁻¹ (N s)",
+          "markScheme": "p = mv (1); substitution 5 × 4 (1); answer 20 with units kg m s⁻¹ or N s (1)",
+          "knowledgeNodeId": "p-mv",
+          "understandingExplanation": "Momentum is the product of mass and velocity: p = mv.",
+          "scoringExplanation": "Three marks: formula, substitution, answer with correct units.",
+          "hints": [
+            { "level": 1, "title": "Clarify", "content": "List the given quantities: m = 5 kg, v = 4 m/s. You need momentum p." },
+            { "level": 2, "title": "Knowledge", "content": "Momentum is the product of mass and velocity." },
+            { "level": 3, "title": "Formula", "content": "Use p = mv." },
+            { "level": 4, "title": "Method", "content": "Substitute m = 5 and v = 4." },
+            { "level": 5, "title": "Solution", "content": "p = 5 × 4 = 20 kg m s⁻¹." }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "bank-forces-resultant",
+      "title": "Forces — resultant force with a diagram",
+      "topic": "Forces",
+      "questions": [
+        {
+          "id": "q-forces-diagram-01",
+          "type": "calculation",
+          "difficulty": 3,
+          "content": "Two perpendicular forces act on a body: 3.0 N east and 4.0 N north. Find the magnitude of the resultant force.",
+          "image": "/images/forces-3-4.png",
+          "imageDescription": "A right triangle showing a 3.0 N force pointing east along the base and a 4.0 N force pointing north along the height, with the resultant as the hypotenuse.",
+          "correctDisplay": "R = √(3.0² + 4.0²) = 5.0 N",
+          "markScheme": [
+            { "point": 1, "criterion": "Recognise the two forces are perpendicular", "marks": 1 },
+            { "point": 2, "criterion": "Apply Pythagoras: R = √(Fx² + Fy²)", "marks": 1 },
+            { "point": 3, "criterion": "Substitute and compute R = 5.0 N", "marks": 1 }
+          ],
+          "knowledgeNodeId": "resultant-force",
+          "understandingExplanation": "For perpendicular forces the resultant magnitude is found by Pythagoras.",
+          "scoringExplanation": "Three marks: method (Pythagoras), substitution, answer.",
+          "hints": [
+            { "level": 1, "title": "Clarify", "content": "The two forces are at right angles. Sketch them as two sides of a right triangle." },
+            { "level": 2, "title": "Knowledge", "content": "Perpendicular forces combine via Pythagoras, not simple addition." },
+            { "level": 3, "title": "Formula", "content": "R = √(Fx² + Fy²)." },
+            { "level": 4, "title": "Method", "content": "Substitute Fx = 3.0 and Fy = 4.0." },
+            { "level": 5, "title": "Solution", "content": "R = √(9 + 16) = √25 = 5.0 N." }
+          ]
+        }
+      ]
+    }
+  ]
+}

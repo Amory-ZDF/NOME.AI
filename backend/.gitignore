@@ -3,3 +3,7 @@ __pycache__/
 .env
 *.egg-info/
 .pytest_cache/
+# extraction resume cache (regenerable)
+data/.extract_cache.json
+# chroma vector index (regenerable via scripts/vectorize_graph.py)
+data/as_physics_embeddings/

@@ -157,4 +157,31 @@ const API = {
       body: JSON.stringify({ studentId, score, comment }),
     });
   },
+
+  // ===== AI 洞察（长期记忆 agent 写入共享 DB，教师端只读呈现）=====
+  async getInsightsStudents() {
+    return await apiFetch('/insights/students');
+  },
+
+  async getInsightsTags(studentId) {
+    const qs = studentId ? '?studentId=' + encodeURIComponent(studentId) : '';
+    return await apiFetch('/insights/tags' + qs);
+  },
+
+  async getInsightsReports(studentId, period) {
+    const params = new URLSearchParams();
+    if (studentId) params.set('studentId', studentId);
+    if (period) params.set('period', period);
+    const qs = params.toString();
+    return await apiFetch('/insights/reports' + (qs ? '?' + qs : ''));
+  },
+
+  async getInsights() {
+    const [students, tags, reports] = await Promise.all([
+      this.getInsightsStudents(),
+      this.getInsightsTags(),
+      this.getInsightsReports(),
+    ]);
+    return { students, tags, reports };
+  },
 };

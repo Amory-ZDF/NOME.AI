@@ -8,6 +8,7 @@ this module is the agent's internal vocabulary.
 from dataclasses import dataclass, field
 from enum import StrEnum
 from datetime import datetime
+from typing import Any
 
 
 # ---------------------------------------------------------------------------
@@ -54,6 +55,10 @@ class QuestionContext:
     accept_keywords: list[str] = field(default_factory=list)
     error_type: ErrorType = ErrorType.KNOWLEDGE
     knowledge_node_id: str | None = None
+    mark_scheme: Any = None  # structured list or string — LLM grading standard
+    image_description: str | None = None  # qwen-translated text for image-based prompts
+    options: list[str] | None = None  # choice questions — the answer candidates
+    correct_index: int | None = None  # choice questions — index of the correct option
 
 
 @dataclass
@@ -61,7 +66,7 @@ class StudentProgress:
     """Current state of the student on one question."""
     question_id: str
     current_answer: str
-    status: str              # unanswered | wrong | correct
+    status: str              # unanswered | wrong | correct | ungraded (free-response pending LLM)
     hint_level: int          # 0-5, 0 = no hint seen
     solved_at_hint_level: int | None
     attempts: list[dict] = field(default_factory=list)  # [{answer, submitted_at, is_correct}]
@@ -107,6 +112,7 @@ class DiagnosisResult:
     linked_knowledge: list[str] = field(default_factory=list)  # knowledge_node_ids
     understanding_explanation: str | None = None  # A-Level conceptual layer
     scoring_explanation: str | None = None        # A-Level mark-scheme layer
+    is_correct: bool | None = None  # LLM grading verdict (free-response questions)
 
 
 @dataclass
@@ -181,3 +187,4 @@ class AgentResponse:
     diagnosis: DiagnosisResult | None = None
     framework: FrameworkResult | None = None
     counter_question: str | None = None  # orchestrator sets this when confidence < 0.7
+    is_correct: bool | None = None       # LLM grading verdict (free-response questions)
