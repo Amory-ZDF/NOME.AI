@@ -1,17 +1,32 @@
 import { z } from 'zod'
 
-import { normalizeSqliteDatabaseUrl } from '../db/database-url.js'
+import {
+  normalizeSqliteDatabaseUrl,
+  normalizePostgresDatabaseUrl,
+} from '../db/database-url.js'
 
 const DEFAULT_CORS_ORIGIN = 'http://localhost:5173'
 const DEFAULT_STUDENT_ID = 'stu-001'
 
-const sqliteDatabaseUrlSchema = z.string().transform((value, context) => {
+const databaseUrlSchema = z.string().transform((value, context) => {
+  const trimmed = value.trim()
+  if (trimmed.startsWith('postgresql://')) {
+    try {
+      return normalizePostgresDatabaseUrl(trimmed)
+    } catch (error) {
+      context.addIssue({
+        code: 'custom',
+        message: error instanceof Error ? error.message : 'must be a valid postgresql:// URL',
+      })
+      return z.NEVER
+    }
+  }
   try {
-    return normalizeSqliteDatabaseUrl(value)
+    return normalizeSqliteDatabaseUrl(trimmed)
   } catch {
     context.addIssue({
       code: 'custom',
-      message: 'must be a supported SQLite file: URL',
+      message: 'must be a supported SQLite file: URL or postgresql:// URL',
     })
     return z.NEVER
   }
@@ -47,8 +62,13 @@ const envSchema = z
     NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
     HOST: z.string().trim().min(1, 'must not be empty').default('127.0.0.1'),
     PORT: z.coerce.number().int().min(1).max(65_535).default(3001),
-    DATABASE_URL: sqliteDatabaseUrlSchema,
+    DATABASE_URL: databaseUrlSchema,
     STUDENT_ID: z.string().trim().min(1, 'must not be empty').optional(),
+    AGENT_URL: z
+      .string()
+      .trim()
+      .min(1, 'must not be empty')
+      .default('http://127.0.0.1:8000'),
     CORS_ORIGINS: z
       .string()
       .default(DEFAULT_CORS_ORIGIN)

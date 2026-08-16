@@ -53,6 +53,7 @@ describe('summarizeSession', () => {
       errorDistribution: {},
       topicOutcomes: [],
       wrongQuestions: [],
+      errorQuestions: [],
     })
   })
 
@@ -78,6 +79,7 @@ describe('summarizeSession', () => {
         { topic: 'Unspecified', correct: 0, wrong: 1 },
       ],
       wrongQuestions: [wrong, missingResult, missingStatus, invalidStatus, null],
+      errorQuestions: [wrong, missingResult, missingStatus, invalidStatus, null],
     })
   })
 })

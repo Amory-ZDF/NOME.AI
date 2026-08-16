@@ -137,6 +137,7 @@ const App = {
       { id: 'students', label: t('common.nav_students'), icon: Icons.users },
       { id: 'assignments', label: t('common.nav_assignments'), icon: Icons.assignment },
       { id: 'reports', label: t('common.nav_reports'), icon: Icons.report },
+      { id: 'insights', label: t('common.nav_insights'), icon: Icons.lightbulb },
     ];
 
     return `

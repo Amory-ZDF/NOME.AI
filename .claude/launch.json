@@ -1,0 +1,17 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "student-frontend",
+      "runtimeExecutable": "bash",
+      "runtimeArgs": ["-lc", "cd /Users/henryjin/PycharmProjects/NOME.AI/Student_Frontend && exec npm run dev"],
+      "port": 5173
+    },
+    {
+      "name": "teacher-frontend",
+      "runtimeExecutable": "bash",
+      "runtimeArgs": ["-lc", "cd /Users/henryjin/PycharmProjects/NOME.AI/Teacher_Frontend && exec node serve.js"],
+      "port": 8765
+    }
+  ]
+}

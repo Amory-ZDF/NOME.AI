@@ -1,0 +1,715 @@
+CH1: Physical Quantities and Units
+1. Physical Quantities
+A physical quantity consists of a numerical value and a unit (e.g., length l = 4 m).
+Estimation is a skill used to approximate values, compare quantities, or check if a calculated result is reasonable.
+2. SI Units
+Base SI quantities and units:
+Mass – kilogram (kg)
+Length – metre (m)
+Time – second (s)
+Current – ampere (A)
+Temperature – kelvin (K)
+Amount of substance – mole (mol) (A‑level only)
+Derived units are obtained from equations. Example: F = m a → SI unit of force = kg × m s^-2 = kg m s^-2 (newton, N).
+A homogeneous equation has the same units on both sides. All valid physics equations are homogeneous; this can be used to check formulas.
+3. Prefixes
+
+
+
+Examples: 6 pF = 6 × 10^-12 F; 10 μm = 10 × 10^-6 m.
+4. Precision, Accuracy & Uncertainty
+Precision: measurements are consistent (small scatter about a mean), but does not indicate accuracy.
+Accuracy: a measurement close to the true value.
+Absolute uncertainty: fixed quantity, e.g. 7 ± 0.6 V.
+Fractional uncertainty: e.g. 7 ± 3/35 V.
+Percentage uncertainty: e.g. 7 ± 8.6 % V.
+To reduce fractional/percentage uncertainty, measure larger quantities.
+Reading (one value) – uncertainty = ± half the smallest division (e.g., thermometer ±0.5 °C).
+Measurement (difference of two readings) – uncertainty = at least ±1 smallest division (e.g., ruler ±1 mm, because both ends have ±0.5 mm added).
+5. Combining Uncertainties
+Adding / subtracting → add absolute uncertainties.
+Example: temperature drop from 298 ± 0.5 K to 273 ± 0.5 K → difference = 25 ± 1 K.
+Multiplying / dividing → add percentage uncertainties.
+Example: force 91 ± 3 N, mass 7 ± 0.2 kg → acceleration requires adding percentage uncertainties of force and mass.
+6. Scalars and Vectors
+Scalars: magnitude only (e.g., distance, speed, mass, temperature).
+Vectors: magnitude and direction (e.g., displacement, velocity, force/weight, acceleration).
+Adding vectors
+Perpendicular vectors – use Pythagoras and trigonometry.
+Example: 5 N and 12 N perpendicular → resultant R = sqrt(12^2 + 5^2) = 13 N, direction theta = tan^-1(5/12) = 22.6° from horizontal.
+Non‑perpendicular vectors – use scale drawing (ruler and protractor) or resolve into components.
+Resolution: x = V cos(theta), y = V sin(theta). Remember: if moving through the angle theta to the component, use cos; if moving away from the angle, use sin.
+Example: velocity 10 m/s at 30° to horizontal → vertical component = 10 sin30° = 5 m/s, horizontal = 10 cos30° ≈ 8.66 m/s.
+Scale drawing example: ship 30 m at bearing 060° then 20 m east → displacement magnitude ≈ 49 m, bearing ≈ 072° (by drawing).
+
+Topic 2: Kinematics
+2.1 - Equations of Motion
+Distance – scalar quantity, describes the amount of ground covered.
+Displacement (s) – overall distance from starting position, includes direction (vector).
+Speed – scalar, distance travelled per unit time.
+Velocity (v) – rate of change of displacement → v = Δs / Δt
+Acceleration (a) – rate of change of velocity → a = Δv / Δt
+Uniform acceleration – acceleration is constant.
+Graphs:
+acceleration-time graph – area under graph = change in velocity.
+velocity-time graph – gradient = acceleration; area under graph = displacement.
+displacement-time graph – gradient = velocity.
+Instantaneous velocity – velocity at a specific point in time. Found from displacement-time graph by drawing a tangent at that time and calculating its gradient.
+Distance-time and speed-time graphs – distance and speed are scalars, so they are never negative.
+
+Derivation of uniform acceleration equations (from velocity-time graph):
+Area under v-t graph = displacement
+s = area of rectangle + area of triangle
+s = u t + (t/2)(v - u)
+Simplify → s = (u + v)/2 × t
+Gradient of v-t graph = acceleration
+a = (v - u) / t
+Rearrange → v = u + a t
+Another way using area
+s = u t + (t/2)(v - u)
+Substitute at = v - u → s = u t + (t/2)(a t)
+→ s = u t + (1/2) a t^2
+Final equation (substitute t = (v - u)/a into s = (u + v)/2 × t)
+s = (u + v)/2 × (v - u)/a
+s = (v^2 - u^2) / (2a)
+→ v^2 = u^2 + 2 a s
+Summary of uniform acceleration formulas:
+v = u + a t
+s = (u + v)/2 × t
+s = u t + (1/2) a t^2
+v^2 = u^2 + 2 a s
+Where:
+s = displacement
+u = initial velocity
+v = final velocity
+a = acceleration
+t = time
+Tip: when solving problems, write down known values and the one you need to find, then choose the appropriate formula.
+Example (stone dropped from 50 m bridge):
+Given: s = 50 m, u = 0 m/s, a = 9.81 m/s^2 (acceleration due to gravity, g). Find v and t.
+Using v^2 = u^2 + 2as → v^2 = 0 + 2 × 9.81 × 50 = 981 → v = 31.3 m/s
+Using s = u t + (1/2) a t^2 → 50 = 0 + 0.5 × 9.81 × t^2 → t^2 = 10.19 → t = 3.19 s
+
+Experiment to measure g (using light gates):
+Set up apparatus with two light gates connected to a data logger, close to an electromagnet.
+Adjust lower light gate so height h = 0.75 m (measured with metre ruler).
+Turn on electromagnet, attach ball bearing.
+Switch off magnet, record time t for bearing to fall between gates.
+Reduce h by 0.05 m each time (down to 0.25 m), repeat.
+Repeat twice more to get mean t for each h.
+Analysis:
+Initial velocity u = 0, displacement s = h, acceleration = g.
+From s = u t + (1/2) a t^2 → h = (1/2) g t^2 → 2h = g t^2
+So a graph of 2h against t^2 (using mean t^2 values) will have gradient = g.
+
+Projectile motion (parabolic path):
+Object moves at constant horizontal velocity (v_x) while experiencing uniform vertical acceleration (due to gravity).
+Vertical velocity (v_y) increases with time, while horizontal velocity remains constant.
+The combination causes the direction to change increasingly over time, producing a parabolic trajectory.
+
+Topic 3: Dynamics
+3.1 - Momentum and Newton's Laws of Motion
+Newton's 1st law – An object will remain at rest or travelling at a constant velocity, until it experiences a resultant force.
+Newton's 2nd law – The acceleration of an object is proportional to the resultant force experienced: F = m a. Resultant force and acceleration are always in the same direction.
+Newton's 3rd law – For each force experienced by an object, the object exerts an equal and opposite force.
+Mass – property of a body, measure of its resistance to acceleration. Larger mass → smaller acceleration for a given resultant force.
+Example: Object 1 (m = 1 kg) and Object 2 (m = 10 kg), both with resultant force 10 N.
+Object 1: a = 10 / 1 = 10 m s^-2
+Object 2: a = 10 / 10 = 1 m s^-2
+Linear momentum = mass × velocity (p = m v).
+From Newton's 2nd law: F = m a = Δ(m v) / Δ t → Force is the rate of change of momentum.
+Weight – gravitational force on an object, varies with gravitational field strength. On Earth: Weight = mass × g (where g = acceleration due to gravity, ~9.81 m s^-2).
+
+3.2 - Non-Uniform Motion (e.g. falling with air resistance)
+For an object falling in a uniform gravitational field (initial velocity = 0):
+Weight acts downwards, air resistance acts upwards. Weight > air resistance → resultant force downwards → object accelerates (Newton's 2nd law).
+As velocity increases, air resistance increases → resultant force decreases → acceleration decreases.
+Eventually, air resistance = weight → resultant force = 0 → object moves at constant terminal velocity.
+Air resistance affects projectile motion:
+Maximum height is reached earlier.
+Both vertical and horizontal distances travelled are reduced.
+
+3.3 - Linear Momentum and its Conservation
+Principle of conservation of momentum – total momentum is conserved in any interaction where no external forces act (momentum before = momentum after).
+Example (perfectly inelastic collision):
+Car (500 kg) at 4 m s^-1 collides with stationary truck (1500 kg). They join and move with velocity V.
+Momentum before = (500 × 4) + (1500 × 0) = 2000 kg m s^-1.
+Momentum after = (500 + 1500) × V = 2000 V.
+2000 = 2000 V → V = 1 m s^-1.
+Types of collisions:
+Elastic – both momentum and kinetic energy are conserved.
+Inelastic – only momentum is conserved; some kinetic energy is converted to other forms (heat, sound, deformation, etc.).
+For a perfectly elastic collision: relative speed of approach = relative speed of separation.
+Example: two equal-mass steel balls, one at rest. Moving ball collides and transfers all momentum and kinetic energy to the stationary ball; the first ball comes to rest, the second moves off with the same speed.
+Most collisions are inelastic – e.g., vehicle collisions: kinetic energy → elastic potential energy (deformation of crumple zones) + thermal energy + sound energy.
+
+Topic 4: Forces, Density and Pressure
+4.1 - Types of Force
+Uniform gravitational field – exerts the same gravitational force on a mass everywhere in the field.
+Force (weight) can be calculated using: F = m g
+m = mass of the object
+g = gravitational field strength (constant in a uniform field)
+On Earth's surface, g ≈ 9.81 N kg^-1
+Centre of gravity – the point at which an object's weight acts.
+For a uniform object, the centre of gravity is exactly at its geometric centre.
+
+4.2 - Equilibrium of Forces
+Moment of a force about a point = Force × perpendicular distance from the line of action of the force to the point.
+Couple – a pair of coplanar forces (within the same plane), equal in magnitude but opposite in direction. A couple produces rotation only (no translation).
+Torque of a couple = Force × perpendicular distance between the lines of action of the forces.
+Principle of moments – for an object in equilibrium, the sum of anticlockwise moments about any pivot equals the sum of clockwise moments.
+Example (finding F from a diagram, taking moments about point A):
+(2 × 50) + (3 × 35) = (3.5 × F)
+205 = 3.5 F → F = 58.6 N
+Note: moments taken about point A mean the distance from A to A is 0, so the moment caused by any force acting at A is zero and can be ignored.
+A system is in equilibrium if:
+No resultant force (net force = 0)
+No resultant torque (net torque = 0)
+How to show an object is in equilibrium:
+Method 1: Resolve all forces into horizontal and vertical components – if both sums equal zero, the object is in equilibrium.
+Method 2 (for 3 coplanar forces): Draw a scale diagram – if it forms a closed triangle, the object is in equilibrium.
+
+4.3 - Density and Pressure
+Density (ρ) = mass per unit volume → ρ = m / V
+m = mass, V = volume. Density measures how compact a substance is.
+Pressure (p) = force perpendicular to a surface per unit area → p = F / A
+F = force acting perpendicular to surface, A = area.
+
+Derivation of Δp = ρ g Δh:
+Consider a fluid column of density ρ, height h, and cross-sectional area A.
+Volume of fluid column = A × h
+Mass of fluid column = ρ × A × h
+Weight of fluid column = ρ × A × h × g
+Pressure at the bottom = Weight / Area = (ρ × A × h × g) / A = ρ h g
+Therefore, the pressure difference between two points in a fluid separated by height Δh is:Δp = ρ g Δh
+
+Total pressure vs pressure due to fluid:
+The equation Δp = ρ g Δh gives the pressure due to the fluid alone (not total pressure).
+Total pressure = pressure due to fluid + atmospheric pressure.
+Example (stone at bottom of lake):
+Depth h = 15.0 m, water density ρ = 997 kg m^-3, atmospheric pressure = 1.01 × 10^5 Pa.
+Pressure from water = ρ g h = 997 × 9.81 × 15.0 = 1.47 × 10^5 Pa.
+Total pressure = 1.47 × 10^5 + 1.01 × 10^5 = 2.48 × 10^5 Pa.
+
+Upthrust (buoyant force):
+For a submerged object, pressure at the bottom is greater than pressure at the top (because depth h is larger at the bottom).
+Since p = F / A and the areas are equal, the upward force on the bottom is greater than the downward force on the top → resultant upward force (upthrust).
+Archimedes' Principle – the weight of the fluid displaced by a submerged body equals the upthrust force exerted on the body.
+Buoyant force F = ρ g V
+ρ = density of the fluid
+g = gravitational acceleration
+V = volume of fluid displaced (equal to the volume of the submerged part of the object)
+
+Topic 5: Work, Energy and Power
+5.1 - Energy Conservation
+Energy – defined as the capacity to do work.
+Work done (W) = force causing motion × distance travelled in the direction of the motion.
+W = F s cosθ
+s = distance travelled
+θ = angle between the direction of the force and the direction of motion
+Work done on a gas at constant pressure (usually by transferring thermal energy):
+Work done = p ΔV
+p = pressure
+ΔV = change in volume
+Efficiency – a measure of how efficiently a system transfers energy.
+Efficiency = useful output power / input power
+Percentage efficiency = (useful output power / input power) × 100%
+Efficiency is never 100% – energy is always lost to friction (thermal, sound, etc.).
+Principle of conservation of energy – energy cannot be created or destroyed, only transferred from one form to another. Total energy in a closed system stays constant.
+Total energy in = Total energy out
+Example: ball thrown upwards – kinetic energy → gravitational potential energy (at max height), then GPE → KE on the way down.
+Important: due to air resistance, initial KE ≠ maximum GPE (some energy is transferred to the environment as heat).
+Power (P) – the rate of energy transfer (energy transferred per unit time). Since work is a measure of energy transfer:
+P = ΔW / Δt = (F × Δs) / Δt = F v (since v = Δs / Δt)
+Energy transferred = P × Δt
+
+Example questions:
+Kettle boiling water:
+Energy required = 163800 J, kettle power = 1200 W.
+P = W / t → t = W / P = 163800 / 1200 = 136.5 s.
+Ball gaining kinetic energy:
+Ball mass 0.6 kg, accelerates from rest to 12 m s^-1 in 0.2 s.
+Kinetic energy gained = (1/2) × 0.6 × 12^2 = 43.2 J.
+Average power = 43.2 / 0.2 = 216 W.
+Car at constant velocity:
+Car travels at 15 m s^-1 against frictional force of 200 N.
+Constant velocity → resultant force = 0 → engine force = 200 N (Newton's 1st law).
+Power = F v = 200 × 15 = 3000 W.
+
+5.2 - Gravitational Potential Energy and Kinetic Energy
+Kinetic Energy (E_k) = (1/2) m v^2
+m = mass, v = velocity.
+Derivation of E_k = (1/2) m v^2 (using suvat and F = ma):
+Object of mass m accelerates uniformly from rest (u = 0) to velocity v.
+From v^2 = u^2 + 2as → v^2 = 2as → a = v^2 / (2s).
+F = ma = m × v^2 / (2s) = (m v^2) / (2s).
+Work done = F × s = (m v^2) / (2s) × s = (1/2) m v^2 = kinetic energy.
+Gravitational Potential Energy (ΔE_p) – depends on object's position in a gravitational field and its mass.
+Elastic Potential Energy – depends on elasticity/spring constant and extension/compression. Both are stored forms of energy but arise from different mechanisms.
+Change in gravitational potential energy close to Earth's surface (uniform field):
+ΔE_p = m g Δh
+m = mass, g = acceleration due to gravity (~9.81 m s^-2), Δh = change in height.
+Derivation of ΔE_p = m g Δh:
+To lift an object at constant velocity, applied force = weight = m g.
+Work done = Force × distance = m g × Δh.
+This work done equals the increase in gravitational potential energy.
+Note: the force does not have to be vertically upwards – just ensure the change in vertical height is used (may involve trigonometry).
+
+Example (pendulum):
+Pendulum mass 500 g (0.5 kg), rises 10 cm (0.1 m) at maximum amplitude. Ignore air resistance.
+At maximum amplitude, all energy is GPE: ΔE_p = m g Δh = 0.5 × 9.81 × 0.1 = 0.4905 J.
+At equilibrium position, all GPE is converted to KE: (1/2) m v^2 = 0.4905 J.
+(1/2) × 0.5 × v^2 = 0.4905 → v^2 = 1.962 → v = 1.4 m s^-1.
+
+Topic 6: Deformation of Solids
+6.1 - Stress and Strain
+Deformation – a change in shape of an object due to an applied force.
+Types of forces and deformation:
+Tensile – causes an object to be stretched (tensile deformation).
+Compressive – causes an object to be squashed / compressed (compressive deformation).
+Hooke's law – extension is directly proportional to the force applied, provided environmental conditions (e.g. temperature) are kept constant.
+Force-extension graph is a straight line through the origin.
+Limit of proportionality (P) – the point after which Hooke's law is no longer obeyed.
+Elastic limit (E) – just after the limit of proportionality; beyond this point, the material will deform plastically (permanently stretched).
+Hooke's law equation: F = k x
+F = force / load applied
+k = spring constant (measure of stiffness)
+x = extension
+Rearranged: k = F / x
+
+Tensile stress = force applied per unit cross-sectional area.
+Stress = F / A
+Tensile strain = extension over original length.
+Strain = x / L (where x = extension, L = original length)
+Young modulus (E) – a value describing the stiffness of a material.
+Up to the limit of proportionality (for a material obeying Hooke's law), stress is proportional to strain, so stress / strain is constant. This constant is the Young modulus.
+Young modulus = Tensile stress / Tensile strain
+Using formulas: E = (F / A) / (x / L) = F L / (x A)
+On a stress-strain graph, the Young modulus is the gradient of the straight (linear) portion of the graph.
+
+Experiment to measure the Young modulus of a metal wire:
+Setup:
+Set up apparatus as shown in the diagram (wire clamped, with masses attached at one end, and a marker on the wire alongside a metre ruler).
+Procedure:
+Measure the diameter of the wire in 3 different places using a micrometer. Record these values.
+Attach the metre ruler to the workbench so the lower end faces the G-clamp. Place a marker on the wire at 0 cm on the ruler.
+Measure the length of wire from the blocks of wood to the marker on the wire when it is taut (this is the original length L).
+Attach a mass to the wire and record the total mass (in kg). The wire stretches, so the marker moves – record the new position of the marker.
+Add another 100 g mass and again record the position of the marker. Repeat until you have readings for at least 7 mass values.
+Calculations:
+Find the mean diameter and calculate the average cross-sectional area:
+A = π d^2 / 4
+For each mass, calculate the force: F = m g (record in a table).
+Calculate the extension for each mass: final marker position – initial position.
+Calculate stress for each mass: stress = F / A.
+Calculate strain for each mass: strain = x / L.
+Plot a graph of stress against strain and draw a line of best fit.
+Since Young modulus = stress / strain, the gradient of the line of best fit equals the Young modulus of the metal.
+
+6.2 - Elastic and Plastic Behaviour
+Elastic deformation – material returns to its original shape when the applied force is removed. All work done is stored as elastic strain energy.
+Plastic deformation – material's shape is changed permanently. Work is done to move atoms apart, so energy is not only stored as elastic strain energy but also dissipated as heat.
+
+Elastic strain energy:
+When work is done to stretch or compress a material, energy is stored as elastic strain energy.
+This cannot be calculated using W = F s cosθ because the force is variable.
+Instead, it is the area under a force-extension graph.
+For a straight-line graph (within the limit of proportionality):
+Elastic strain energy = (1/2) F x = (1/2) k x^2
+This equation applies only when deforming within the limit of proportionality.
+
+Force-extension graph behaviours:
+Plastic – material experiences large extension as load increases, especially beyond the elastic limit.
+Brittle – material extends very little and is likely to fracture (break apart) at a low extension.
+Loading and unloading:
+When stretched beyond the elastic limit, the unloading line does not return to the origin.
+The loading and unloading lines are parallel because the material's stiffness (spring constant) remains constant.
+The area between the loading and unloading lines represents the work done to permanently deform the material.
+
+Topic 7: Waves
+7.1 - Progressive Waves
+Key terms:
+
+
+
+Wave equation:
+v = f λ (speed = frequency × wavelength)
+Derivation:
+A wave travels a distance equal to its wavelength (λ) in one time period (T), so v = λ / T.
+Since f = 1 / T, substitute to get v = f λ.
+
+Using a CRO (cathode-ray oscilloscope) to measure frequency and amplitude:
+To find frequency:
+CRO displays the sound wave's displacement-time graph. Adjust the time-base settings so the waveforms fill as much of the screen as possible.
+Measure the number of full waves on the screen and the number of divisions they occupy. Multiply the number of divisions by the time-base to find the total time, then calculate period T = time taken for one full oscillation.
+Use f = 1 / T to find frequency.
+To find amplitude:
+The y-axis shows displacement. Adjust the voltage/division setting so the wave fills the vertical space.
+Measure the number of divisions the wave spans vertically and multiply by the voltage/division to obtain the amplitude (in volts).
+
+Intensity:
+Intensity (I) = power per unit area → I = P / A
+P = power, A = area.
+Intensity of a wave is directly proportional to amplitude squared (I ∝ A²).
+
+7.2 - Transverse and Longitudinal Waves
+Transverse waves – oscillations of particles (or fields) are at right angles (perpendicular) to the direction of energy transfer.
+All electromagnetic (EM) waves are transverse.
+EM waves travel at 3 × 10^8 m s^-1 in a vacuum.
+Examples: shaking a slinky vertically, waves on a string attached to a signal generator.
+Longitudinal waves – oscillations of particles are parallel to the direction of energy transfer.
+Made up of compressions (regions of high pressure/density) and rarefactions (regions of low pressure/density).
+Cannot travel in a vacuum.
+Example: sound waves. Can be demonstrated by pushing a slinky horizontally.
+
+Two types of wave graphs:
+Displacement-distance graph – shows how displacement of a particle varies with distance along the wave. Used to measure wavelength.
+For a transverse wave, this graph looks similar to the actual wave.
+For a longitudinal wave, the graph looks very different from the actual wave.
+Displacement-time graph – shows how displacement of a particle varies with time. Used to measure the period of a wave.
+
+7.3 - Doppler Effect for Sound Waves
+Doppler effect – the compression or spreading out of waves emitted or reflected by a moving source.
+Wavelengths in front of the source are compressed (shorter λ, higher observed frequency).
+Wavelengths behind the source are spread out (longer λ, lower observed frequency).
+Example: the sound of a car moving past you.
+Observed frequency equation (source moving relative to stationary observer):
+f_o = (f_s × v) / (v ± v_s)
+Where:
+f_o = observed frequency
+f_s = frequency emitted by the source
+v = speed of sound
+v_s = speed of the source (constant)
+Sign convention:
+v_s is added when the source is moving away from the observer (denominator larger → lower f_o).
+v_s is subtracted when the source is moving towards the observer (denominator smaller → higher f_o).
+Memory aid: towards = minus (higher pitch), away = plus (lower pitch).
+
+7.4 - Electromagnetic Spectrum
+The EM spectrum contains all electromagnetic waves, classified into principal categories by wavelength.
+Orders of magnitude (approximate wavelengths):
+
+
+
+Visible light: wavelengths in the range 400 – 700 nm are visible to the human eye.
+All EM waves travel at the same speed in free space: 3 × 10^8 m s^-1 (speed of light, c).
+
+7.5 - Polarisation
+Polarised wave – oscillates in only one plane (e.g. only vertically, if vertically polarised).
+Only transverse waves can be polarised – polarisation provides evidence for the transverse nature of waves, because polarisation can only occur if oscillations are perpendicular to the direction of travel.
+Effect on intensity:
+Passing through a polarising filter excludes waves of certain orientations.
+Intensity after filtering is always less than or equal to the intensity before.
+Malus' Law:
+I = I₀ cos²θ
+I₀ = initial intensity (before filter)
+I = intensity after passing through the filter
+θ = angle between the polarisation direction of the wave and the axis of the filter
+
+Topic 8: Superposition
+8.1 - Stationary Waves
+Superposition – occurs when two (or more) waves of the same type cross each other. The resultant displacement is the vector sum of the individual displacements.
+Types of interference:
+Constructive interference – waves meet in phase (phase difference = 0, 2π, 4π, ...). Their displacements add together to produce a larger resultant displacement.
+Destructive interference – waves meet out of phase / antiphase (phase difference = π, 3π, 5π, ...). Their displacements cancel each other out to produce a smaller (or zero) resultant displacement.
+Stationary wave (standing wave) – formed from the superposition of two progressive waves travelling in opposite directions in the same plane, with the same frequency, wavelength and amplitude.
+No energy is transferred by a stationary wave.
+Nodes – regions of minimum displacement (destructive interference, waves meet out of phase).
+Antinodes – regions of maximum displacement (constructive interference, waves meet in phase).
+The distance between adjacent nodes (or adjacent antinodes) = half a wavelength (λ/2) for any harmonic.
+Fundamental frequency (first harmonic) – the lowest frequency at which a stationary wave forms. It has two nodes and one antinode.
+For a vibrating string: f = (1 / 2L) × √(T / μ)
+L = length of the vibrating string
+T = tension in the string
+μ = mass per unit length (kg m^-1)
+Harmonics:
+First harmonic (fundamental) – 1 antinode → frequency = f
+Second harmonic – 2 antinodes → frequency = 2f
+Third harmonic – 3 antinodes → frequency = 3f
+... and so on for the nth harmonic (frequency = n × f).
+Examples of stationary waves:
+Microwaves – formed by reflecting a microwave beam at a metal plate. Use a microwave probe to detect nodes and antinodes.
+Sound waves – formed by placing a speaker at one end of a closed glass tube. Lay powder across the bottom – it is shaken at antinodes and settles at nodes. Distance between nodes = λ/2. With known frequency f, use v = f λ to find the speed of sound in air.
+
+8.2 - Diffraction
+Diffraction – the spreading out of waves when they pass through or around a gap.
+Greatest diffraction occurs when the gap size ≈ wavelength.
+When gap < wavelength → most waves are reflected.
+When gap > wavelength → less noticeable diffraction.
+When a wave meets an obstacle → diffraction round the edges; the wider the obstacle compared to the wavelength, the less diffraction.
+Single-slit diffraction (monochromatic light):
+Forms an interference pattern of light and dark fringes on a screen.
+Central bright fringe – twice the width of all other fringes.
+Bright fringes – constructive interference (waves meet in phase).
+Dark fringes – destructive interference (waves meet completely out of phase).
+Intensity of fringes decreases as you move away from the central fringe.
+
+8.3 - Interference
+Coherent light source – has the same frequency and wavelength, and a fixed phase difference.
+Lasers are coherent and monochromatic (emit a single wavelength or small range), so they form clear interference patterns.
+Young's double-slit experiment – demonstrates interference of light from two sources.
+Use two coherent sources, or one coherent source with a double slit.
+If using a non-coherent source (e.g. light bulb), place a single slit before the double slit to create a fixed path difference, and a filter to make the light monochromatic.
+Procedure:
+Shine coherent light through two slits, where the slit width is about the same size as the wavelength (so light diffracts).
+Each slit acts as a coherent point source, producing a pattern of light and dark fringes.
+Bright fringes (constructive) occur where path difference = nλ (n = 0, 1, 2, ...).
+Dark fringes (destructive) occur where path difference = (n + 1/2)λ.
+Formula: λ = a x / D
+λ = wavelength of light
+a = slit separation (distance between the two slits)
+x = fringe spacing (distance between adjacent bright fringes)
+D = distance from slits to screen
+
+8.4 - The Diffraction Grating
+Diffraction grating – a slide containing many equally spaced slits very close together.
+The interference pattern is sharper and brighter than with a double slit (more rays reinforcing the pattern) → measurements are more accurate.
+As the number of slits increases, the maxima become narrower and brighter.
+Orders of maxima:
+Zero order – central bright fringe (n = 0).
+First order – maxima either side of zero order (n = ±1).
+Second order – outside first order (n = ±2), and so on.
+Diffraction grating formula: d sinθ = nλ
+d = distance between adjacent slits (slit spacing)
+θ = angle from the normal to the maximum
+n = order of the maximum (integer)
+λ = wavelength
+Derivation (for first order maximum):
+For the first order maximum (n = 1), the path difference between adjacent rays = λ.
+A right-angled triangle is formed with hypotenuse d and opposite side λ.
+Using sinθ = opposite / hypotenuse → sinθ = λ / d → d sinθ = λ.
+For higher orders, path difference = nλ → d sinθ = nλ.
+Key points:
+As λ increases (e.g. changing from blue to red light), the distance between orders increases (θ increases → pattern spreads out).
+The maximum value of sinθ is 1, so any value of n where sinθ > 1 is impossible (i.e. higher orders may not exist).
+Applications of diffraction gratings:
+Astronomy – splitting light from stars to obtain line absorption spectra, revealing which elements are present.
+X-ray crystallography – x-rays directed at a thin crystal sheet. The crystal acts as a diffraction grating (since x-ray wavelengths are similar in size to atomic spacing). The diffraction pattern can be used to measure atomic spacing in materials.
+
+Topic 9: Electricity
+9.1 - Electric Current
+Electric current (I) – the flow of charge (Q) per unit time (t), i.e. the rate of flow of charge.
+I = Q / t
+Charge is carried by charge carriers in quantised amounts. Typically the charge carriers are electrons, each carrying the elementary charge e = 1.60 × 10^-19 C (coulombs).
+Total charge transferred: Q = I × t
+Example: a conductor delivering 5 A for 10 s → Q = 5 × 10 = 50 C.
+Derivation of I = A n v q:
+Consider a current-carrying conductor with:
+A = cross-sectional area
+n = number density of charge carriers (number per unit volume)
+v = mean drift velocity of charge carriers
+q = charge on each carrier
+In time Δt, the distance travelled by charge carriers = v × Δt.Volume of charge carriers passing a point = A × v × Δt.Number of charge carriers = n × A × v × Δt.Total charge passing = n × A × v × Δt × q.Current = total charge / time = (n A v Δt q) / Δt = I = A n v q
+
+9.2 - Potential Difference and Power
+Potential difference (V) – the energy transferred per unit charge between two points in a circuit.
+V = W / Q
+W = energy transferred / work done (J)
+Q = charge (C)
+Power (P) – the energy transferred per unit time (rate of energy transfer).
+P = E / t (E = energy transferred, t = time)
+Also: P = V × I
+Combining with V = I R (Ohm's law), we get:
+P = V I = V^2 / R = I^2 R
+Energy transferred: E = P × t = V × I × t
+
+9.3 - Resistance and Resistivity
+Resistance (R) – a measure of how difficult it is for charge carriers to pass through a component.
+R = V / I
+Ohm's law – for an ohmic conductor, current is directly proportional to potential difference across it, provided physical conditions (e.g. temperature) are kept constant.
+Ohmic conductor – follows Ohm's law; its I-V graph is a straight line through the origin (at constant temperature).
+Semiconductor diode:
+Forward bias – allows current to flow easily once the threshold voltage is exceeded.
+Reverse bias – resistance is extremely high, so only a very small (negligible) current can flow.
+Filament lamp:
+Contains a metal wire that heats up as current increases → resistance increases with current.
+At low currents, the wire does not heat significantly → Ohm's law is obeyed (linear region).
+As current increases, the graph curves due to increasing resistance (gradient decreases).
+Ammeters – assumed to have zero resistance (do not affect circuit current measurements).
+Voltmeters – assumed to have infinite resistance (no current flows through them, so voltage measurements are exact).
+
+Resistivity (ρ) – a measure of how strongly a material opposes the flow of electric current. It is independent of the size of the sample (depends only on the material and temperature).
+ρ = R A / L
+R = resistance
+A = cross-sectional area
+L = length
+Resistivity is the resistance of a material of length 1 m and cross-sectional area 1 m².
+
+Effect of temperature on resistance:
+Metal conductor – as temperature increases, resistance increases.
+Reason: atoms gain kinetic energy and vibrate more → charge carriers (electrons) collide with atoms more frequently → slow down → current decreases → resistance increases (R = V / I).
+Thermistor (NTC – negative temperature coefficient) – as temperature increases, resistance decreases.
+Reason: increasing temperature causes electrons to be emitted from atoms → number of charge carriers increases → current increases → resistance decreases.
+Application: temperature sensor – can trigger an event (e.g. turn on heating) when temperature drops below a set value.
+
+Superconductor – a material with zero resistivity below a certain temperature, called the critical temperature (T_c). Most known superconductors have critical temperatures close to 0 K (-273°C).
+With zero resistivity, resistance also drops to zero.
+Applications:
+Power cables – zero energy loss due to heating during transmission.
+Strong magnetic fields – no constant power source needed (e.g. maglev trains – no friction between trains and rails).
+Medical applications (e.g. MRI scanners).
+
+Light Dependent Resistor (LDR) – resistance decreases with increasing light intensity.
+Application: can be used as a light sensor to trigger events.
+Example circuit: LDR in series with a fixed resistor R₂. If light intensity falls, LDR resistance increases → total resistance increases → circuit current decreases → voltage across R₂ decreases (V = IR) → p.d. out decreases.
+To reverse the effect, swap the positions of the LDR and the fixed resistor → p.d. out increases as light intensity decreases.
+This can be used to switch on a light bulb when a certain threshold voltage is reached.
+
+Topic 10: D.C. Circuits
+10.1 - Practical Circuits
+Internal resistance (r) – caused by electrons colliding with atoms inside a battery, resulting in some energy being lost before the electrons leave the battery. Represented as a small resistor inside the battery.
+Electromotive force (emf / ε) – the energy transferred by a cell per coulomb of charge that passes through it.
+ε = E / Q (E = energy transferred, Q = charge)
+Total resistance in a circuit with internal resistance:
+R_T = R + r
+R = load resistance (external)
+r = internal resistance
+emf = total resistance × current:
+ε = I (R + r) = I R + I r
+Terminal p.d. (V) – the p.d. across the load resistance R:
+V = I R
+Lost volts (v) – the p.d. across the internal resistance r (energy wasted by the cell per coulomb of charge):
+v = I r
+Therefore: ε = V + v (emf = terminal p.d. + lost volts)
+The emf of a battery can be measured by connecting a voltmeter across the cell when no current flows (open circuit) – the reading equals the emf.
+
+10.2 - Kirchhoff's Laws
+Kirchhoff's first law – the total current flowing into a junction equals the total current flowing out of that junction.
+This shows that charge is conserved (no charge is lost at any point).
+Kirchhoff's second law – the sum of all the voltages (p.d.s) in a series circuit equals the supply voltage (or the sum of all voltages around any closed loop is zero).
+This shows that energy is conserved (no energy is lost at any point).
+
+Series circuits:
+Current is the same everywhere.
+Battery p.d. is shared across all components.
+Total voltage: V_T = V_1 + V_2 + V_3 + ...
+Total resistance: R_T = R_1 + R_2 + R_3 + ...
+Parallel circuits:
+The sum of currents in each parallel branch equals the total current.
+The p.d. across each branch is the same.
+For identical cells in parallel, total voltage equals the voltage of one cell (current is split equally between branches).
+V_T = V_1 = V_2 = V_3 = ...
+Total resistance (for resistors in parallel):
+1 / R_T = 1 / R_1 + 1 / R_2 + 1 / R_3 + ...
+Example (combined series and parallel):
+Find total resistance of a circuit with a 4Ω and 16Ω resistor in parallel, in series with a 10Ω and 3Ω resistor.
+Parallel combination: 1 / R_T = 1/4 + 1/16 = 5/16 → R_T = 3.2 Ω
+Total: R_T = 10 + 3 + 3.2 = 16.2 Ω
+
+10.3 - Potential Dividers
+Potential divider – a circuit with several resistors in series connected across a voltage source, used to produce a required fraction of the source p.d. that remains constant.
+Variable potential divider – use a variable resistor as one of the resistors in series. By varying its resistance, you can vary the output p.d.
+If resistance across R_1 increases:
+Total circuit resistance increases → circuit current decreases.
+Using V = I R, the voltage across R_2 decreases → output p.d. decreases.
+
+Sensors as potential dividers:
+Replace the variable resistor with a thermistor (temperature sensor) or LDR (light sensor).
+LDR – resistance decreases as light intensity increases.
+Example (LDR as a light sensor):
+If light intensity falls → LDR resistance increases → total circuit resistance increases → circuit current decreases.
+Using V = I R, voltage across R_2 decreases → p.d. out decreases.
+To reverse the effect, swap the LDR and the fixed resistor → p.d. out increases as light intensity decreases.
+This circuit can be used to switch on a light bulb when it gets dark (once a threshold voltage is met).
+
+Potentiometer:
+Consists of a voltmeter and a three-terminal resistor.
+Has a control to adjust the resistance between terminals, while resistance between the two outer terminals remains fixed.
+Used to compare potential differences in parts of a circuit, or as a variable resistor in a potential divider circuit.
+
+Null measurements:
+Used to measure circuit features more accurately (since ammeters and voltmeters influence current flow and alter circuit behaviour).
+A galvanometer can measure emf directly using: ε = V + I r
+With current set to zero (I = 0), emf = cell voltage (direct measurement).
+By knowing emf and measuring voltage, a galvanometer can be placed along a length of wire to measure current and determine resistance.
+
+Topic 11: Particle Physics
+11.1 - Atoms, Nuclei, and Radiation
+Rutherford scattering – demonstrated the existence of the nucleus. Before this, scientists believed in Thomson's plum pudding model, which stated that the atom was a sphere of positive charge with small areas of negative charge evenly distributed throughout.
+Rutherford's apparatus:
+Alpha source and gold foil in an evacuated chamber.
+Chamber covered with a fluorescent coating to show where alpha particles hit.
+A movable microscope to observe the paths of the alpha particles.
+Expected results (if plum pudding model were true):
+Positively charged alpha particles would be deflected by very small amounts when passing through the foil.
+Actual observations:
+Most alpha particles passed straight through with no deflection → atom is mostly empty space (not uniform density).
+A small amount were deflected by large angles → centre of the atom is positively charged (repelled the positively charged alpha particles).
+Very few were deflected back by more than 90° → centre of the atom is very dense (could deflect fast-moving alpha particles) and very small (very few particles were deflected by large angles).
+Conclusion: the atom has a small, dense, positively charged nucleus at its centre.
+
+Atomic structure:
+An atom consists of protons, neutrons (in the nucleus, collectively called nucleons), and electrons (orbiting the nucleus in shells).
+Properties of subatomic particles:
+
+
+
+Specific charge = charge / mass (charge-to-mass ratio).
+Example (proton): specific charge = (1.6 × 10^-19) / (1.67 × 10^-27) = 9.58 × 10^7 C kg^-1
+
+Nuclear notation:
+Proton number (Z) = number of protons.
+Nucleon number (A) = number of protons + neutrons.
+Shown as: A/Z X (where X is the element symbol).
+Conservation laws in nuclear processes:
+Total charge is conserved.
+Total number of nucleons is conserved.
+Total lepton number (electrons + neutrinos) is conserved.
+Isotopes – atoms with the same number of protons (same Z) but different numbers of neutrons (different A).
+Example: carbon-14 is a radioactive isotope used in carbon dating (calculating the percentage of remaining carbon-14 and using its known half-life to estimate age).
+
+Radiation – where an unstable nucleus emits energy (EM waves or subatomic particles) to become more stable.
+Unified atomic mass unit (u) – equivalent to the mass of one nucleon (proton or neutron): 1 u = 1.6 × 10^-27 kg.
+Elementary charge (e) – magnitude of charge on one electron or one proton: e = 1.6 × 10^-19 C.
+Antiparticle – has the same mass but opposite charge and quantum numbers to its corresponding particle. Example: the positron is the antiparticle of the electron.
+
+Types of radiation:
+
+
+
+
+Alpha decay:
+An alpha particle (2 protons + 2 neutrons) is emitted from a nucleus with too many nucleons.
+Nucleon number decreases by 4, proton number decreases by 2.
+Example: 238/92 U → 234/90 Th + 4/2 α
+Alpha particles have discrete energy (equal to the energy difference between the original nucleus and the product).
+Beta-minus decay (β⁻):
+Occurs when a nucleus has too many neutrons compared to protons.
+A neutron decays into a proton + electron + antineutrino.
+Proton number increases by 1, nucleon number stays the same.
+Example: 228/88 Ra → 228/89 Ac + 0/-1 β (plus antineutrino)
+Beta-plus decay (β⁺):
+Occurs when a nucleus has too many protons compared to neutrons.
+A proton decays into a neutron + positron + neutrino.
+Proton number decreases by 1, nucleon number stays the same.
+Example: 11/6 C → 11/5 B + 0/+1 β (plus neutrino)
+Beta particles have a continuous range of energies because the energy from decay is shared between the beta particle and the neutrino/antineutrino.
+
+11.2 - Fundamental Particles
+Quarks – fundamental particles that combine to form hadrons (e.g. protons and neutrons).
+Six flavours (types): up, down, top, bottom, charm, strange.
+
+
+Each quark has an antiquark with the opposite charge (denoted with a bar, e.g. ū for anti-up).
+
+Hadrons – particles made of quarks. There are two types:
+Baryons – composed of three quarks.
+Proton = uud (charge: +2/3 + 2/3 - 1/3 = +1e)
+Neutron = udd (charge: +2/3 - 1/3 - 1/3 = 0e)
+Mesons – composed of one quark and one antiquark.
+Example: π⁺ meson = u d̄ (up quark + anti-down quark)
+
+Quark changes in beta decay:
+Beta-minus (β⁻) – a neutron decays into a proton:
+A down quark changes into an up quark.
+n (udd) → p (uud) + e⁻ + antineutrino
+Beta-plus (β⁺) – a proton decays into a neutron:
+An up quark changes into a down quark.
+p (uud) → n (udd) + e⁺ + neutrino
+
+Summary of particle classifications:
+Hadrons – made of quarks (experience strong nuclear force). Includes:
+Baryons (3 quarks) – e.g. protons, neutrons
+Mesons (quark + antiquark) – e.g. pions
+Leptons – fundamental particles NOT made of quarks (e.g. electrons, neutrinos). Do NOT experience the strong nuclear force.
+Quarks – fundamental particles that make up hadrons.

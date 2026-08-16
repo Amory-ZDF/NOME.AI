@@ -1,5 +1,5 @@
 import { expect, test } from 'vitest'
-import { gradeAnswer, validateAttempt } from './answerRules'
+import { gradeAnswer, gradeAnswerLocal, validateAttempt } from './answerRules'
 
 test.each(['', '   ', '!!!', '???'])('rejects throwaway answer %j', (answer) => {
   expect(validateAttempt(answer)).toEqual({ valid: false, code: 'THROWAWAY', message: 'Please answer seriously first — empty or random input cannot be submitted' })
@@ -11,8 +11,14 @@ test('grades a choice by letter or exact option text', () => {
   expect(gradeAnswer(question, '2').isCorrect).toBe(true)
 })
 
-test('grades open work with case-insensitive keywords', () => {
-  expect(gradeAnswer({ acceptKeywords: ['y = 2x'] }, 'Therefore Y = 2X').isCorrect).toBe(true)
+test('returns null verdict for free-response questions (delegated to the LLM)', () => {
+  const question = { acceptKeywords: ['y = 2x'], correctDisplay: 'y = 2x' }
+  expect(gradeAnswer(question, 'y = 2x').isCorrect).toBeNull()
+  expect(gradeAnswer({ markScheme: 'p = mv' }, 'p = mv').isCorrect).toBeNull()
+})
+
+test('grades open work locally with case-insensitive keywords', () => {
+  expect(gradeAnswerLocal({ acceptKeywords: ['y = 2x'] }, 'Therefore Y = 2X').isCorrect).toBe(true)
 })
 
 test.each([
@@ -35,7 +41,7 @@ test.each([
   ['25%', '125%'],
   ['25 percent', '125 percent'],
 ])('does not match numeric keyword %j inside a different numeric or identifier token %j', (keyword, answer) => {
-  expect(gradeAnswer({ acceptKeywords: [keyword] }, answer).isCorrect).toBe(false)
+  expect(gradeAnswerLocal({ acceptKeywords: [keyword] }, answer).isCorrect).toBe(false)
 })
 
 test.each([
@@ -55,9 +61,9 @@ test.each([
   ['k+1', 'Assume the result for k+1'],
   ['induction', 'Therefore the claim follows by induction'],
 ])('matches standalone numeric or normalized phrase keyword %j in %j', (keyword, answer) => {
-  expect(gradeAnswer({ acceptKeywords: [keyword] }, answer).isCorrect).toBe(true)
+  expect(gradeAnswerLocal({ acceptKeywords: [keyword] }, answer).isCorrect).toBe(true)
 })
 
 test('grades open work safely when no accepted keywords are defined', () => {
-  expect(gradeAnswer({}, 'an answer')).toEqual({ isCorrect: false, normalizedAnswer: 'an answer' })
+  expect(gradeAnswerLocal({}, 'an answer')).toEqual({ isCorrect: false, normalizedAnswer: 'an answer' })
 })

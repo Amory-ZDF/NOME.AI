@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'vitest'
 import { VARIANT_TEMPLATES } from '../../data/variantTemplates'
-import { gradeAnswer } from './answerRules'
+import { gradeAnswerLocal } from './answerRules'
 import { createVariantExercise } from './variantFactory'
 
 const REQUIRED_TOPICS = [
@@ -68,7 +68,7 @@ describe('VARIANT_TEMPLATES', () => {
         const acceptedAnswer = Number.isInteger(template.correctIndex)
           ? ['a', 'b', 'c', 'd'][template.correctIndex]
           : template.acceptKeywords[0]
-        expect(gradeAnswer(template, acceptedAnswer).isCorrect, `${topic}: ${template.content}`).toBe(true)
+        expect(gradeAnswerLocal(template, acceptedAnswer).isCorrect, `${topic}: ${template.content}`).toBe(true)
       }
     }
   })

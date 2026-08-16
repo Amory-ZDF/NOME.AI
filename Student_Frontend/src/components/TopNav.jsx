@@ -1,22 +1,25 @@
 import { useState } from 'react'
 import { NavLink, useNavigate } from 'react-router-dom'
 import { Icon } from './ui'
-import { student } from '../data/mockData'
 import { useApp } from '../store/AppStore'
 
-// PRD §0.5: top navigation — Home / Tasks / Notes / Bank / Profile
+// PRD §0.5: top navigation — Home / Tasks / Notes / Bank / Errors / Profile
 const links = [
   { to: '/', label: 'Home' },
   { to: '/tasks', label: 'Tasks' },
   { to: '/notes', label: 'Notes' },
   { to: '/bank', label: 'Bank' },
+  { to: '/errors', label: 'Errors' },
   { to: '/profile', label: 'Profile' },
 ]
 
 export default function TopNav() {
   const [menuOpen, setMenuOpen] = useState(false)
   const navigate = useNavigate()
-  const { showToast } = useApp()
+  const { showToast, student } = useApp()
+
+  const name = student?.name ?? 'Student'
+  const initial = (name[0] ?? 'S').toUpperCase()
 
   return (
     <header className="bg-pure-surface border-b border-whisper-line sticky top-0 z-40">
@@ -70,9 +73,9 @@ export default function TopNav() {
           <button
             className="w-8 h-8 rounded-full bg-deep-teal text-white text-sm font-medium flex items-center justify-center"
             onClick={() => navigate('/profile')}
-            title={student.name}
+            title={name}
           >
-            {student.name[0]}
+            {initial}
           </button>
           {/* Mobile menu button */}
           <button className="md:hidden p-2 text-warm-stone" onClick={() => setMenuOpen(!menuOpen)}>

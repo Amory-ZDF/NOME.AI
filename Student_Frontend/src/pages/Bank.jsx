@@ -1,11 +1,9 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { motion } from 'framer-motion'
-import { bankQuestions, bankRecommendations } from '../data/mockData'
 import { Icon, Badge, Stars, ProgressBar, Toggle, Modal, staggerContainer, fadeUpItem } from '../components/ui'
 import { useApp } from '../store/AppStore'
 
-const subjectTabs = ['All', 'A-Level Math', 'IELTS Reading', 'IELTS Writing']
 const TYPE_LABEL = { choice: 'Multiple Choice', calculation: 'Calculation', proof: 'Proof', reading: 'Reading', writing: 'Writing', fill_blank: 'Fill in Blank' }
 const SOURCE_LABEL = { past_exam: 'Past Exam', mock: 'Mock Exam', teacher_upload: 'Teacher Upload' }
 
@@ -56,7 +54,7 @@ function QuestionRow({ q, smart }) {
 
 export default function Bank() {
   const navigate = useNavigate()
-  const { showToast, addTask, isActionPending } = useApp()
+  const { showToast, addTask, isActionPending, bankQuestions, bankRecommendations, loadBank } = useApp()
   const [subject, setSubject] = useState('All')
   const [difficulty, setDifficulty] = useState('all')
   const [type, setType] = useState('all')
@@ -65,6 +63,13 @@ export default function Bank() {
   const [search, setSearch] = useState('')
   const [uploadOpen, setUploadOpen] = useState(false)
 
+  useEffect(() => { loadBank() }, [loadBank])
+
+  const subjectTabs = useMemo(() => {
+    const subjects = [...new Set(bankQuestions.map((q) => q.subject).filter(Boolean))]
+    return subjects.length > 0 ? ['All', ...subjects] : ['All']
+  }, [bankQuestions])
+
   const filtered = useMemo(() => bankQuestions.filter((q) => {
     if (subject !== 'All' && q.subject !== subject) return false
     if (difficulty !== 'all' && q.difficulty !== Number(difficulty)) return false
@@ -72,7 +77,7 @@ export default function Bank() {
     if (status !== 'all' && q.studentStatus !== status) return false
     if (search && !q.preview.includes(search) && !q.topic.includes(search)) return false
     return true
-  }), [subject, difficulty, type, status, search])
+  }), [subject, difficulty, type, status, search, bankQuestions])
 
   const recommended = bankRecommendations
     .map((r) => ({ ...r, q: bankQuestions.find((bq) => bq.id === r.questionId) }))
@@ -98,7 +103,7 @@ export default function Bank() {
     <div className="max-w-content mx-auto px-4 lg:px-0 py-8">
       <div className="flex items-center justify-between mb-5 flex-wrap gap-3">
         <h1 className="text-2xl font-bold tracking-tight">
-          Question Bank <span className="font-mono text-warm-stone text-lg">1,247 questions</span>
+          Question Bank <span className="font-mono text-warm-stone text-lg">{bankQuestions.length} questions</span>
         </h1>
         <div className="flex items-center gap-2">
           <div className="relative">

@@ -55,6 +55,15 @@ enforces this, not the LLM.
       "node_id_a": 0.72,
       "node_id_b": 0.31
     }
+  },
+  "graph": {
+    "prerequisite_chain": [
+      {"id": "node_id_a", "name": "Vector Decomposition", "depth": 1, "type": "Skill"},
+      {"id": "node_id_b", "name": "Trigonometry", "depth": 2, "type": "Concept"}
+    ],
+    "weak_links": [
+      {"node_id": "node_id_b", "node_name": "Trigonometry", "depth": 2, "mastery": 0.31, "type": "Concept"}
+    ]
   }
 }
 ```
@@ -63,6 +72,14 @@ enforces this, not the LLM.
 score (0.0 = never demonstrated, 1.0 = recently mastered). Pre-computed by
 MemoryRetriever, not by you.
 
+`graph.prerequisite_chain` is the full upstream BFS from `error_node_id` (each node
+with its `depth`), and `graph.weak_links` is that chain already filtered to mastery
+< 0.6 and sorted by (depth ASC, mastery ASC). Both are pre-computed deterministically
+by the orchestrator via the KnowledgeGraph. Use them as ground truth for the walk in
+Phase 1 and the weak-link list in Phase 2 — do NOT invent node IDs or mastery scores
+that are absent from these inputs. If both are empty, the graph is unavailable; fall
+back to writing the narrative from `error_history` alone and keep `weak_links` empty.
+
 ## Process
 
 ### Phase 1: Walk the knowledge graph
@@ -70,8 +87,9 @@ MemoryRetriever, not by you.
 You have access to the knowledge graph via these operations:
 1. `get_prerequisite_chain(error_node_id)` — returns all nodes upstream along
    PREREQUISITE_OF and REQUIRES_SKILL edges, ordered by depth.
-2. `get_related(node_id)` — returns nodes connected by COMMONLY_CONFUSED or
-   TESTED_TOGETHER edges.
+2. `get_related(node_id)` — returns nodes connected by CONTRASTED_WITH edges
+   (commonly-confused concepts, e.g. precision↔accuracy, series↔parallel).
+3. `get_siblings(node_id)` — returns concepts that belong to the same topic chapter.
 
 Start from the error node. Walk upward through prerequisites. Stop at depth
 5 (nodes this far up are unlikely to be causing the current error).

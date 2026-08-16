@@ -237,6 +237,15 @@ export const hintSchema = safeStrictObject({
   content: nonEmptyString,
 })
 
+// A mark scheme is the grading standard a judge (LLM or teacher) grades against.
+// It is a plain-text scheme or a structured list of mark points. `markSchemePoints`
+// below is the legacy structured-only form kept for the error book; the question
+// template accepts either so hand-authored files stay simple.
+export const markSchemeSchema = z.union([
+  nonEmptyString,
+  z.array(jsonObjectSchema).min(1),
+])
+
 const questionShape = {
   id: nonEmptyString,
   order: z.number().int().positive(),
@@ -244,11 +253,22 @@ const questionShape = {
   topic: nonEmptyString,
   difficulty: z.number().int().min(1).max(5),
   content: nonEmptyString,
+  // Choice questions: exactly four options + the index of the correct one. Graded
+  // locally (correctIndex is deterministic). Free-response questions carry a
+  // mark scheme instead and are graded by the judge (LLM or teacher).
   options: z.array(nonEmptyString).min(1).optional(),
   correctIndex: z.number().int().nonnegative().optional(),
-  acceptKeywords: z.array(nonEmptyString),
-  correctDisplay: nonEmptyString,
-  errorType: errorTypeSchema,
+  // Legacy: keyword-contains matching was removed from the runtime. Kept optional
+  // so previously stored questions still validate.
+  acceptKeywords: z.array(nonEmptyString).optional(),
+  // Concise correct answer, shown after solving. Optional: choice can derive it
+  // from options[correctIndex]; free-response questions may prefer markScheme.
+  correctDisplay: optionalNonEmptyString,
+  // The grading standard for free-response questions (judge grades against it).
+  markScheme: markSchemeSchema.optional(),
+  // Template errorType is unused at runtime (error_diagnosis re-classifies from
+  // the student's answer). Kept optional for authoring hints only.
+  errorType: errorTypeSchema.optional(),
   hints: z.array(hintSchema).length(5),
   variantOf: optionalNonEmptyString,
   sourceQuestionId: optionalNonEmptyString,
@@ -257,6 +277,14 @@ const questionShape = {
   markSchemePoints: z.array(jsonObjectSchema).optional(),
   passageEvidence: optionalNonEmptyString,
   errorPattern: optionalNonEmptyString,
+  knowledgeNodeId: optionalNonEmptyString,
+  chapter: optionalNonEmptyString,
+  source: z.enum(['past_exam', 'mock', 'teacher_upload']).optional(),
+  sourceDetail: optionalNonEmptyString,
+  // Question images: `image` is a URL/relative path; `imageDescription` is the
+  // human-authored (e.g. qwen-translated) plain-language rendering of the figure.
+  image: optionalNonEmptyString,
+  imageDescription: optionalNonEmptyString,
 } as const
 
 function refineQuestion(
@@ -264,6 +292,8 @@ function refineQuestion(
     type: z.infer<typeof questionTypeSchema>
     options?: string[] | undefined
     correctIndex?: number | undefined
+    markScheme?: unknown
+    correctDisplay?: string | undefined
     hints: Array<{ level: number }>
   },
   context: z.RefinementCtx,
@@ -290,12 +320,22 @@ function refineQuestion(
         message: 'correctIndex must reference an option',
       })
     }
-  } else if (value.correctIndex !== undefined && value.options === undefined) {
-    context.addIssue({
-      code: 'custom',
-      path: ['correctIndex'],
-      message: 'correctIndex requires options',
-    })
+  } else {
+    // Free-response questions must be judge-gradeable: a mark scheme, or at least
+    // a concise correct answer as a fallback grading standard.
+    if (value.markScheme === undefined && value.correctDisplay === undefined) {
+      context.addIssue({
+        code: 'custom',
+        message: 'Free-response questions require a markScheme (or correctDisplay) to grade against',
+      })
+    }
+    if (value.correctIndex !== undefined && value.options === undefined) {
+      context.addIssue({
+        code: 'custom',
+        path: ['correctIndex'],
+        message: 'correctIndex requires options',
+      })
+    }
   }
 }
 
@@ -367,7 +407,7 @@ export const errorItemShape = {
   studentAnswer: z.string(),
   correctAnswer: z.string(),
   analysis: nonEmptyString,
-  acceptKeywords: z.array(nonEmptyString),
+  acceptKeywords: z.array(nonEmptyString).optional(),
   options: z.array(nonEmptyString).min(1).optional(),
   correctIndex: z.number().int().nonnegative().optional(),
   redoHistory: z.array(redoAttemptSchema),
@@ -949,6 +989,14 @@ export const sessionResultSchema = safeStrictObject({
     hintsUsed: z.number().int().min(0).max(5),
     solvedAtHintLevel: z.number().int().min(0).max(5).nullable(),
     handwritingUsed: z.boolean().optional(),
+    // Agent diagnosis evidence carried through to the error book. Optional so
+    // the exercise engine's pre-diagnosis result shape (and any persisted
+    // session without agent wiring) still validates.
+    errorType: errorTypeSchema.optional(),
+    whereWrong: nonEmptyString.optional(),
+    whyWrong: nonEmptyString.optional(),
+    understandingExplanation: optionalNonEmptyString,
+    scoringExplanation: optionalNonEmptyString,
   })
   .superRefine((value, context) => {
     const hasCorrectAttempt = value.attempts.some(({ isCorrect }) => isCorrect)

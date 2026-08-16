@@ -82,7 +82,7 @@ describe('parseEnv', () => {
     ['a non-integral PORT', { ...BASE_ENV, PORT: '3001.5' }],
     ['a blank DATABASE_URL', { ...BASE_ENV, DATABASE_URL: '' }],
     ['a whitespace-only DATABASE_URL', { ...BASE_ENV, DATABASE_URL: '   ' }],
-    ['a PostgreSQL DATABASE_URL', { ...BASE_ENV, DATABASE_URL: 'postgresql://db' }],
+    ['a PostgreSQL URL without a database name', { ...BASE_ENV, DATABASE_URL: 'postgresql://db' }],
     ['an HTTP DATABASE_URL', { ...BASE_ENV, DATABASE_URL: 'https://db.example' }],
     ['a bare database path', { ...BASE_ENV, DATABASE_URL: './student.db' }],
     ['an empty SQLite URL', { ...BASE_ENV, DATABASE_URL: 'file:' }],
@@ -106,6 +106,12 @@ describe('parseEnv', () => {
     expect(parseEnv({ ...BASE_ENV, DATABASE_URL: ' file::memory: ' }).DATABASE_URL).toBe(
       'file::memory:',
     )
+  })
+
+  it('accepts and normalizes a PostgreSQL connection URL', () => {
+    expect(
+      parseEnv({ ...BASE_ENV, DATABASE_URL: ' postgresql://user:pass@localhost:5432/nome ' }).DATABASE_URL,
+    ).toBe('postgresql://user:pass@localhost:5432/nome')
   })
 
   it('does not expose the database URL when reporting another invalid value', () => {

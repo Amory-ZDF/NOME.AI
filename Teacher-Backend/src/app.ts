@@ -15,14 +15,17 @@ import { installErrorHandlers } from './common/http/error-handler.js'
 import { fail, ok } from './common/http/envelope.js'
 import { serializeError } from './common/logging/error-serializer.js'
 import type { Env } from './config/env.js'
+import type { InsightsRepo } from './data/insights-repo.js'
 import { dashboardRoutes } from './modules/dashboard/dashboard.routes.js'
 import { coursesRoutes } from './modules/courses/courses.routes.js'
 import { studentsRoutes } from './modules/students/students.routes.js'
 import { assignmentsRoutes } from './modules/assignments/assignments.routes.js'
 import { reportsRoutes } from './modules/reports/reports.routes.js'
+import { insightsRoutes } from './modules/insights/insights.routes.js'
 
 interface BuildAppOptions {
   env: Env
+  insightsRepo?: InsightsRepo
   loggerStream?: { write(message: string): void }
   now?: () => Date
   createId?: () => string
@@ -38,7 +41,7 @@ const healthEnvelopeSchema = z.object({
   }),
 })
 
-export function buildApp({ env, loggerStream, now = () => new Date(), createId = () => crypto.randomUUID() }: BuildAppOptions) {
+export function buildApp({ env, insightsRepo, loggerStream, now = () => new Date(), createId = () => crypto.randomUUID() }: BuildAppOptions) {
   let logRawRouterRejection = () => undefined
   const invalidRequestBody = JSON.stringify(fail('INVALID_INPUT', 'Invalid request'))
   const rejectRawRouterRequest = (
@@ -166,6 +169,12 @@ export function buildApp({ env, loggerStream, now = () => new Date(), createId =
   app.register(studentsRoutes)
   app.register(assignmentsRoutes)
   app.register(reportsRoutes)
+  if (insightsRepo?.enabled) {
+    app.register(insightsRoutes, insightsRepo)
+    app.addHook('onClose', async () => {
+      await insightsRepo.close()
+    })
+  }
 
   return app
 }

@@ -16,11 +16,13 @@ import { fail, ok } from './common/http/envelope.js'
 import { serializeError } from './common/logging/error-serializer.js'
 import type { Env } from './config/env.js'
 import type { StudentPrisma } from './db/client.js'
+import { bankRoutes } from './modules/bank/bank.routes.js'
 import { bootstrapRoutes } from './modules/bootstrap/bootstrap.routes.js'
 import { exerciseRoutes } from './modules/exercises/exercise.routes.js'
 import { errorRoutes } from './modules/errors/error.routes.js'
 import { noteRoutes } from './modules/notes/note.routes.js'
 import { materialRoutes } from './modules/materials/material.routes.js'
+import { profileRoutes } from './modules/profile/profile.routes.js'
 import { sessionRoutes } from './modules/sessions/session.routes.js'
 import { settingsRoutes } from './modules/settings/settings.routes.js'
 import { taskRoutes } from './modules/tasks/task.routes.js'
@@ -168,6 +170,8 @@ export function buildApp({ env, loggerStream, prisma, now = () => new Date(), cr
 
   app.register(bootstrapRoutes, { studentId: env.STUDENT_ID })
   app.register(exerciseRoutes, { studentId: env.STUDENT_ID })
+  app.register(bankRoutes, { studentId: env.STUDENT_ID, agentUrl: env.AGENT_URL })
+  app.register(profileRoutes, { studentId: env.STUDENT_ID })
   app.register(errorRoutes, { studentId: env.STUDENT_ID })
   app.register(noteRoutes, { studentId: env.STUDENT_ID })
   app.register(materialRoutes, { studentId: env.STUDENT_ID, now, createId })

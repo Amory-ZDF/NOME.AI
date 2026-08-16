@@ -16,6 +16,13 @@ const getHintsUsed = (question) => {
   return Number.isFinite(value) && value > 0 ? value : 0
 }
 
+// A question that needed any wrong attempt before solving (and therefore any
+// hint) is an error worth surfacing. First-try-correct questions are not.
+const isErrorQuestion = (question) => {
+  const result = getResult(question)
+  return result.solvedAtHintLevel !== 0 || result.status !== 'correct'
+}
+
 const countByErrorType = (questions) => questions.reduce((counts, question) => {
   const type = normalizeErrorType(question, { ...getResult(question), status: normalizeQuestionStatus(question) })
   counts[type] = (counts[type] ?? 0) + 1
@@ -38,6 +45,7 @@ export function summarizeSession(session) {
   const total = questions.length
   const correct = questions.filter((question) => normalizeQuestionStatus(question) === 'correct')
   const wrongQuestions = questions.filter((question) => normalizeQuestionStatus(question) !== 'correct')
+  const errorQuestions = questions.filter(isErrorQuestion)
   const totalHints = questions.reduce((sum, question) => sum + getHintsUsed(question), 0)
 
   return {
@@ -50,8 +58,9 @@ export function summarizeSession(session) {
       averageHints: total ? totalHints / total : 0,
       independentlySolved: correct.filter((question) => getResult(question).solvedAtHintLevel === 0).length,
     },
-    errorDistribution: countByErrorType(wrongQuestions),
+    errorDistribution: countByErrorType(errorQuestions),
     topicOutcomes: groupTopicOutcomes(questions),
     wrongQuestions,
+    errorQuestions,
   }
 }

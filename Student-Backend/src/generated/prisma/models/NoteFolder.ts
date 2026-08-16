@@ -430,6 +430,7 @@ export type NoteFolderCreateOrConnectWithoutStudentInput = {
 
 export type NoteFolderCreateManyStudentInputEnvelope = {
   data: Prisma.NoteFolderCreateManyStudentInput | Prisma.NoteFolderCreateManyStudentInput[]
+  skipDuplicates?: boolean
 }
 
 export type NoteFolderUpsertWithWhereUniqueWithoutStudentInput = {
@@ -497,6 +498,7 @@ export type NoteFolderCreateOrConnectWithoutParentInput = {
 
 export type NoteFolderCreateManyParentInputEnvelope = {
   data: Prisma.NoteFolderCreateManyParentInput | Prisma.NoteFolderCreateManyParentInput[]
+  skipDuplicates?: boolean
 }
 
 export type NoteFolderUpsertWithoutChildrenInput = {
@@ -1348,6 +1350,7 @@ export type NoteFolderCreateManyArgs<ExtArgs extends runtime.Types.Extensions.In
    * The data used to create many NoteFolders.
    */
   data: Prisma.NoteFolderCreateManyInput | Prisma.NoteFolderCreateManyInput[]
+  skipDuplicates?: boolean
 }
 
 /**
@@ -1366,6 +1369,7 @@ export type NoteFolderCreateManyAndReturnArgs<ExtArgs extends runtime.Types.Exte
    * The data used to create many NoteFolders.
    */
   data: Prisma.NoteFolderCreateManyInput | Prisma.NoteFolderCreateManyInput[]
+  skipDuplicates?: boolean
   /**
    * Choose, which related nodes to fetch as well
    */

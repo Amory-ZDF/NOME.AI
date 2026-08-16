@@ -2,7 +2,7 @@ import { useRef, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { motion } from 'framer-motion'
 import { useApp } from '../store/AppStore'
-import { gradeAnswer, validateAttempt } from '../features/exercise/answerRules'
+import { gradeAnswerLocal, validateAttempt } from '../features/exercise/answerRules'
 import { Icon, Badge, MathHTML } from '../components/ui'
 
 // PRD §4.4 redo mode: single-question focus, no AI hints
@@ -45,7 +45,7 @@ function ErrorRedoContent({ id }) {
       showToast('Please answer seriously first', 'error')
       return
     }
-    const { isCorrect } = gradeAnswer(item, validation.value)
+    const { isCorrect } = gradeAnswerLocal(item, validation.value)
     const timeSpent = Math.max(0, Math.floor((Date.now() - attemptStartedAt.current) / 1000))
     try {
       await recordRedo(item.id, { answer, isCorrect, timeSpent })

@@ -40,7 +40,7 @@ Pages.dashboard = async function() {
           <a href="#assignments" class="card-link">${_c('view_all')} →</a>
         </div>
         <div class="pending-grid">
-          ${renderPendingCard('amber', Icons.document, _('pending_ugrading'), data.pending.ungraded.count, _c('unit_count'), data.pending.ungraded.latest)}
+          ${renderPendingCard('amber', Icons.document, _('pending_ugrading'), data.pending.ungraded.count, _c('unit_count'), data.pending.ungraded.latestUngraded || data.pending.ungraded.latest)}
           ${renderPendingCard('red', Icons.alert, _('pending_stress'), data.pending.stressAlerts.count, _c('unit_person'), data.pending.stressAlerts.students.join('、'))}
           ${renderPendingCard('amber', Icons.clock, _('pending_stagnant'), data.pending.stagnant.count, _c('unit_person'), data.pending.stagnant.students.join('、'))}
           ${renderPendingCard('blue', Icons.alertCircle, _('pending_abnormal'), data.pending.abnormal.count, _c('unit_count'), data.pending.abnormal.details)}

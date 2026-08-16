@@ -3,7 +3,9 @@
   "private": true,
   "version": "1.0.0",
   "type": "module",
-  "engines": { "node": ">=24" },
+  "engines": {
+    "node": ">=24"
+  },
   "scripts": {
     "dev": "tsx watch src/server.ts",
     "start": "node dist/server.js",
@@ -13,6 +15,7 @@
     "db:migrate": "prisma migrate dev",
     "db:deploy": "prisma migrate deploy",
     "db:seed": "prisma db seed",
+    "db:import-questions": "tsx prisma/import-questions.ts",
     "test:prepare": "cross-env DATABASE_URL=file:./prisma/test.db prisma db push --force-reset",
     "test": "npm run test:prepare && cross-env DATABASE_URL=file:./prisma/test.db vitest run --no-file-parallelism",
     "test:watch": "cross-env DATABASE_URL=file:./prisma/test.db vitest --no-file-parallelism"
@@ -22,10 +25,12 @@
     "@fastify/swagger": "^9.0.0",
     "@fastify/swagger-ui": "^6.1.1",
     "@prisma/adapter-better-sqlite3": "^7.0.0",
+    "@prisma/adapter-pg": "^7.9.1",
     "@prisma/client": "^7.0.0",
     "dotenv": "^17.4.2",
     "fastify": "^5.0.0",
     "fastify-type-provider-zod": "^6.0.0",
+    "pg": "^8.23.0",
     "zod": "^4.0.0"
   },
   "devDependencies": {

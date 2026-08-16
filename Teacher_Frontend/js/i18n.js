@@ -13,6 +13,7 @@ const I18N = {
     nav_students:     { zh: '学生档案',                  en: 'Students' },
     nav_assignments:  { zh: '作业管理',                  en: 'Assignments' },
     nav_reports:      { zh: '数据报告',                  en: 'Reports' },
+    nav_insights:     { zh: 'AI 洞察',                   en: 'AI Insights' },
     nav_settings:     { zh: '设置',                      en: 'Settings' },
 
     // 顶栏通用
@@ -107,6 +108,10 @@ const I18N = {
     lang_label:       { zh: '语言',                      en: 'Language' },
     lang_zh:          { zh: '中文',                      en: '中文' },
     lang_en:          { zh: 'English',                   en: 'English' },
+    // 工作台通用（代码里以 common.* 查找）
+    latest:           { zh: '最近',                      en: 'Latest' },
+    waiting_days:     { zh: '等待',                      en: 'Waiting' },
+    submitted_today:  { zh: '今天提交',                  en: 'Submitted today' },
   },
 
   // ===== 工作台 =====
@@ -125,9 +130,6 @@ const I18N = {
     assignments_pending:{ zh: '待批改',                  en: 'Pending grading' },
     assignments_assigned:{ zh: '已布置',                en: 'Assigned' },
     student_alerts:   { zh: '学生预警',                  en: 'Student Alerts' },
-    latest:           { zh: '最近',                      en: 'Latest' },
-    waiting_days:     { zh: '等待',                      en: 'Waiting' },
-    submitted_today:  { zh: '今天提交',                  en: 'Submitted today' },
     motivational_1:   { zh: '三角函数正确率提升了12%, 继续保持', en: 'Trig scores up 12%, keep it up!' },
   },
 

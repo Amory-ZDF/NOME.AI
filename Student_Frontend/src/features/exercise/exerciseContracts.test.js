@@ -78,14 +78,13 @@ describe('isRenderableExerciseSet', () => {
     ['a non-finite order', [validQuestion({ order: Number.NaN })]],
     ['a non-finite difficulty', [validQuestion({ difficulty: Number.POSITIVE_INFINITY })]],
     ['an empty correct display', [validQuestion({ correctDisplay: ' ' })]],
-    ['an empty error type', [validQuestion({ errorType: '' })]],
     ['duplicate question IDs', [validQuestion(), validQuestion({ order: 2 })]],
     ['missing hints', [validQuestion({ hints: null })]],
     ['incomplete hints', [validQuestion({ hints: completeHints().slice(0, 4) })]],
     ['duplicate hint levels', [validQuestion({ hints: completeHints().map((hint, index) => (index === 4 ? { ...hint, level: 4 } : hint)) })]],
     ['an empty hint title', [validQuestion({ hints: completeHints().map((hint, index) => (index === 0 ? { ...hint, title: '' } : hint)) })]],
     ['an empty hint body', [validQuestion({ hints: completeHints().map((hint, index) => (index === 0 ? { ...hint, content: ' ' } : hint)) })]],
-    ['empty accepted keywords', [validQuestion({ acceptKeywords: [] })]],
+    ['a free-response question with no gradeable standard', [validQuestion({ correctDisplay: ' ', markScheme: undefined })]],
   ])('rejects a set with %s', (_, questions) => {
     expect(isRenderableExerciseSet(validSet({ questions }))).toBe(false)
   })

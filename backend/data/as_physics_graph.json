@@ -1,0 +1,4775 @@
+{
+  "entities": [
+    {
+      "id": "topic-ch01",
+      "name": "Physical Quantities and Units",
+      "type": "Topic"
+    },
+    {
+      "id": "topic-ch02",
+      "name": "Kinematics",
+      "type": "Topic"
+    },
+    {
+      "id": "topic-ch03",
+      "name": "Dynamics",
+      "type": "Topic"
+    },
+    {
+      "id": "topic-ch04",
+      "name": "Forces, Density and Pressure",
+      "type": "Topic"
+    },
+    {
+      "id": "topic-ch05",
+      "name": "Work, Energy and Power",
+      "type": "Topic"
+    },
+    {
+      "id": "topic-ch06",
+      "name": "Deformation of Solids",
+      "type": "Topic"
+    },
+    {
+      "id": "topic-ch07",
+      "name": "Waves",
+      "type": "Topic"
+    },
+    {
+      "id": "topic-ch08",
+      "name": "Superposition",
+      "type": "Topic"
+    },
+    {
+      "id": "topic-ch09",
+      "name": "Electricity",
+      "type": "Topic"
+    },
+    {
+      "id": "topic-ch10",
+      "name": "D.C. Circuits",
+      "type": "Topic"
+    },
+    {
+      "id": "topic-ch11",
+      "name": "Particle Physics",
+      "type": "Topic"
+    },
+    {
+      "id": "bigidea-conservation",
+      "name": "Conservation laws",
+      "type": "BigIdea"
+    },
+    {
+      "id": "bigidea-energy",
+      "name": "Energy & energy transfer",
+      "type": "BigIdea"
+    },
+    {
+      "id": "bigidea-waves",
+      "name": "Waves transfer energy without net matter transfer",
+      "type": "BigIdea"
+    },
+    {
+      "id": "bigidea-modeling",
+      "name": "Modeling & idealization",
+      "type": "BigIdea"
+    },
+    {
+      "id": "bigidea-macro-micro",
+      "name": "Macro-micro correspondence",
+      "type": "BigIdea"
+    },
+    {
+      "id": "bigidea-measurement",
+      "name": "Measurement & uncertainty",
+      "type": "BigIdea"
+    },
+    {
+      "id": "physical-quantity",
+      "name": "physical quantity",
+      "type": "Concept",
+      "definition": "A quantity that consists of a numerical value and a unit."
+    },
+    {
+      "id": "estimation",
+      "name": "estimation",
+      "type": "Skill",
+      "definition": "Approximating values, comparing quantities, or checking if a calculated result is reasonable."
+    },
+    {
+      "id": "si-units",
+      "name": "SI units",
+      "type": "Concept",
+      "definition": "The International System of Units, including base units for mass, length, time, current, temperature, and amount of substance."
+    },
+    {
+      "id": "derived-units",
+      "name": "derived units",
+      "type": "Concept",
+      "definition": "Units obtained from equations, e.g., newton (N) = kg·m·s^-2."
+    },
+    {
+      "id": "homogeneous-equation",
+      "name": "homogeneous equation",
+      "type": "Concept",
+      "definition": "An equation with the same units on both sides; all valid physics equations are homogeneous."
+    },
+    {
+      "id": "prefixes",
+      "name": "prefixes",
+      "type": "Concept",
+      "definition": "SI prefixes used to denote multiples or submultiples of units, e.g., pico (p) = 10^-12, micro (μ) = 10^-6."
+    },
+    {
+      "id": "precision",
+      "name": "precision",
+      "type": "Concept",
+      "definition": "Consistency of measurements (small scatter about a mean), not necessarily indicating accuracy."
+    },
+    {
+      "id": "accuracy",
+      "name": "accuracy",
+      "type": "Concept",
+      "definition": "Closeness of a measurement to the true value."
+    },
+    {
+      "id": "absolute-uncertainty",
+      "name": "absolute uncertainty",
+      "type": "Concept",
+      "definition": "A fixed quantity expressing the uncertainty in a measurement, e.g., 7 ± 0.6 V."
+    },
+    {
+      "id": "fractional-uncertainty",
+      "name": "fractional uncertainty",
+      "type": "Concept",
+      "definition": "The ratio of the absolute uncertainty to the measured value, e.g., 7 ± 3/35 V."
+    },
+    {
+      "id": "percentage-uncertainty",
+      "name": "percentage uncertainty",
+      "type": "Concept",
+      "definition": "Fractional uncertainty expressed as a percentage, e.g., 7 ± 8.6% V."
+    },
+    {
+      "id": "combining-uncertainties",
+      "name": "combining uncertainties",
+      "type": "Skill",
+      "definition": "Adding absolute uncertainties for addition/subtraction, and adding percentage uncertainties for multiplication/division."
+    },
+    {
+      "id": "scalar",
+      "name": "scalar",
+      "type": "Concept",
+      "definition": "A quantity with magnitude only, e.g., distance, speed, mass, temperature."
+    },
+    {
+      "id": "vector",
+      "name": "vector",
+      "type": "Concept",
+      "definition": "A quantity with both magnitude and direction, e.g., displacement, velocity, force, acceleration."
+    },
+    {
+      "id": "resultant-force",
+      "name": "Resultant force",
+      "type": "Concept",
+      "definition": "The net force acting on an object, equal to the vector sum of all forces."
+    },
+    {
+      "id": "vector-addition",
+      "name": "vector addition",
+      "type": "Skill",
+      "definition": "Combining vectors to find the resultant, using Pythagoras and trigonometry for perpendicular vectors, or scale drawing/resolution for non-perpendicular vectors."
+    },
+    {
+      "id": "resolution-of-vectors",
+      "name": "resolution of vectors",
+      "type": "Skill",
+      "definition": "Splitting a vector into perpendicular components using x = V cos(θ) and y = V sin(θ)."
+    },
+    {
+      "id": "scale-drawing",
+      "name": "scale drawing",
+      "type": "Skill",
+      "definition": "Using a ruler and protractor to add non-perpendicular vectors graphically."
+    },
+    {
+      "id": "pythagoras-theorem",
+      "name": "Pythagoras theorem",
+      "type": "Formula",
+      "definition": "Relates the sides of a right-angled triangle; used to find the magnitude of a resultant vector.",
+      "expression": "R = sqrt(x^2 + y^2)"
+    },
+    {
+      "id": "trigonometry-for-vectors",
+      "name": "trigonometry for vectors",
+      "type": "Formula",
+      "definition": "Used to find components or direction of vectors.",
+      "expression": "x = V cos(θ), y = V sin(θ), θ = tan^-1(y/x)"
+    },
+    {
+      "id": "distance",
+      "name": "distance",
+      "type": "Concept",
+      "definition": "Scalar quantity describing the amount of ground covered."
+    },
+    {
+      "id": "displacement",
+      "name": "displacement",
+      "type": "Concept",
+      "definition": "Overall distance from starting position, includes direction (vector)."
+    },
+    {
+      "id": "speed",
+      "name": "speed",
+      "type": "Concept",
+      "definition": "Scalar quantity, distance travelled per unit time."
+    },
+    {
+      "id": "velocity",
+      "name": "velocity",
+      "type": "Concept",
+      "definition": "Rate of change of displacement."
+    },
+    {
+      "id": "acceleration",
+      "name": "acceleration",
+      "type": "Concept",
+      "definition": "Rate of change of velocity."
+    },
+    {
+      "id": "uniform-acceleration",
+      "name": "uniform acceleration",
+      "type": "Concept",
+      "definition": "Acceleration that is constant."
+    },
+    {
+      "id": "instantaneous-velocity",
+      "name": "instantaneous velocity",
+      "type": "Concept",
+      "definition": "Velocity at a specific point in time, found from displacement-time graph by drawing a tangent."
+    },
+    {
+      "id": "suvat-equations",
+      "name": "SUVAT equations",
+      "type": "Formula",
+      "definition": "Set of equations relating displacement, initial velocity, final velocity, acceleration, and time for uniformly accelerated motion.",
+      "expression": "v = u + at; s = ut + (1/2)at^2; v^2 = u^2 + 2as; s = (u+v)t/2"
+    },
+    {
+      "id": "acceleration-due-to-gravity",
+      "name": "acceleration due to gravity",
+      "type": "Concept",
+      "definition": "The acceleration experienced by an object in free fall, approximately 9.81 m/s^2 on Earth."
+    },
+    {
+      "id": "projectile-motion",
+      "name": "projectile motion",
+      "type": "Concept",
+      "definition": "Motion of an object under constant horizontal velocity and uniform vertical acceleration, producing a parabolic trajectory."
+    },
+    {
+      "id": "draw-a-tangent",
+      "name": "draw a tangent",
+      "type": "Skill",
+      "definition": "Draw a tangent to a curve at a point to find the instantaneous gradient."
+    },
+    {
+      "id": "measure-g-using-light-gates",
+      "name": "measure g using light gates",
+      "type": "Skill",
+      "definition": "Experimental technique using light gates and a data logger to measure acceleration due to gravity."
+    },
+    {
+      "id": "solve-kinematics-problems",
+      "name": "solve kinematics problems",
+      "type": "Skill",
+      "definition": "Write down known values and the one to find, then choose the appropriate SUVAT equation."
+    },
+    {
+      "id": "newtons-first-law",
+      "name": "Newton's first law",
+      "type": "Concept",
+      "definition": "An object remains at rest or in uniform motion unless acted upon by a resultant force."
+    },
+    {
+      "id": "newtons-second-law",
+      "name": "Newton's second law",
+      "type": "Concept",
+      "definition": "The resultant force on an object is equal to the rate of change of momentum, which for constant mass is mass times acceleration.",
+      "expression": "F = m a"
+    },
+    {
+      "id": "newtons-third-law",
+      "name": "Newton's third law",
+      "type": "Concept",
+      "definition": "For each force experienced by an object, the object exerts an equal and opposite force."
+    },
+    {
+      "id": "mass",
+      "name": "Mass",
+      "type": "Concept",
+      "definition": "Property of a body, measure of its resistance to acceleration. Larger mass leads to smaller acceleration for a given resultant force."
+    },
+    {
+      "id": "momentum",
+      "name": "Momentum",
+      "type": "Concept",
+      "definition": "Linear momentum is the product of mass and velocity."
+    },
+    {
+      "id": "weight",
+      "name": "weight",
+      "type": "Concept",
+      "definition": "The gravitational force acting on an object, calculated as mass times gravitational field strength."
+    },
+    {
+      "id": "terminal-velocity",
+      "name": "Terminal velocity",
+      "type": "Concept",
+      "definition": "The constant velocity reached when the resultant force on a falling object is zero, i.e., air resistance equals weight."
+    },
+    {
+      "id": "conservation-of-momentum",
+      "name": "Conservation of momentum",
+      "type": "Concept",
+      "definition": "Total momentum is conserved in any interaction where no external forces act."
+    },
+    {
+      "id": "elastic-collision",
+      "name": "Elastic collision",
+      "type": "Concept",
+      "definition": "A collision in which both momentum and kinetic energy are conserved."
+    },
+    {
+      "id": "inelastic-collision",
+      "name": "Inelastic collision",
+      "type": "Concept",
+      "definition": "A collision in which only momentum is conserved; some kinetic energy is converted to other forms."
+    },
+    {
+      "id": "kinetic-energy",
+      "name": "kinetic energy",
+      "type": "Concept",
+      "definition": "Energy an object possesses due to its motion."
+    },
+    {
+      "id": "elastic-strain-energy",
+      "name": "Elastic strain energy",
+      "type": "Concept",
+      "definition": "Energy stored when work is done to stretch or compress a material."
+    },
+    {
+      "id": "air-resistance",
+      "name": "Air resistance",
+      "type": "Concept",
+      "definition": "A resistive force opposing the motion of an object through air, increasing with velocity."
+    },
+    {
+      "id": "p-mv",
+      "name": "p = mv",
+      "type": "Formula",
+      "definition": "Momentum equals mass times velocity.",
+      "expression": "p = m v"
+    },
+    {
+      "id": "weight-mg",
+      "name": "Weight = mg",
+      "type": "Formula",
+      "definition": "Weight equals mass times gravitational field strength.",
+      "expression": "W = m g"
+    },
+    {
+      "id": "force-rate-of-change-of-momentum",
+      "name": "Force = rate of change of momentum",
+      "type": "Formula",
+      "definition": "Force is the rate of change of momentum, derived from Newton's second law.",
+      "expression": "F = Δ(m v) / Δ t"
+    },
+    {
+      "id": "conservation-of-momentum-equation",
+      "name": "Conservation of momentum equation",
+      "type": "Formula",
+      "definition": "Total momentum before an interaction equals total momentum after, when no external forces act.",
+      "expression": "m1 u1 + m2 u2 = m1 v1 + m2 v2"
+    },
+    {
+      "id": "relative-speed-of-approach-relative-speed-of-separation",
+      "name": "Relative speed of approach = relative speed of separation",
+      "type": "Formula",
+      "definition": "For a perfectly elastic collision, the relative speed of approach equals the relative speed of separation.",
+      "expression": "u1 - u2 = v2 - v1"
+    },
+    {
+      "id": "resolve-forces",
+      "name": "Resolve forces",
+      "type": "Skill",
+      "definition": "Break down forces into components to analyze motion."
+    },
+    {
+      "id": "apply-conservation-of-momentum",
+      "name": "Apply conservation of momentum",
+      "type": "Skill",
+      "definition": "Use the principle of conservation of momentum to solve collision problems."
+    },
+    {
+      "id": "uniform-gravitational-field",
+      "name": "uniform gravitational field",
+      "type": "Concept",
+      "definition": "A region where the gravitational force on a mass is the same everywhere."
+    },
+    {
+      "id": "centre-of-gravity",
+      "name": "centre of gravity",
+      "type": "Concept",
+      "definition": "The point at which the entire weight of an object is considered to act."
+    },
+    {
+      "id": "moment-of-a-force",
+      "name": "moment of a force",
+      "type": "Concept",
+      "definition": "The turning effect of a force about a point, equal to the force times the perpendicular distance from the line of action to the point."
+    },
+    {
+      "id": "couple",
+      "name": "couple",
+      "type": "Concept",
+      "definition": "A pair of equal and opposite coplanar forces that produce rotation only, with no net translation."
+    },
+    {
+      "id": "torque-of-a-couple",
+      "name": "torque of a couple",
+      "type": "Concept",
+      "definition": "The turning effect of a couple, equal to one force times the perpendicular distance between the lines of action."
+    },
+    {
+      "id": "principle-of-moments",
+      "name": "principle of moments",
+      "type": "Concept",
+      "definition": "For an object in equilibrium, the sum of anticlockwise moments about any pivot equals the sum of clockwise moments."
+    },
+    {
+      "id": "equilibrium",
+      "name": "equilibrium",
+      "type": "Concept",
+      "definition": "A state where there is no resultant force and no resultant torque acting on an object."
+    },
+    {
+      "id": "density",
+      "name": "density",
+      "type": "Concept",
+      "definition": "Mass per unit volume of a substance."
+    },
+    {
+      "id": "pressure",
+      "name": "pressure",
+      "type": "Concept",
+      "definition": "Force perpendicular to a surface per unit area."
+    },
+    {
+      "id": "pressure-difference-in-fluid",
+      "name": "pressure difference in fluid",
+      "type": "Concept",
+      "definition": "The difference in pressure between two points in a fluid due to the weight of the fluid column between them."
+    },
+    {
+      "id": "total-pressure",
+      "name": "total pressure",
+      "type": "Concept",
+      "definition": "The sum of the pressure due to the fluid and the atmospheric pressure."
+    },
+    {
+      "id": "upthrust",
+      "name": "upthrust",
+      "type": "Concept",
+      "definition": "The resultant upward force on a submerged object due to the difference in pressure between its bottom and top surfaces."
+    },
+    {
+      "id": "archimedes-principle",
+      "name": "Archimedes' Principle",
+      "type": "Concept",
+      "definition": "The upthrust on a submerged body equals the weight of the fluid displaced."
+    },
+    {
+      "id": "f-mg",
+      "name": "F = mg",
+      "type": "Formula",
+      "definition": "Calculates the weight of an object in a gravitational field.",
+      "expression": "F = m g"
+    },
+    {
+      "id": "moment-f-d",
+      "name": "moment = F × d",
+      "type": "Formula",
+      "definition": "Calculates the moment of a force about a point.",
+      "expression": "Moment = F × d (perpendicular distance)"
+    },
+    {
+      "id": "torque-of-couple-f-d",
+      "name": "torque of couple = F × d",
+      "type": "Formula",
+      "definition": "Calculates the torque of a couple.",
+      "expression": "Torque = F × d (perpendicular distance between forces)"
+    },
+    {
+      "id": "m-v",
+      "name": "ρ = m / V",
+      "type": "Formula",
+      "definition": "Defines density as mass per unit volume.",
+      "expression": "ρ = m / V"
+    },
+    {
+      "id": "p-f-a",
+      "name": "p = F / A",
+      "type": "Formula",
+      "definition": "Defines pressure as force per unit area.",
+      "expression": "p = F / A"
+    },
+    {
+      "id": "p-g-h",
+      "name": "Δp = ρ g Δh",
+      "type": "Formula",
+      "definition": "Calculates the pressure difference between two points in a fluid.",
+      "expression": "Δp = ρ g Δh"
+    },
+    {
+      "id": "f-g-v",
+      "name": "F = ρ g V",
+      "type": "Formula",
+      "definition": "Calculates the upthrust (buoyant force) on a submerged object.",
+      "expression": "F = ρ g V"
+    },
+    {
+      "id": "resolve-forces-into-components",
+      "name": "resolve forces into components",
+      "type": "Skill",
+      "definition": "Breaking a force into horizontal and vertical components to analyze equilibrium."
+    },
+    {
+      "id": "draw-scale-diagram-for-equilibrium",
+      "name": "draw scale diagram for equilibrium",
+      "type": "Skill",
+      "definition": "Drawing a scale diagram of three coplanar forces to check if they form a closed triangle, indicating equilibrium."
+    },
+    {
+      "id": "energy",
+      "name": "energy",
+      "type": "Concept",
+      "definition": "The capacity to do work."
+    },
+    {
+      "id": "work",
+      "name": "work",
+      "type": "Concept",
+      "definition": "Work done is the force causing motion multiplied by the distance travelled in the direction of the motion."
+    },
+    {
+      "id": "work-done-formula",
+      "name": "work done formula",
+      "type": "Formula",
+      "definition": "Work done equals force times distance times cosine of the angle between force and motion direction.",
+      "expression": "W = F s cosθ"
+    },
+    {
+      "id": "work-done-on-gas",
+      "name": "work done on gas",
+      "type": "Formula",
+      "definition": "Work done on a gas at constant pressure equals pressure times change in volume.",
+      "expression": "W = p ΔV"
+    },
+    {
+      "id": "efficiency",
+      "name": "efficiency",
+      "type": "Concept",
+      "definition": "A measure of how efficiently a system transfers energy."
+    },
+    {
+      "id": "efficiency-formula",
+      "name": "efficiency formula",
+      "type": "Formula",
+      "definition": "Efficiency is the ratio of useful output power to input power.",
+      "expression": "Efficiency = useful output power / input power"
+    },
+    {
+      "id": "percentage-efficiency-formula",
+      "name": "percentage efficiency formula",
+      "type": "Formula",
+      "definition": "Percentage efficiency is efficiency expressed as a percentage.",
+      "expression": "Percentage efficiency = (useful output power / input power) × 100%"
+    },
+    {
+      "id": "principle-of-conservation-of-energy",
+      "name": "principle of conservation of energy",
+      "type": "Concept",
+      "definition": "Energy cannot be created or destroyed, only transferred from one form to another. Total energy in a closed system stays constant."
+    },
+    {
+      "id": "power",
+      "name": "power",
+      "type": "Concept",
+      "definition": "The rate of energy transfer, measured in watts."
+    },
+    {
+      "id": "power-formula",
+      "name": "power formula",
+      "type": "Formula",
+      "definition": "Power equals work done divided by time taken, which can also be expressed as force times velocity.",
+      "expression": "P = ΔW / Δt = F v"
+    },
+    {
+      "id": "kinetic-energy-formula",
+      "name": "kinetic energy formula",
+      "type": "Formula",
+      "definition": "Kinetic energy equals half the mass times the square of the velocity.",
+      "expression": "E_k = (1/2) m v^2"
+    },
+    {
+      "id": "gravitational-potential-energy",
+      "name": "gravitational potential energy",
+      "type": "Concept",
+      "definition": "Energy an object possesses due to its position in a gravitational field and its mass."
+    },
+    {
+      "id": "gravitational-potential-energy-formula",
+      "name": "gravitational potential energy formula",
+      "type": "Formula",
+      "definition": "Change in gravitational potential energy close to Earth's surface equals mass times gravitational acceleration times change in height.",
+      "expression": "ΔE_p = m g Δh"
+    },
+    {
+      "id": "deformation",
+      "name": "Deformation",
+      "type": "Concept",
+      "definition": "A change in shape of an object due to an applied force."
+    },
+    {
+      "id": "tensile-deformation",
+      "name": "Tensile deformation",
+      "type": "Concept",
+      "definition": "Deformation that causes an object to be stretched."
+    },
+    {
+      "id": "compressive-deformation",
+      "name": "Compressive deformation",
+      "type": "Concept",
+      "definition": "Deformation that causes an object to be squashed or compressed."
+    },
+    {
+      "id": "hookes-law",
+      "name": "Hooke's law",
+      "type": "Concept",
+      "definition": "Extension is directly proportional to the force applied, provided environmental conditions (e.g. temperature) are kept constant."
+    },
+    {
+      "id": "limit-of-proportionality",
+      "name": "Limit of proportionality",
+      "type": "Concept",
+      "definition": "The point after which Hooke's law is no longer obeyed."
+    },
+    {
+      "id": "elastic-limit",
+      "name": "Elastic limit",
+      "type": "Concept",
+      "definition": "The point just after the limit of proportionality; beyond this point, the material will deform plastically (permanently stretched)."
+    },
+    {
+      "id": "spring-constant",
+      "name": "Spring constant",
+      "type": "Concept",
+      "definition": "A measure of stiffness of a spring or material."
+    },
+    {
+      "id": "tensile-stress",
+      "name": "Tensile stress",
+      "type": "Concept",
+      "definition": "Force applied per unit cross-sectional area."
+    },
+    {
+      "id": "tensile-strain",
+      "name": "Tensile strain",
+      "type": "Concept",
+      "definition": "Extension over original length."
+    },
+    {
+      "id": "young-modulus",
+      "name": "Young modulus",
+      "type": "Concept",
+      "definition": "A value describing the stiffness of a material; the ratio of tensile stress to tensile strain up to the limit of proportionality."
+    },
+    {
+      "id": "elastic-deformation",
+      "name": "Elastic deformation",
+      "type": "Concept",
+      "definition": "Material returns to its original shape when the applied force is removed; all work done is stored as elastic strain energy."
+    },
+    {
+      "id": "plastic-deformation",
+      "name": "Plastic deformation",
+      "type": "Concept",
+      "definition": "Material's shape is changed permanently; work is done to move atoms apart, so energy is not only stored as elastic strain energy but also dissipated as heat."
+    },
+    {
+      "id": "brittle",
+      "name": "Brittle",
+      "type": "Concept",
+      "definition": "Material that extends very little and is likely to fracture at a low extension."
+    },
+    {
+      "id": "hookes-law-equation",
+      "name": "Hooke's law equation",
+      "type": "Formula",
+      "definition": "Relates force, spring constant, and extension for a spring obeying Hooke's law.",
+      "expression": "F = k x"
+    },
+    {
+      "id": "stress-formula",
+      "name": "Stress formula",
+      "type": "Formula",
+      "definition": "Defines tensile stress as force per unit cross-sectional area.",
+      "expression": "Stress = F / A"
+    },
+    {
+      "id": "strain-formula",
+      "name": "Strain formula",
+      "type": "Formula",
+      "definition": "Defines tensile strain as extension over original length.",
+      "expression": "Strain = x / L"
+    },
+    {
+      "id": "young-modulus-formula",
+      "name": "Young modulus formula",
+      "type": "Formula",
+      "definition": "Relates Young modulus to stress and strain, and to force, length, area, and extension.",
+      "expression": "E = (F / A) / (x / L) = F L / (x A)"
+    },
+    {
+      "id": "cross-sectional-area-formula",
+      "name": "Cross-sectional area formula",
+      "type": "Formula",
+      "definition": "Calculates the cross-sectional area of a wire from its diameter.",
+      "expression": "A = π d^2 / 4"
+    },
+    {
+      "id": "force-from-mass-formula",
+      "name": "Force from mass formula",
+      "type": "Formula",
+      "definition": "Calculates the force due to gravity on a mass.",
+      "expression": "F = m g"
+    },
+    {
+      "id": "elastic-strain-energy-formula",
+      "name": "Elastic strain energy formula",
+      "type": "Formula",
+      "definition": "Calculates elastic strain energy for a material within the limit of proportionality.",
+      "expression": "Elastic strain energy = (1/2) F x = (1/2) k x^2"
+    },
+    {
+      "id": "measure-young-modulus-of-a-metal-wire",
+      "name": "Measure Young modulus of a metal wire",
+      "type": "Skill",
+      "definition": "Experimental procedure to determine the Young modulus of a metal wire by measuring stress and strain."
+    },
+    {
+      "id": "plot-stress-strain-graph",
+      "name": "Plot stress-strain graph",
+      "type": "Skill",
+      "definition": "Plot a graph of stress against strain and draw a line of best fit to determine the Young modulus from the gradient."
+    },
+    {
+      "id": "calculate-elastic-strain-energy-from-graph",
+      "name": "Calculate elastic strain energy from graph",
+      "type": "Skill",
+      "definition": "Determine elastic strain energy as the area under a force-extension graph."
+    },
+    {
+      "id": "wave-equation",
+      "name": "wave equation",
+      "type": "Formula",
+      "definition": "Relates the speed of a wave to its frequency and wavelength.",
+      "expression": "v = f λ"
+    },
+    {
+      "id": "intensity",
+      "name": "intensity",
+      "type": "Concept",
+      "definition": "Power per unit area of a wave."
+    },
+    {
+      "id": "intensity-formula",
+      "name": "intensity formula",
+      "type": "Formula",
+      "definition": "Intensity is power per unit area.",
+      "expression": "I = P / A"
+    },
+    {
+      "id": "intensity-amplitude-relation",
+      "name": "intensity-amplitude relation",
+      "type": "Formula",
+      "definition": "Intensity of a wave is directly proportional to the square of its amplitude.",
+      "expression": "I ∝ A²"
+    },
+    {
+      "id": "transverse-wave",
+      "name": "transverse wave",
+      "type": "Concept",
+      "definition": "A wave in which oscillations are perpendicular to the direction of energy transfer."
+    },
+    {
+      "id": "longitudinal-wave",
+      "name": "longitudinal wave",
+      "type": "Concept",
+      "definition": "A wave in which oscillations are parallel to the direction of energy transfer, consisting of compressions and rarefactions."
+    },
+    {
+      "id": "displacement-distance-graph",
+      "name": "displacement-distance graph",
+      "type": "Concept",
+      "definition": "A graph showing how displacement of particles varies with distance along the wave, used to measure wavelength."
+    },
+    {
+      "id": "displacement-time-graph",
+      "name": "displacement-time graph",
+      "type": "Concept",
+      "definition": "A graph showing how displacement of a particle varies with time, used to measure the period."
+    },
+    {
+      "id": "doppler-effect",
+      "name": "Doppler effect",
+      "type": "Concept",
+      "definition": "The compression or spreading out of waves emitted or reflected by a moving source, causing a change in observed frequency."
+    },
+    {
+      "id": "doppler-effect-formula",
+      "name": "Doppler effect formula",
+      "type": "Formula",
+      "definition": "Calculates the observed frequency when a source moves relative to a stationary observer.",
+      "expression": "f_o = (f_s × v) / (v ± v_s)"
+    },
+    {
+      "id": "electromagnetic-spectrum",
+      "name": "electromagnetic spectrum",
+      "type": "Concept",
+      "definition": "The range of all electromagnetic waves classified by wavelength."
+    },
+    {
+      "id": "polarisation",
+      "name": "polarisation",
+      "type": "Concept",
+      "definition": "The restriction of wave oscillations to a single plane, possible only for transverse waves."
+    },
+    {
+      "id": "malus-law",
+      "name": "Malus' law",
+      "type": "Concept",
+      "definition": "Describes the intensity of light after passing through a polarising filter."
+    },
+    {
+      "id": "malus-law-formula",
+      "name": "Malus' law formula",
+      "type": "Formula",
+      "definition": "Relates transmitted intensity to initial intensity and the angle between polarisation direction and filter axis.",
+      "expression": "I = I₀ cos²θ"
+    },
+    {
+      "id": "use-cro-to-measure-frequency-and-amplitude",
+      "name": "use CRO to measure frequency and amplitude",
+      "type": "Skill",
+      "definition": "Using a cathode-ray oscilloscope to determine the frequency and amplitude of a wave from its display."
+    },
+    {
+      "id": "measure-wavelength-from-displacement-distance-graph",
+      "name": "measure wavelength from displacement-distance graph",
+      "type": "Skill",
+      "definition": "Determining wavelength by reading the distance between corresponding points on a displacement-distance graph."
+    },
+    {
+      "id": "measure-period-from-displacement-time-graph",
+      "name": "measure period from displacement-time graph",
+      "type": "Skill",
+      "definition": "Determining the period by reading the time between corresponding points on a displacement-time graph."
+    },
+    {
+      "id": "superposition",
+      "name": "Superposition",
+      "type": "Concept",
+      "definition": "Occurs when two or more waves of the same type cross each other; the resultant displacement is the vector sum of the individual displacements."
+    },
+    {
+      "id": "constructive-interference",
+      "name": "Constructive interference",
+      "type": "Concept",
+      "definition": "Waves meet in phase (phase difference = 0, 2π, 4π, ...) and their displacements add to produce a larger resultant displacement."
+    },
+    {
+      "id": "destructive-interference",
+      "name": "Destructive interference",
+      "type": "Concept",
+      "definition": "Waves meet out of phase or antiphase (phase difference = π, 3π, 5π, ...) and their displacements cancel to produce a smaller or zero resultant displacement."
+    },
+    {
+      "id": "stationary-wave",
+      "name": "Stationary wave",
+      "type": "Concept",
+      "definition": "A wave formed from the superposition of two progressive waves travelling in opposite directions in the same plane, with the same frequency, wavelength and amplitude; no energy is transferred."
+    },
+    {
+      "id": "node",
+      "name": "Node",
+      "type": "Concept",
+      "definition": "Region of minimum displacement in a stationary wave, formed by destructive interference where waves meet out of phase."
+    },
+    {
+      "id": "antinode",
+      "name": "Antinode",
+      "type": "Concept",
+      "definition": "Region of maximum displacement in a stationary wave, formed by constructive interference where waves meet in phase."
+    },
+    {
+      "id": "fundamental-frequency",
+      "name": "Fundamental frequency",
+      "type": "Concept",
+      "definition": "The lowest frequency at which a stationary wave forms; it has two nodes and one antinode."
+    },
+    {
+      "id": "harmonic",
+      "name": "Harmonic",
+      "type": "Concept",
+      "definition": "A frequency at which a stationary wave forms; the nth harmonic has n antinodes and frequency n times the fundamental frequency."
+    },
+    {
+      "id": "diffraction",
+      "name": "Diffraction",
+      "type": "Concept",
+      "definition": "The spreading out of waves when they pass through or around a gap; greatest when gap size is approximately equal to wavelength."
+    },
+    {
+      "id": "coherent-light-source",
+      "name": "Coherent light source",
+      "type": "Concept",
+      "definition": "A light source with the same frequency and wavelength, and a fixed phase difference."
+    },
+    {
+      "id": "youngs-double-slit-experiment",
+      "name": "Young's double-slit experiment",
+      "type": "Concept",
+      "definition": "An experiment demonstrating interference of light from two coherent sources, producing a pattern of bright and dark fringes."
+    },
+    {
+      "id": "diffraction-grating",
+      "name": "Diffraction grating",
+      "type": "Concept",
+      "definition": "A slide containing many equally spaced slits very close together, producing a sharper and brighter interference pattern than a double slit."
+    },
+    {
+      "id": "order-of-maximum",
+      "name": "Order of maximum",
+      "type": "Concept",
+      "definition": "The integer n in the diffraction grating equation d sinθ = nλ, indicating the position of a bright maximum (n = 0 for central, n = ±1 for first order, etc.)."
+    },
+    {
+      "id": "fringe-spacing-formula",
+      "name": "Fringe spacing formula",
+      "type": "Formula",
+      "definition": "Relates wavelength, slit separation, fringe spacing, and distance to screen in Young's double-slit experiment.",
+      "expression": "λ = a x / D"
+    },
+    {
+      "id": "diffraction-grating-formula",
+      "name": "Diffraction grating formula",
+      "type": "Formula",
+      "definition": "Relates slit spacing, angle to maximum, order, and wavelength for a diffraction grating.",
+      "expression": "d sinθ = nλ"
+    },
+    {
+      "id": "vibrating-string-frequency-formula",
+      "name": "Vibrating string frequency formula",
+      "type": "Formula",
+      "definition": "Gives the fundamental frequency of a vibrating string in terms of length, tension, and mass per unit length.",
+      "expression": "f = (1 / 2L) × √(T / μ)"
+    },
+    {
+      "id": "wave-speed-formula",
+      "name": "Wave speed formula",
+      "type": "Formula",
+      "definition": "Relates wave speed, frequency, and wavelength.",
+      "expression": "v = f λ"
+    },
+    {
+      "id": "measure-node-spacing",
+      "name": "Measure node spacing",
+      "type": "Skill",
+      "definition": "Using a microwave probe or powder in a tube to detect nodes and antinodes and measure the distance between nodes."
+    },
+    {
+      "id": "derive-diffraction-grating-formula",
+      "name": "Derive diffraction grating formula",
+      "type": "Skill",
+      "definition": "Deriving d sinθ = nλ using path difference and trigonometry for a diffraction grating."
+    },
+    {
+      "id": "electric-current",
+      "name": "electric current",
+      "type": "Concept",
+      "definition": "The rate of flow of charge, measured in amperes."
+    },
+    {
+      "id": "charge",
+      "name": "charge",
+      "type": "Concept",
+      "definition": "A property of matter that causes it to experience a force in an electromagnetic field; measured in coulombs."
+    },
+    {
+      "id": "elementary-charge",
+      "name": "elementary charge",
+      "type": "Concept",
+      "definition": "The magnitude of charge on a single electron or proton."
+    },
+    {
+      "id": "i-q-t",
+      "name": "I = Q/t",
+      "type": "Formula",
+      "definition": "Defines electric current as the rate of flow of charge.",
+      "expression": "I = Q / t"
+    },
+    {
+      "id": "q-it",
+      "name": "Q = It",
+      "type": "Formula",
+      "definition": "Calculates total charge transferred given current and time.",
+      "expression": "Q = I × t"
+    },
+    {
+      "id": "i-a-n-v-q",
+      "name": "I = A n v q",
+      "type": "Formula",
+      "definition": "Relates current to cross-sectional area, number density of charge carriers, mean drift velocity, and charge per carrier.",
+      "expression": "I = A n v q"
+    },
+    {
+      "id": "potential-difference",
+      "name": "potential difference",
+      "type": "Concept",
+      "definition": "The energy transferred per unit charge between two points in a circuit."
+    },
+    {
+      "id": "v-w-q",
+      "name": "V = W/Q",
+      "type": "Formula",
+      "definition": "Defines potential difference as work done per unit charge.",
+      "expression": "V = W / Q"
+    },
+    {
+      "id": "p-e-t",
+      "name": "P = E/t",
+      "type": "Formula",
+      "definition": "Defines power as energy transferred per unit time.",
+      "expression": "P = E / t"
+    },
+    {
+      "id": "p-vi",
+      "name": "P = VI",
+      "type": "Formula",
+      "definition": "Power as the product of potential difference and current.",
+      "expression": "P = V × I"
+    },
+    {
+      "id": "p-v-2-r",
+      "name": "P = V^2/R",
+      "type": "Formula",
+      "definition": "Power in terms of potential difference and resistance.",
+      "expression": "P = V^2 / R"
+    },
+    {
+      "id": "p-i-2r",
+      "name": "P = I^2R",
+      "type": "Formula",
+      "definition": "Power in terms of current and resistance.",
+      "expression": "P = I^2 R"
+    },
+    {
+      "id": "resistance",
+      "name": "resistance",
+      "type": "Concept",
+      "definition": "A measure of how difficult it is for charge carriers to pass through a component."
+    },
+    {
+      "id": "r-v-i",
+      "name": "R = V/I",
+      "type": "Formula",
+      "definition": "Defines resistance as the ratio of potential difference to current.",
+      "expression": "R = V / I"
+    },
+    {
+      "id": "ohms-law",
+      "name": "Ohm's law",
+      "type": "Concept",
+      "definition": "For an ohmic conductor, current is directly proportional to potential difference, provided physical conditions are constant."
+    },
+    {
+      "id": "ohmic-conductor",
+      "name": "ohmic conductor",
+      "type": "Concept",
+      "definition": "A conductor that obeys Ohm's law; its I-V graph is a straight line through the origin at constant temperature."
+    },
+    {
+      "id": "semiconductor-diode",
+      "name": "semiconductor diode",
+      "type": "Concept",
+      "definition": "A component that allows current to flow easily in forward bias but has very high resistance in reverse bias."
+    },
+    {
+      "id": "filament-lamp",
+      "name": "filament lamp",
+      "type": "Concept",
+      "definition": "A lamp with a metal wire that heats up as current increases, causing resistance to increase."
+    },
+    {
+      "id": "ammeter",
+      "name": "ammeter",
+      "type": "Concept",
+      "definition": "An instrument used to measure current, assumed to have zero resistance."
+    },
+    {
+      "id": "voltmeter",
+      "name": "voltmeter",
+      "type": "Concept",
+      "definition": "An instrument used to measure potential difference, assumed to have infinite resistance."
+    },
+    {
+      "id": "resistivity",
+      "name": "resistivity",
+      "type": "Concept",
+      "definition": "A measure of how strongly a material opposes the flow of electric current, independent of the size of the sample."
+    },
+    {
+      "id": "ra-l",
+      "name": "ρ = RA/L",
+      "type": "Formula",
+      "definition": "Relates resistivity to resistance, cross-sectional area, and length.",
+      "expression": "ρ = R A / L"
+    },
+    {
+      "id": "thermistor",
+      "name": "thermistor",
+      "type": "Concept",
+      "definition": "A temperature sensor whose resistance changes with temperature."
+    },
+    {
+      "id": "superconductor",
+      "name": "superconductor",
+      "type": "Concept",
+      "definition": "A material with zero resistivity below a critical temperature."
+    },
+    {
+      "id": "light-dependent-resistor",
+      "name": "Light Dependent Resistor",
+      "type": "Concept",
+      "definition": "A resistor whose resistance decreases with increasing light intensity."
+    },
+    {
+      "id": "derive-i-a-n-v-q",
+      "name": "derive I = A n v q",
+      "type": "Skill",
+      "definition": "Derive the equation for current in terms of charge carrier density and drift velocity."
+    },
+    {
+      "id": "interpret-i-v-graphs",
+      "name": "interpret I-V graphs",
+      "type": "Skill",
+      "definition": "Interpret current-voltage graphs for different components to determine their resistance behavior."
+    },
+    {
+      "id": "apply-ohms-law",
+      "name": "apply Ohm's law",
+      "type": "Skill",
+      "definition": "Use Ohm's law to relate current, potential difference, and resistance in circuits."
+    },
+    {
+      "id": "internal-resistance",
+      "name": "internal resistance",
+      "type": "Concept",
+      "definition": "The resistance caused by electrons colliding with atoms inside a battery, resulting in some energy being lost before the electrons leave the battery."
+    },
+    {
+      "id": "e-m-f",
+      "name": "e.m.f.",
+      "type": "Concept",
+      "definition": "The energy transferred by a cell per coulomb of charge that passes through it."
+    },
+    {
+      "id": "terminal-p-d",
+      "name": "terminal p.d.",
+      "type": "Concept",
+      "definition": "The potential difference across the load resistance in a circuit with internal resistance."
+    },
+    {
+      "id": "lost-volts",
+      "name": "lost volts",
+      "type": "Concept",
+      "definition": "The potential difference across the internal resistance, representing energy wasted by the cell per coulomb of charge."
+    },
+    {
+      "id": "kirchhoffs-first-law",
+      "name": "Kirchhoff's first law",
+      "type": "Concept",
+      "definition": "The total current flowing into a junction equals the total current flowing out of that junction."
+    },
+    {
+      "id": "kirchhoffs-second-law",
+      "name": "Kirchhoff's second law",
+      "type": "Concept",
+      "definition": "The sum of all the voltages in a series circuit equals the supply voltage, or the sum of all voltages around any closed loop is zero."
+    },
+    {
+      "id": "series-circuit",
+      "name": "series circuit",
+      "type": "Concept",
+      "definition": "A circuit where components are connected end-to-end so that the same current flows through each component."
+    },
+    {
+      "id": "parallel-circuit",
+      "name": "parallel circuit",
+      "type": "Concept",
+      "definition": "A circuit where components are connected across the same two points, so the potential difference across each branch is the same."
+    },
+    {
+      "id": "potential-divider",
+      "name": "potential divider",
+      "type": "Concept",
+      "definition": "A circuit with several resistors in series connected across a voltage source, used to produce a required fraction of the source p.d. that remains constant."
+    },
+    {
+      "id": "variable-potential-divider",
+      "name": "variable potential divider",
+      "type": "Concept",
+      "definition": "A potential divider that uses a variable resistor to vary the output p.d."
+    },
+    {
+      "id": "ldr",
+      "name": "LDR",
+      "type": "Concept",
+      "definition": "A light-dependent resistor whose resistance decreases as light intensity increases."
+    },
+    {
+      "id": "potentiometer",
+      "name": "potentiometer",
+      "type": "Concept",
+      "definition": "A three-terminal resistor with a control to adjust the resistance between terminals, used to compare potential differences or as a variable resistor."
+    },
+    {
+      "id": "null-measurement",
+      "name": "null measurement",
+      "type": "Concept",
+      "definition": "A measurement technique that avoids influencing the circuit by using a galvanometer with zero current to measure emf directly."
+    },
+    {
+      "id": "galvanometer",
+      "name": "galvanometer",
+      "type": "Concept",
+      "definition": "A sensitive instrument used to detect and measure small electric currents."
+    },
+    {
+      "id": "emf-formula",
+      "name": "emf formula",
+      "type": "Formula",
+      "definition": "The relationship between electromotive force, energy transferred, and charge.",
+      "expression": "ε = E / Q"
+    },
+    {
+      "id": "total-resistance-with-internal-resistance",
+      "name": "total resistance with internal resistance",
+      "type": "Formula",
+      "definition": "The total resistance in a circuit is the sum of the load resistance and the internal resistance.",
+      "expression": "R_T = R + r"
+    },
+    {
+      "id": "emf-total-resistance-current",
+      "name": "emf total resistance current",
+      "type": "Formula",
+      "definition": "The relationship between emf, total resistance, and current.",
+      "expression": "ε = I (R + r) = I R + I r"
+    },
+    {
+      "id": "terminal-p-d-formula",
+      "name": "terminal p.d. formula",
+      "type": "Formula",
+      "definition": "The potential difference across the load resistance.",
+      "expression": "V = I R"
+    },
+    {
+      "id": "lost-volts-formula",
+      "name": "lost volts formula",
+      "type": "Formula",
+      "definition": "The potential difference across the internal resistance.",
+      "expression": "v = I r"
+    },
+    {
+      "id": "emf-terminal-lost",
+      "name": "emf terminal lost",
+      "type": "Formula",
+      "definition": "The relationship between emf, terminal p.d., and lost volts.",
+      "expression": "ε = V + v"
+    },
+    {
+      "id": "series-total-voltage",
+      "name": "series total voltage",
+      "type": "Formula",
+      "definition": "The total voltage in a series circuit is the sum of the individual voltages.",
+      "expression": "V_T = V_1 + V_2 + V_3 + ..."
+    },
+    {
+      "id": "series-total-resistance",
+      "name": "series total resistance",
+      "type": "Formula",
+      "definition": "The total resistance in a series circuit is the sum of the individual resistances.",
+      "expression": "R_T = R_1 + R_2 + R_3 + ..."
+    },
+    {
+      "id": "parallel-total-voltage",
+      "name": "parallel total voltage",
+      "type": "Formula",
+      "definition": "The total voltage in a parallel circuit is the same across each branch.",
+      "expression": "V_T = V_1 = V_2 = V_3 = ..."
+    },
+    {
+      "id": "parallel-total-resistance",
+      "name": "parallel total resistance",
+      "type": "Formula",
+      "definition": "The reciprocal of the total resistance in a parallel circuit is the sum of the reciprocals of the individual resistances.",
+      "expression": "1 / R_T = 1 / R_1 + 1 / R_2 + 1 / R_3 + ..."
+    },
+    {
+      "id": "potential-divider-formula",
+      "name": "potential divider formula",
+      "type": "Formula",
+      "definition": "The output p.d. of a potential divider is determined by the ratio of resistances.",
+      "expression": "V_out = V_in * (R_2 / (R_1 + R_2))"
+    },
+    {
+      "id": "null-measurement-formula",
+      "name": "null measurement formula",
+      "type": "Formula",
+      "definition": "The relationship between emf, terminal p.d., and current in a null measurement.",
+      "expression": "ε = V + I r"
+    },
+    {
+      "id": "calculate-total-resistance",
+      "name": "calculate total resistance",
+      "type": "Skill",
+      "definition": "The ability to compute the total resistance of a circuit combining series and parallel resistors."
+    },
+    {
+      "id": "measure-emf",
+      "name": "measure emf",
+      "type": "Skill",
+      "definition": "The ability to measure the emf of a battery using a voltmeter in an open circuit."
+    },
+    {
+      "id": "apply-kirchhoffs-laws",
+      "name": "apply Kirchhoff's laws",
+      "type": "Skill",
+      "definition": "The ability to use Kirchhoff's laws to analyze currents and voltages in circuits."
+    },
+    {
+      "id": "use-potential-divider",
+      "name": "use potential divider",
+      "type": "Skill",
+      "definition": "The ability to design and analyze potential divider circuits, including with sensors."
+    },
+    {
+      "id": "perform-null-measurement",
+      "name": "perform null measurement",
+      "type": "Skill",
+      "definition": "The ability to use a galvanometer to measure emf without affecting the circuit."
+    },
+    {
+      "id": "rutherford-scattering",
+      "name": "Rutherford scattering",
+      "type": "Concept",
+      "definition": "The experiment that demonstrated the existence of a small, dense, positively charged nucleus in the atom."
+    },
+    {
+      "id": "nucleus",
+      "name": "nucleus",
+      "type": "Concept",
+      "definition": "The small, dense, positively charged central region of an atom containing protons and neutrons."
+    },
+    {
+      "id": "specific-charge",
+      "name": "specific charge",
+      "type": "Concept",
+      "definition": "The ratio of the charge of a particle to its mass."
+    },
+    {
+      "id": "proton-number",
+      "name": "proton number",
+      "type": "Concept",
+      "definition": "The number of protons in the nucleus of an atom, denoted by Z."
+    },
+    {
+      "id": "nucleon-number",
+      "name": "nucleon number",
+      "type": "Concept",
+      "definition": "The total number of protons and neutrons in the nucleus of an atom, denoted by A."
+    },
+    {
+      "id": "isotopes",
+      "name": "isotopes",
+      "type": "Concept",
+      "definition": "Atoms with the same number of protons but different numbers of neutrons."
+    },
+    {
+      "id": "radiation",
+      "name": "radiation",
+      "type": "Concept",
+      "definition": "The emission of energy in the form of electromagnetic waves or subatomic particles from an unstable nucleus."
+    },
+    {
+      "id": "unified-atomic-mass-unit",
+      "name": "unified atomic mass unit",
+      "type": "Concept",
+      "definition": "A unit of mass equal to one-twelfth the mass of a carbon-12 atom, approximately the mass of one nucleon."
+    },
+    {
+      "id": "antiparticle",
+      "name": "antiparticle",
+      "type": "Concept",
+      "definition": "A particle with the same mass but opposite charge and quantum numbers as its corresponding particle."
+    },
+    {
+      "id": "alpha-decay",
+      "name": "alpha decay",
+      "type": "Concept",
+      "definition": "A type of radioactive decay in which an alpha particle (two protons and two neutrons) is emitted from a nucleus."
+    },
+    {
+      "id": "beta-minus-decay",
+      "name": "beta-minus decay",
+      "type": "Concept",
+      "definition": "A type of radioactive decay in which a neutron decays into a proton, an electron, and an antineutrino."
+    },
+    {
+      "id": "beta-plus-decay",
+      "name": "beta-plus decay",
+      "type": "Concept",
+      "definition": "A type of radioactive decay in which a proton decays into a neutron, a positron, and a neutrino."
+    },
+    {
+      "id": "quarks",
+      "name": "quarks",
+      "type": "Concept",
+      "definition": "Fundamental particles that combine to form hadrons, such as protons and neutrons."
+    },
+    {
+      "id": "hadrons",
+      "name": "hadrons",
+      "type": "Concept",
+      "definition": "Particles made of quarks, which experience the strong nuclear force."
+    },
+    {
+      "id": "baryons",
+      "name": "baryons",
+      "type": "Concept",
+      "definition": "Hadrons composed of three quarks, such as protons and neutrons."
+    },
+    {
+      "id": "mesons",
+      "name": "mesons",
+      "type": "Concept",
+      "definition": "Hadrons composed of one quark and one antiquark."
+    },
+    {
+      "id": "leptons",
+      "name": "leptons",
+      "type": "Concept",
+      "definition": "Fundamental particles that are not made of quarks and do not experience the strong nuclear force."
+    },
+    {
+      "id": "conservation-of-charge",
+      "name": "conservation of charge",
+      "type": "Concept",
+      "definition": "The principle that total electric charge is conserved in nuclear processes."
+    },
+    {
+      "id": "conservation-of-nucleons",
+      "name": "conservation of nucleons",
+      "type": "Concept",
+      "definition": "The principle that the total number of nucleons is conserved in nuclear processes."
+    },
+    {
+      "id": "conservation-of-lepton-number",
+      "name": "conservation of lepton number",
+      "type": "Concept",
+      "definition": "The principle that the total lepton number is conserved in nuclear processes."
+    },
+    {
+      "id": "specific-charge-formula",
+      "name": "specific charge formula",
+      "type": "Formula",
+      "definition": "The formula for calculating specific charge as charge divided by mass.",
+      "expression": "specific charge = charge / mass"
+    },
+    {
+      "id": "nuclear-notation",
+      "name": "nuclear notation",
+      "type": "Formula",
+      "definition": "The notation used to represent a nuclide, showing the proton number and nucleon number.",
+      "expression": "A/Z X"
+    },
+    {
+      "id": "alpha-decay-equation",
+      "name": "alpha decay equation",
+      "type": "Formula",
+      "definition": "The general equation for alpha decay, showing the emission of an alpha particle.",
+      "expression": "A/Z X → (A-4)/(Z-2) Y + 4/2 He"
+    },
+    {
+      "id": "beta-minus-decay-equation",
+      "name": "beta-minus decay equation",
+      "type": "Formula",
+      "definition": "The general equation for beta-minus decay, showing the conversion of a neutron to a proton.",
+      "expression": "A/Z X → A/(Z+1) Y + 0/-1 e + antineutrino"
+    },
+    {
+      "id": "beta-plus-decay-equation",
+      "name": "beta-plus decay equation",
+      "type": "Formula",
+      "definition": "The general equation for beta-plus decay, showing the conversion of a proton to a neutron.",
+      "expression": "A/Z X → A/(Z-1) Y + 0/+1 e + neutrino"
+    },
+    {
+      "id": "proton-composition",
+      "name": "proton composition",
+      "type": "Formula",
+      "definition": "The quark composition of a proton.",
+      "expression": "p = uud"
+    },
+    {
+      "id": "neutron-composition",
+      "name": "neutron composition",
+      "type": "Formula",
+      "definition": "The quark composition of a neutron.",
+      "expression": "n = udd"
+    },
+    {
+      "id": "beta-minus-quark-change",
+      "name": "beta-minus quark change",
+      "type": "Formula",
+      "definition": "The quark-level change in beta-minus decay.",
+      "expression": "d → u"
+    },
+    {
+      "id": "beta-plus-quark-change",
+      "name": "beta-plus quark change",
+      "type": "Formula",
+      "definition": "The quark-level change in beta-plus decay.",
+      "expression": "u → d"
+    },
+    {
+      "id": "draw-rutherford-scattering-diagram",
+      "name": "draw Rutherford scattering diagram",
+      "type": "Skill",
+      "definition": "The ability to draw and interpret the apparatus and results of the Rutherford scattering experiment."
+    },
+    {
+      "id": "calculate-specific-charge",
+      "name": "calculate specific charge",
+      "type": "Skill",
+      "definition": "The ability to calculate the specific charge of a particle given its charge and mass."
+    },
+    {
+      "id": "write-nuclear-equations",
+      "name": "write nuclear equations",
+      "type": "Skill",
+      "definition": "The ability to write balanced nuclear equations for radioactive decay."
+    },
+    {
+      "id": "determine-quark-composition",
+      "name": "determine quark composition",
+      "type": "Skill",
+      "definition": "The ability to determine the quark composition of hadrons."
+    }
+  ],
+  "relations": [
+    {
+      "source": "physical-quantity",
+      "target": "si-units",
+      "type": "BELONGS_TO"
+    },
+    {
+      "source": "estimation",
+      "target": "topic-ch01",
+      "type": "BELONGS_TO"
+    },
+    {
+      "source": "si-units",
+      "target": "topic-ch01",
+      "type": "BELONGS_TO"
+    },
+    {
+      "source": "derived-units",
+      "target": "topic-ch01",
+      "type": "BELONGS_TO"
+    },
+    {
+      "source": "homogeneous-equation",
+      "target": "topic-ch01",
+      "type": "BELONGS_TO"
+    },
+    {
+      "source": "prefixes",
+      "target": "topic-ch01",
+      "type": "BELONGS_TO"
+    },
+    {
+      "source": "precision",
+      "target": "topic-ch01",
+      "type": "BELONGS_TO"
+    },
+    {
+      "source": "accuracy",
+      "target": "topic-ch01",
+      "type": "BELONGS_TO"
+    },
+    {
+      "source": "absolute-uncertainty",
+      "target": "topic-ch01",
+      "type": "BELONGS_TO"
+    },
+    {
+      "source": "fractional-uncertainty",
+      "target": "topic-ch01",
+      "type": "BELONGS_TO"
+    },
+    {
+      "source": "percentage-uncertainty",
+      "target": "topic-ch01",
+      "type": "BELONGS_TO"
+    },
+    {
+      "source": "combining-uncertainties",
+      "target": "topic-ch01",
+      "type": "BELONGS_TO"
+    },
+    {
+      "source": "scalar",
+      "target": "topic-ch01",
+      "type": "BELONGS_TO"
+    },
+    {
+      "source": "vector",
+      "target": "topic-ch01",
+      "type": "BELONGS_TO"
+    },
+    {
+      "source": "vector-addition",
+      "target": "topic-ch01",
+      "type": "BELONGS_TO"
+    },
+    {
+      "source": "resolution-of-vectors",
+      "target": "topic-ch01",
+      "type": "BELONGS_TO"
+    },
+    {
+      "source": "scale-drawing",
+      "target": "topic-ch01",
+      "type": "BELONGS_TO"
+    },
+    {
+      "source": "pythagoras-theorem",
+      "target": "topic-ch01",
+      "type": "BELONGS_TO"
+    },
+    {
+      "source": "trigonometry-for-vectors",
+      "target": "topic-ch01",
+      "type": "BELONGS_TO"
+    },
+    {
+      "source": "precision",
+      "target": "accuracy",
+      "type": "CONTRASTED_WITH"
+    },
+    {
+      "source": "scalar",
+      "target": "vector",
+      "type": "CONTRASTED_WITH"
+    },
+    {
+      "source": "vector-addition",
+      "target": "resolution-of-vectors",
+      "type": "REQUIRES_SKILL"
+    },
+    {
+      "source": "vector-addition",
+      "target": "scale-drawing",
+      "type": "REQUIRES_SKILL"
+    },
+    {
+      "source": "resolution-of-vectors",
+      "target": "trigonometry-for-vectors",
+      "type": "REQUIRES_SKILL"
+    },
+    {
+      "source": "resultant-force",
+      "target": "vector-addition",
+      "type": "REQUIRES_SKILL"
+    },
+    {
+      "source": "absolute-uncertainty",
+      "target": "combining-uncertainties",
+      "type": "PREREQUISITE_OF"
+    },
+    {
+      "source": "fractional-uncertainty",
+      "target": "combining-uncertainties",
+      "type": "PREREQUISITE_OF"
+    },
+    {
+      "source": "percentage-uncertainty",
+      "target": "combining-uncertainties",
+      "type": "PREREQUISITE_OF"
+    },
+    {
+      "source": "si-units",
+      "target": "derived-units",
+      "type": "PREREQUISITE_OF"
+    },
+    {
+      "source": "derived-units",
+      "target": "homogeneous-equation",
+      "type": "PREREQUISITE_OF"
+    },
+    {
+      "source": "displacement",
+      "target": "velocity",
+      "type": "PREREQUISITE_OF"
+    },
+    {
+      "source": "velocity",
+      "target": "acceleration",
+      "type": "PREREQUISITE_OF"
+    },
+    {
+      "source": "uniform-acceleration",
+      "target": "suvat-equations",
+      "type": "PREREQUISITE_OF"
+    },
+    {
+      "source": "suvat-equations",
+      "target": "solve-kinematics-problems",
+      "type": "REQUIRES_SKILL"
+    },
+    {
+      "source": "acceleration-due-to-gravity",
+      "target": "measure-g-using-light-gates",
+      "type": "REQUIRES_SKILL"
+    },
+    {
+      "source": "suvat-equations",
+      "target": "measure-g-using-light-gates",
+      "type": "REQUIRES_SKILL"
+    },
+    {
+      "source": "suvat-equations",
+      "target": "projectile-motion",
+      "type": "PREREQUISITE_OF"
+    },
+    {
+      "source": "distance",
+      "target": "topic-ch02",
+      "type": "BELONGS_TO"
+    },
+    {
+      "source": "displacement",
+      "target": "topic-ch02",
+      "type": "BELONGS_TO"
+    },
+    {
+      "source": "speed",
+      "target": "topic-ch02",
+      "type": "BELONGS_TO"
+    },
+    {
+      "source": "velocity",
+      "target": "topic-ch02",
+      "type": "BELONGS_TO"
+    },
+    {
+      "source": "acceleration",
+      "target": "topic-ch02",
+      "type": "BELONGS_TO"
+    },
+    {
+      "source": "uniform-acceleration",
+      "target": "topic-ch02",
+      "type": "BELONGS_TO"
+    },
+    {
+      "source": "instantaneous-velocity",
+      "target": "topic-ch02",
+      "type": "BELONGS_TO"
+    },
+    {
+      "source": "suvat-equations",
+      "target": "topic-ch02",
+      "type": "BELONGS_TO"
+    },
+    {
+      "source": "acceleration-due-to-gravity",
+      "target": "topic-ch02",
+      "type": "BELONGS_TO"
+    },
+    {
+      "source": "projectile-motion",
+      "target": "topic-ch02",
+      "type": "BELONGS_TO"
+    },
+    {
+      "source": "measure-g-using-light-gates",
+      "target": "topic-ch02",
+      "type": "BELONGS_TO"
+    },
+    {
+      "source": "solve-kinematics-problems",
+      "target": "topic-ch02",
+      "type": "BELONGS_TO"
+    },
+    {
+      "source": "distance",
+      "target": "displacement",
+      "type": "CONTRASTED_WITH"
+    },
+    {
+      "source": "speed",
+      "target": "velocity",
+      "type": "CONTRASTED_WITH"
+    },
+    {
+      "source": "newtons-first-law",
+      "target": "newtons-second-law",
+      "type": "PREREQUISITE_OF"
+    },
+    {
+      "source": "newtons-second-law",
+      "target": "newtons-third-law",
+      "type": "PREREQUISITE_OF"
+    },
+    {
+      "source": "mass",
+      "target": "newtons-second-law",
+      "type": "PREREQUISITE_OF"
+    },
+    {
+      "source": "resultant-force",
+      "target": "newtons-first-law",
+      "type": "PREREQUISITE_OF"
+    },
+    {
+      "source": "resultant-force",
+      "target": "newtons-second-law",
+      "type": "PREREQUISITE_OF"
+    },
+    {
+      "source": "momentum",
+      "target": "conservation-of-momentum",
+      "type": "PREREQUISITE_OF"
+    },
+    {
+      "source": "newtons-second-law",
+      "target": "force-rate-of-change-of-momentum",
+      "type": "PREREQUISITE_OF"
+    },
+    {
+      "source": "weight",
+      "target": "terminal-velocity",
+      "type": "PREREQUISITE_OF"
+    },
+    {
+      "source": "air-resistance",
+      "target": "terminal-velocity",
+      "type": "PREREQUISITE_OF"
+    },
+    {
+      "source": "conservation-of-momentum",
+      "target": "elastic-collision",
+      "type": "PREREQUISITE_OF"
+    },
+    {
+      "source": "conservation-of-momentum",
+      "target": "inelastic-collision",
+      "type": "PREREQUISITE_OF"
+    },
+    {
+      "source": "kinetic-energy",
+      "target": "elastic-collision",
+      "type": "PREREQUISITE_OF"
+    },
+    {
+      "source": "kinetic-energy",
+      "target": "inelastic-collision",
+      "type": "PREREQUISITE_OF"
+    },
+    {
+      "source": "elastic-collision",
+      "target": "inelastic-collision",
+      "type": "CONTRASTED_WITH"
+    },
+    {
+      "source": "newtons-second-law",
+      "target": "resolve-forces",
+      "type": "REQUIRES_SKILL"
+    },
+    {
+      "source": "conservation-of-momentum",
+      "target": "apply-conservation-of-momentum",
+      "type": "REQUIRES_SKILL"
+    },
+    {
+      "source": "newtons-first-law",
+      "target": "topic-ch03",
+      "type": "BELONGS_TO"
+    },
+    {
+      "source": "newtons-second-law",
+      "target": "topic-ch03",
+      "type": "BELONGS_TO"
+    },
+    {
+      "source": "newtons-third-law",
+      "target": "topic-ch03",
+      "type": "BELONGS_TO"
+    },
+    {
+      "source": "mass",
+      "target": "topic-ch03",
+      "type": "BELONGS_TO"
+    },
+    {
+      "source": "momentum",
+      "target": "topic-ch03",
+      "type": "BELONGS_TO"
+    },
+    {
+      "source": "weight",
+      "target": "topic-ch03",
+      "type": "BELONGS_TO"
+    },
+    {
+      "source": "terminal-velocity",
+      "target": "topic-ch03",
+      "type": "BELONGS_TO"
+    },
+    {
+      "source": "conservation-of-momentum",
+      "target": "topic-ch03",
+      "type": "BELONGS_TO"
+    },
+    {
+      "source": "elastic-collision",
+      "target": "topic-ch03",
+      "type": "BELONGS_TO"
+    },
+    {
+      "source": "inelastic-collision",
+      "target": "topic-ch03",
+      "type": "BELONGS_TO"
+    },
+    {
+      "source": "resultant-force",
+      "target": "topic-ch03",
+      "type": "BELONGS_TO"
+    },
+    {
+      "source": "air-resistance",
+      "target": "topic-ch03",
+      "type": "BELONGS_TO"
+    },
+    {
+      "source": "p-mv",
+      "target": "topic-ch03",
+      "type": "BELONGS_TO"
+    },
+    {
+      "source": "force-rate-of-change-of-momentum",
+      "target": "topic-ch03",
+      "type": "BELONGS_TO"
+    },
+    {
+      "source": "conservation-of-momentum-equation",
+      "target": "topic-ch03",
+      "type": "BELONGS_TO"
+    },
+    {
+      "source": "resolve-forces",
+      "target": "topic-ch03",
+      "type": "BELONGS_TO"
+    },
+    {
+      "source": "apply-conservation-of-momentum",
+      "target": "topic-ch03",
+      "type": "BELONGS_TO"
+    },
+    {
+      "source": "uniform-gravitational-field",
+      "target": "weight",
+      "type": "PREREQUISITE_OF"
+    },
+    {
+      "source": "weight",
+      "target": "f-mg",
+      "type": "PREREQUISITE_OF"
+    },
+    {
+      "source": "centre-of-gravity",
+      "target": "moment-of-a-force",
+      "type": "PREREQUISITE_OF"
+    },
+    {
+      "source": "moment-of-a-force",
+      "target": "principle-of-moments",
+      "type": "PREREQUISITE_OF"
+    },
+    {
+      "source": "couple",
+      "target": "torque-of-a-couple",
+      "type": "PREREQUISITE_OF"
+    },
+    {
+      "source": "principle-of-moments",
+      "target": "equilibrium",
+      "type": "PREREQUISITE_OF"
+    },
+    {
+      "source": "equilibrium",
+      "target": "resolve-forces-into-components",
+      "type": "REQUIRES_SKILL"
+    },
+    {
+      "source": "equilibrium",
+      "target": "draw-scale-diagram-for-equilibrium",
+      "type": "REQUIRES_SKILL"
+    },
+    {
+      "source": "pressure-difference-in-fluid",
+      "target": "total-pressure",
+      "type": "PREREQUISITE_OF"
+    },
+    {
+      "source": "pressure-difference-in-fluid",
+      "target": "upthrust",
+      "type": "PREREQUISITE_OF"
+    },
+    {
+      "source": "archimedes-principle",
+      "target": "upthrust",
+      "type": "PREREQUISITE_OF"
+    },
+    {
+      "source": "pressure-difference-in-fluid",
+      "target": "total-pressure",
+      "type": "CONTRASTED_WITH"
+    },
+    {
+      "source": "uniform-gravitational-field",
+      "target": "topic-ch04",
+      "type": "BELONGS_TO"
+    },
+    {
+      "source": "centre-of-gravity",
+      "target": "topic-ch04",
+      "type": "BELONGS_TO"
+    },
+    {
+      "source": "moment-of-a-force",
+      "target": "topic-ch04",
+      "type": "BELONGS_TO"
+    },
+    {
+      "source": "couple",
+      "target": "topic-ch04",
+      "type": "BELONGS_TO"
+    },
+    {
+      "source": "torque-of-a-couple",
+      "target": "topic-ch04",
+      "type": "BELONGS_TO"
+    },
+    {
+      "source": "principle-of-moments",
+      "target": "topic-ch04",
+      "type": "BELONGS_TO"
+    },
+    {
+      "source": "equilibrium",
+      "target": "topic-ch04",
+      "type": "BELONGS_TO"
+    },
+    {
+      "source": "density",
+      "target": "topic-ch04",
+      "type": "BELONGS_TO"
+    },
+    {
+      "source": "pressure",
+      "target": "topic-ch04",
+      "type": "BELONGS_TO"
+    },
+    {
+      "source": "pressure-difference-in-fluid",
+      "target": "topic-ch04",
+      "type": "BELONGS_TO"
+    },
+    {
+      "source": "total-pressure",
+      "target": "topic-ch04",
+      "type": "BELONGS_TO"
+    },
+    {
+      "source": "upthrust",
+      "target": "topic-ch04",
+      "type": "BELONGS_TO"
+    },
+    {
+      "source": "archimedes-principle",
+      "target": "topic-ch04",
+      "type": "BELONGS_TO"
+    },
+    {
+      "source": "f-mg",
+      "target": "topic-ch04",
+      "type": "BELONGS_TO"
+    },
+    {
+      "source": "resolve-forces-into-components",
+      "target": "topic-ch04",
+      "type": "BELONGS_TO"
+    },
+    {
+      "source": "draw-scale-diagram-for-equilibrium",
+      "target": "topic-ch04",
+      "type": "BELONGS_TO"
+    },
+    {
+      "source": "work",
+      "target": "energy",
+      "type": "PREREQUISITE_OF"
+    },
+    {
+      "source": "work-done-formula",
+      "target": "work",
+      "type": "BELONGS_TO"
+    },
+    {
+      "source": "work-done-on-gas",
+      "target": "work",
+      "type": "BELONGS_TO"
+    },
+    {
+      "source": "energy",
+      "target": "efficiency",
+      "type": "PREREQUISITE_OF"
+    },
+    {
+      "source": "efficiency-formula",
+      "target": "efficiency",
+      "type": "BELONGS_TO"
+    },
+    {
+      "source": "percentage-efficiency-formula",
+      "target": "efficiency",
+      "type": "BELONGS_TO"
+    },
+    {
+      "source": "energy",
+      "target": "principle-of-conservation-of-energy",
+      "type": "PREREQUISITE_OF"
+    },
+    {
+      "source": "work",
+      "target": "power",
+      "type": "PREREQUISITE_OF"
+    },
+    {
+      "source": "power-formula",
+      "target": "power",
+      "type": "BELONGS_TO"
+    },
+    {
+      "source": "kinetic-energy",
+      "target": "energy",
+      "type": "PREREQUISITE_OF"
+    },
+    {
+      "source": "kinetic-energy-formula",
+      "target": "kinetic-energy",
+      "type": "BELONGS_TO"
+    },
+    {
+      "source": "gravitational-potential-energy",
+      "target": "energy",
+      "type": "PREREQUISITE_OF"
+    },
+    {
+      "source": "gravitational-potential-energy-formula",
+      "target": "gravitational-potential-energy",
+      "type": "BELONGS_TO"
+    },
+    {
+      "source": "suvat-equations",
+      "target": "kinetic-energy-formula",
+      "type": "PREREQUISITE_OF"
+    },
+    {
+      "source": "newtons-second-law",
+      "target": "kinetic-energy-formula",
+      "type": "PREREQUISITE_OF"
+    },
+    {
+      "source": "newtons-first-law",
+      "target": "power-formula",
+      "type": "PREREQUISITE_OF"
+    },
+    {
+      "source": "work",
+      "target": "topic-ch05",
+      "type": "BELONGS_TO"
+    },
+    {
+      "source": "energy",
+      "target": "topic-ch05",
+      "type": "BELONGS_TO"
+    },
+    {
+      "source": "efficiency",
+      "target": "topic-ch05",
+      "type": "BELONGS_TO"
+    },
+    {
+      "source": "principle-of-conservation-of-energy",
+      "target": "topic-ch05",
+      "type": "BELONGS_TO"
+    },
+    {
+      "source": "power",
+      "target": "topic-ch05",
+      "type": "BELONGS_TO"
+    },
+    {
+      "source": "kinetic-energy",
+      "target": "topic-ch05",
+      "type": "BELONGS_TO"
+    },
+    {
+      "source": "gravitational-potential-energy",
+      "target": "topic-ch05",
+      "type": "BELONGS_TO"
+    },
+    {
+      "source": "gravitational-potential-energy",
+      "target": "kinetic-energy",
+      "type": "CONTRASTED_WITH"
+    },
+    {
+      "source": "hookes-law",
+      "target": "limit-of-proportionality",
+      "type": "PREREQUISITE_OF"
+    },
+    {
+      "source": "limit-of-proportionality",
+      "target": "elastic-limit",
+      "type": "PREREQUISITE_OF"
+    },
+    {
+      "source": "tensile-stress",
+      "target": "young-modulus",
+      "type": "PREREQUISITE_OF"
+    },
+    {
+      "source": "tensile-strain",
+      "target": "young-modulus",
+      "type": "PREREQUISITE_OF"
+    },
+    {
+      "source": "hookes-law",
+      "target": "young-modulus",
+      "type": "PREREQUISITE_OF"
+    },
+    {
+      "source": "elastic-deformation",
+      "target": "elastic-strain-energy",
+      "type": "PREREQUISITE_OF"
+    },
+    {
+      "source": "elastic-strain-energy",
+      "target": "elastic-strain-energy-formula",
+      "type": "PREREQUISITE_OF"
+    },
+    {
+      "source": "hookes-law-equation",
+      "target": "elastic-strain-energy-formula",
+      "type": "PREREQUISITE_OF"
+    },
+    {
+      "source": "young-modulus",
+      "target": "plot-stress-strain-graph",
+      "type": "REQUIRES_SKILL"
+    },
+    {
+      "source": "elastic-strain-energy",
+      "target": "calculate-elastic-strain-energy-from-graph",
+      "type": "REQUIRES_SKILL"
+    },
+    {
+      "source": "deformation",
+      "target": "topic-ch06",
+      "type": "BELONGS_TO"
+    },
+    {
+      "source": "tensile-deformation",
+      "target": "topic-ch06",
+      "type": "BELONGS_TO"
+    },
+    {
+      "source": "compressive-deformation",
+      "target": "topic-ch06",
+      "type": "BELONGS_TO"
+    },
+    {
+      "source": "hookes-law",
+      "target": "topic-ch06",
+      "type": "BELONGS_TO"
+    },
+    {
+      "source": "limit-of-proportionality",
+      "target": "topic-ch06",
+      "type": "BELONGS_TO"
+    },
+    {
+      "source": "elastic-limit",
+      "target": "topic-ch06",
+      "type": "BELONGS_TO"
+    },
+    {
+      "source": "spring-constant",
+      "target": "topic-ch06",
+      "type": "BELONGS_TO"
+    },
+    {
+      "source": "tensile-stress",
+      "target": "topic-ch06",
+      "type": "BELONGS_TO"
+    },
+    {
+      "source": "tensile-strain",
+      "target": "topic-ch06",
+      "type": "BELONGS_TO"
+    },
+    {
+      "source": "young-modulus",
+      "target": "topic-ch06",
+      "type": "BELONGS_TO"
+    },
+    {
+      "source": "elastic-deformation",
+      "target": "topic-ch06",
+      "type": "BELONGS_TO"
+    },
+    {
+      "source": "plastic-deformation",
+      "target": "topic-ch06",
+      "type": "BELONGS_TO"
+    },
+    {
+      "source": "elastic-strain-energy",
+      "target": "topic-ch06",
+      "type": "BELONGS_TO"
+    },
+    {
+      "source": "brittle",
+      "target": "topic-ch06",
+      "type": "BELONGS_TO"
+    },
+    {
+      "source": "hookes-law-equation",
+      "target": "topic-ch06",
+      "type": "BELONGS_TO"
+    },
+    {
+      "source": "stress-formula",
+      "target": "topic-ch06",
+      "type": "BELONGS_TO"
+    },
+    {
+      "source": "strain-formula",
+      "target": "topic-ch06",
+      "type": "BELONGS_TO"
+    },
+    {
+      "source": "young-modulus-formula",
+      "target": "topic-ch06",
+      "type": "BELONGS_TO"
+    },
+    {
+      "source": "cross-sectional-area-formula",
+      "target": "topic-ch06",
+      "type": "BELONGS_TO"
+    },
+    {
+      "source": "force-from-mass-formula",
+      "target": "topic-ch06",
+      "type": "BELONGS_TO"
+    },
+    {
+      "source": "elastic-strain-energy-formula",
+      "target": "topic-ch06",
+      "type": "BELONGS_TO"
+    },
+    {
+      "source": "plot-stress-strain-graph",
+      "target": "topic-ch06",
+      "type": "BELONGS_TO"
+    },
+    {
+      "source": "calculate-elastic-strain-energy-from-graph",
+      "target": "topic-ch06",
+      "type": "BELONGS_TO"
+    },
+    {
+      "source": "elastic-deformation",
+      "target": "plastic-deformation",
+      "type": "CONTRASTED_WITH"
+    },
+    {
+      "source": "brittle",
+      "target": "plastic-deformation",
+      "type": "CONTRASTED_WITH"
+    },
+    {
+      "source": "wave-equation",
+      "target": "topic-ch07",
+      "type": "BELONGS_TO"
+    },
+    {
+      "source": "intensity",
+      "target": "topic-ch07",
+      "type": "BELONGS_TO"
+    },
+    {
+      "source": "intensity-formula",
+      "target": "topic-ch07",
+      "type": "BELONGS_TO"
+    },
+    {
+      "source": "intensity-amplitude-relation",
+      "target": "topic-ch07",
+      "type": "BELONGS_TO"
+    },
+    {
+      "source": "transverse-wave",
+      "target": "topic-ch07",
+      "type": "BELONGS_TO"
+    },
+    {
+      "source": "longitudinal-wave",
+      "target": "topic-ch07",
+      "type": "BELONGS_TO"
+    },
+    {
+      "source": "displacement-distance-graph",
+      "target": "topic-ch07",
+      "type": "BELONGS_TO"
+    },
+    {
+      "source": "displacement-time-graph",
+      "target": "topic-ch07",
+      "type": "BELONGS_TO"
+    },
+    {
+      "source": "doppler-effect",
+      "target": "topic-ch07",
+      "type": "BELONGS_TO"
+    },
+    {
+      "source": "doppler-effect-formula",
+      "target": "topic-ch07",
+      "type": "BELONGS_TO"
+    },
+    {
+      "source": "electromagnetic-spectrum",
+      "target": "topic-ch07",
+      "type": "BELONGS_TO"
+    },
+    {
+      "source": "polarisation",
+      "target": "topic-ch07",
+      "type": "BELONGS_TO"
+    },
+    {
+      "source": "malus-law",
+      "target": "topic-ch07",
+      "type": "BELONGS_TO"
+    },
+    {
+      "source": "malus-law-formula",
+      "target": "topic-ch07",
+      "type": "BELONGS_TO"
+    },
+    {
+      "source": "use-cro-to-measure-frequency-and-amplitude",
+      "target": "topic-ch07",
+      "type": "BELONGS_TO"
+    },
+    {
+      "source": "measure-wavelength-from-displacement-distance-graph",
+      "target": "topic-ch07",
+      "type": "BELONGS_TO"
+    },
+    {
+      "source": "measure-period-from-displacement-time-graph",
+      "target": "topic-ch07",
+      "type": "BELONGS_TO"
+    },
+    {
+      "source": "transverse-wave",
+      "target": "longitudinal-wave",
+      "type": "CONTRASTED_WITH"
+    },
+    {
+      "source": "displacement-distance-graph",
+      "target": "displacement-time-graph",
+      "type": "CONTRASTED_WITH"
+    },
+    {
+      "source": "wave-equation",
+      "target": "use-cro-to-measure-frequency-and-amplitude",
+      "type": "REQUIRES_SKILL"
+    },
+    {
+      "source": "displacement-distance-graph",
+      "target": "measure-wavelength-from-displacement-distance-graph",
+      "type": "REQUIRES_SKILL"
+    },
+    {
+      "source": "displacement-time-graph",
+      "target": "measure-period-from-displacement-time-graph",
+      "type": "REQUIRES_SKILL"
+    },
+    {
+      "source": "intensity",
+      "target": "intensity-formula",
+      "type": "PREREQUISITE_OF"
+    },
+    {
+      "source": "intensity",
+      "target": "intensity-amplitude-relation",
+      "type": "PREREQUISITE_OF"
+    },
+    {
+      "source": "transverse-wave",
+      "target": "polarisation",
+      "type": "PREREQUISITE_OF"
+    },
+    {
+      "source": "polarisation",
+      "target": "malus-law",
+      "type": "PREREQUISITE_OF"
+    },
+    {
+      "source": "doppler-effect",
+      "target": "doppler-effect-formula",
+      "type": "PREREQUISITE_OF"
+    },
+    {
+      "source": "superposition",
+      "target": "constructive-interference",
+      "type": "PREREQUISITE_OF"
+    },
+    {
+      "source": "superposition",
+      "target": "destructive-interference",
+      "type": "PREREQUISITE_OF"
+    },
+    {
+      "source": "constructive-interference",
+      "target": "antinode",
+      "type": "PREREQUISITE_OF"
+    },
+    {
+      "source": "destructive-interference",
+      "target": "node",
+      "type": "PREREQUISITE_OF"
+    },
+    {
+      "source": "superposition",
+      "target": "stationary-wave",
+      "type": "PREREQUISITE_OF"
+    },
+    {
+      "source": "stationary-wave",
+      "target": "fundamental-frequency",
+      "type": "PREREQUISITE_OF"
+    },
+    {
+      "source": "fundamental-frequency",
+      "target": "harmonic",
+      "type": "PREREQUISITE_OF"
+    },
+    {
+      "source": "diffraction",
+      "target": "youngs-double-slit-experiment",
+      "type": "PREREQUISITE_OF"
+    },
+    {
+      "source": "coherent-light-source",
+      "target": "youngs-double-slit-experiment",
+      "type": "PREREQUISITE_OF"
+    },
+    {
+      "source": "youngs-double-slit-experiment",
+      "target": "diffraction-grating",
+      "type": "PREREQUISITE_OF"
+    },
+    {
+      "source": "diffraction-grating",
+      "target": "order-of-maximum",
+      "type": "PREREQUISITE_OF"
+    },
+    {
+      "source": "youngs-double-slit-experiment",
+      "target": "fringe-spacing-formula",
+      "type": "PREREQUISITE_OF"
+    },
+    {
+      "source": "diffraction-grating",
+      "target": "diffraction-grating-formula",
+      "type": "PREREQUISITE_OF"
+    },
+    {
+      "source": "stationary-wave",
+      "target": "vibrating-string-frequency-formula",
+      "type": "PREREQUISITE_OF"
+    },
+    {
+      "source": "stationary-wave",
+      "target": "wave-speed-formula",
+      "type": "PREREQUISITE_OF"
+    },
+    {
+      "source": "stationary-wave",
+      "target": "measure-node-spacing",
+      "type": "REQUIRES_SKILL"
+    },
+    {
+      "source": "diffraction-grating-formula",
+      "target": "derive-diffraction-grating-formula",
+      "type": "REQUIRES_SKILL"
+    },
+    {
+      "source": "constructive-interference",
+      "target": "destructive-interference",
+      "type": "CONTRASTED_WITH"
+    },
+    {
+      "source": "node",
+      "target": "antinode",
+      "type": "CONTRASTED_WITH"
+    },
+    {
+      "source": "superposition",
+      "target": "topic-ch08",
+      "type": "BELONGS_TO"
+    },
+    {
+      "source": "constructive-interference",
+      "target": "topic-ch08",
+      "type": "BELONGS_TO"
+    },
+    {
+      "source": "destructive-interference",
+      "target": "topic-ch08",
+      "type": "BELONGS_TO"
+    },
+    {
+      "source": "stationary-wave",
+      "target": "topic-ch08",
+      "type": "BELONGS_TO"
+    },
+    {
+      "source": "node",
+      "target": "topic-ch08",
+      "type": "BELONGS_TO"
+    },
+    {
+      "source": "antinode",
+      "target": "topic-ch08",
+      "type": "BELONGS_TO"
+    },
+    {
+      "source": "fundamental-frequency",
+      "target": "topic-ch08",
+      "type": "BELONGS_TO"
+    },
+    {
+      "source": "harmonic",
+      "target": "topic-ch08",
+      "type": "BELONGS_TO"
+    },
+    {
+      "source": "diffraction",
+      "target": "topic-ch08",
+      "type": "BELONGS_TO"
+    },
+    {
+      "source": "coherent-light-source",
+      "target": "topic-ch08",
+      "type": "BELONGS_TO"
+    },
+    {
+      "source": "youngs-double-slit-experiment",
+      "target": "topic-ch08",
+      "type": "BELONGS_TO"
+    },
+    {
+      "source": "diffraction-grating",
+      "target": "topic-ch08",
+      "type": "BELONGS_TO"
+    },
+    {
+      "source": "order-of-maximum",
+      "target": "topic-ch08",
+      "type": "BELONGS_TO"
+    },
+    {
+      "source": "fringe-spacing-formula",
+      "target": "topic-ch08",
+      "type": "BELONGS_TO"
+    },
+    {
+      "source": "diffraction-grating-formula",
+      "target": "topic-ch08",
+      "type": "BELONGS_TO"
+    },
+    {
+      "source": "vibrating-string-frequency-formula",
+      "target": "topic-ch08",
+      "type": "BELONGS_TO"
+    },
+    {
+      "source": "wave-speed-formula",
+      "target": "topic-ch08",
+      "type": "BELONGS_TO"
+    },
+    {
+      "source": "measure-node-spacing",
+      "target": "topic-ch08",
+      "type": "BELONGS_TO"
+    },
+    {
+      "source": "derive-diffraction-grating-formula",
+      "target": "topic-ch08",
+      "type": "BELONGS_TO"
+    },
+    {
+      "source": "electric-current",
+      "target": "i-q-t",
+      "type": "PREREQUISITE_OF"
+    },
+    {
+      "source": "charge",
+      "target": "electric-current",
+      "type": "PREREQUISITE_OF"
+    },
+    {
+      "source": "elementary-charge",
+      "target": "charge",
+      "type": "PREREQUISITE_OF"
+    },
+    {
+      "source": "potential-difference",
+      "target": "v-w-q",
+      "type": "PREREQUISITE_OF"
+    },
+    {
+      "source": "power",
+      "target": "p-e-t",
+      "type": "PREREQUISITE_OF"
+    },
+    {
+      "source": "potential-difference",
+      "target": "p-vi",
+      "type": "PREREQUISITE_OF"
+    },
+    {
+      "source": "resistance",
+      "target": "r-v-i",
+      "type": "PREREQUISITE_OF"
+    },
+    {
+      "source": "ohms-law",
+      "target": "ohmic-conductor",
+      "type": "PREREQUISITE_OF"
+    },
+    {
+      "source": "ohmic-conductor",
+      "target": "filament-lamp",
+      "type": "CONTRASTED_WITH"
+    },
+    {
+      "source": "semiconductor-diode",
+      "target": "filament-lamp",
+      "type": "CONTRASTED_WITH"
+    },
+    {
+      "source": "thermistor",
+      "target": "superconductor",
+      "type": "CONTRASTED_WITH"
+    },
+    {
+      "source": "electric-current",
+      "target": "topic-ch09",
+      "type": "BELONGS_TO"
+    },
+    {
+      "source": "charge",
+      "target": "topic-ch09",
+      "type": "BELONGS_TO"
+    },
+    {
+      "source": "i-q-t",
+      "target": "topic-ch09",
+      "type": "BELONGS_TO"
+    },
+    {
+      "source": "q-it",
+      "target": "topic-ch09",
+      "type": "BELONGS_TO"
+    },
+    {
+      "source": "potential-difference",
+      "target": "topic-ch09",
+      "type": "BELONGS_TO"
+    },
+    {
+      "source": "v-w-q",
+      "target": "topic-ch09",
+      "type": "BELONGS_TO"
+    },
+    {
+      "source": "p-e-t",
+      "target": "topic-ch09",
+      "type": "BELONGS_TO"
+    },
+    {
+      "source": "p-vi",
+      "target": "topic-ch09",
+      "type": "BELONGS_TO"
+    },
+    {
+      "source": "resistance",
+      "target": "topic-ch09",
+      "type": "BELONGS_TO"
+    },
+    {
+      "source": "r-v-i",
+      "target": "topic-ch09",
+      "type": "BELONGS_TO"
+    },
+    {
+      "source": "ohms-law",
+      "target": "topic-ch09",
+      "type": "BELONGS_TO"
+    },
+    {
+      "source": "ohmic-conductor",
+      "target": "topic-ch09",
+      "type": "BELONGS_TO"
+    },
+    {
+      "source": "semiconductor-diode",
+      "target": "topic-ch09",
+      "type": "BELONGS_TO"
+    },
+    {
+      "source": "filament-lamp",
+      "target": "topic-ch09",
+      "type": "BELONGS_TO"
+    },
+    {
+      "source": "ammeter",
+      "target": "topic-ch09",
+      "type": "BELONGS_TO"
+    },
+    {
+      "source": "voltmeter",
+      "target": "topic-ch09",
+      "type": "BELONGS_TO"
+    },
+    {
+      "source": "resistivity",
+      "target": "topic-ch09",
+      "type": "BELONGS_TO"
+    },
+    {
+      "source": "thermistor",
+      "target": "topic-ch09",
+      "type": "BELONGS_TO"
+    },
+    {
+      "source": "superconductor",
+      "target": "topic-ch09",
+      "type": "BELONGS_TO"
+    },
+    {
+      "source": "apply-ohms-law",
+      "target": "topic-ch09",
+      "type": "BELONGS_TO"
+    },
+    {
+      "source": "internal-resistance",
+      "target": "e-m-f",
+      "type": "PREREQUISITE_OF"
+    },
+    {
+      "source": "e-m-f",
+      "target": "terminal-p-d",
+      "type": "PREREQUISITE_OF"
+    },
+    {
+      "source": "e-m-f",
+      "target": "lost-volts",
+      "type": "PREREQUISITE_OF"
+    },
+    {
+      "source": "kirchhoffs-first-law",
+      "target": "series-circuit",
+      "type": "PREREQUISITE_OF"
+    },
+    {
+      "source": "kirchhoffs-second-law",
+      "target": "series-circuit",
+      "type": "PREREQUISITE_OF"
+    },
+    {
+      "source": "kirchhoffs-first-law",
+      "target": "parallel-circuit",
+      "type": "PREREQUISITE_OF"
+    },
+    {
+      "source": "kirchhoffs-second-law",
+      "target": "parallel-circuit",
+      "type": "PREREQUISITE_OF"
+    },
+    {
+      "source": "series-circuit",
+      "target": "potential-divider",
+      "type": "PREREQUISITE_OF"
+    },
+    {
+      "source": "potential-divider",
+      "target": "variable-potential-divider",
+      "type": "PREREQUISITE_OF"
+    },
+    {
+      "source": "variable-potential-divider",
+      "target": "ldr",
+      "type": "PREREQUISITE_OF"
+    },
+    {
+      "source": "variable-potential-divider",
+      "target": "thermistor",
+      "type": "PREREQUISITE_OF"
+    },
+    {
+      "source": "potential-divider",
+      "target": "potentiometer",
+      "type": "PREREQUISITE_OF"
+    },
+    {
+      "source": "galvanometer",
+      "target": "null-measurement",
+      "type": "PREREQUISITE_OF"
+    },
+    {
+      "source": "e-m-f",
+      "target": "emf-formula",
+      "type": "REQUIRES_SKILL"
+    },
+    {
+      "source": "internal-resistance",
+      "target": "total-resistance-with-internal-resistance",
+      "type": "REQUIRES_SKILL"
+    },
+    {
+      "source": "e-m-f",
+      "target": "emf-total-resistance-current",
+      "type": "REQUIRES_SKILL"
+    },
+    {
+      "source": "lost-volts",
+      "target": "lost-volts-formula",
+      "type": "REQUIRES_SKILL"
+    },
+    {
+      "source": "e-m-f",
+      "target": "emf-terminal-lost",
+      "type": "REQUIRES_SKILL"
+    },
+    {
+      "source": "series-circuit",
+      "target": "series-total-voltage",
+      "type": "REQUIRES_SKILL"
+    },
+    {
+      "source": "series-circuit",
+      "target": "series-total-resistance",
+      "type": "REQUIRES_SKILL"
+    },
+    {
+      "source": "parallel-circuit",
+      "target": "parallel-total-voltage",
+      "type": "REQUIRES_SKILL"
+    },
+    {
+      "source": "parallel-circuit",
+      "target": "parallel-total-resistance",
+      "type": "REQUIRES_SKILL"
+    },
+    {
+      "source": "potential-divider",
+      "target": "potential-divider-formula",
+      "type": "REQUIRES_SKILL"
+    },
+    {
+      "source": "null-measurement",
+      "target": "null-measurement-formula",
+      "type": "REQUIRES_SKILL"
+    },
+    {
+      "source": "series-circuit",
+      "target": "calculate-total-resistance",
+      "type": "REQUIRES_SKILL"
+    },
+    {
+      "source": "parallel-circuit",
+      "target": "calculate-total-resistance",
+      "type": "REQUIRES_SKILL"
+    },
+    {
+      "source": "e-m-f",
+      "target": "measure-emf",
+      "type": "REQUIRES_SKILL"
+    },
+    {
+      "source": "kirchhoffs-first-law",
+      "target": "apply-kirchhoffs-laws",
+      "type": "REQUIRES_SKILL"
+    },
+    {
+      "source": "kirchhoffs-second-law",
+      "target": "apply-kirchhoffs-laws",
+      "type": "REQUIRES_SKILL"
+    },
+    {
+      "source": "potential-divider",
+      "target": "use-potential-divider",
+      "type": "REQUIRES_SKILL"
+    },
+    {
+      "source": "null-measurement",
+      "target": "perform-null-measurement",
+      "type": "REQUIRES_SKILL"
+    },
+    {
+      "source": "internal-resistance",
+      "target": "topic-ch10",
+      "type": "BELONGS_TO"
+    },
+    {
+      "source": "e-m-f",
+      "target": "topic-ch10",
+      "type": "BELONGS_TO"
+    },
+    {
+      "source": "terminal-p-d",
+      "target": "topic-ch10",
+      "type": "BELONGS_TO"
+    },
+    {
+      "source": "lost-volts",
+      "target": "topic-ch10",
+      "type": "BELONGS_TO"
+    },
+    {
+      "source": "kirchhoffs-first-law",
+      "target": "topic-ch10",
+      "type": "BELONGS_TO"
+    },
+    {
+      "source": "kirchhoffs-second-law",
+      "target": "topic-ch10",
+      "type": "BELONGS_TO"
+    },
+    {
+      "source": "series-circuit",
+      "target": "topic-ch10",
+      "type": "BELONGS_TO"
+    },
+    {
+      "source": "parallel-circuit",
+      "target": "topic-ch10",
+      "type": "BELONGS_TO"
+    },
+    {
+      "source": "potential-divider",
+      "target": "topic-ch10",
+      "type": "BELONGS_TO"
+    },
+    {
+      "source": "variable-potential-divider",
+      "target": "topic-ch10",
+      "type": "BELONGS_TO"
+    },
+    {
+      "source": "ldr",
+      "target": "topic-ch10",
+      "type": "BELONGS_TO"
+    },
+    {
+      "source": "potentiometer",
+      "target": "topic-ch10",
+      "type": "BELONGS_TO"
+    },
+    {
+      "source": "null-measurement",
+      "target": "topic-ch10",
+      "type": "BELONGS_TO"
+    },
+    {
+      "source": "galvanometer",
+      "target": "topic-ch10",
+      "type": "BELONGS_TO"
+    },
+    {
+      "source": "emf-formula",
+      "target": "topic-ch10",
+      "type": "BELONGS_TO"
+    },
+    {
+      "source": "total-resistance-with-internal-resistance",
+      "target": "topic-ch10",
+      "type": "BELONGS_TO"
+    },
+    {
+      "source": "emf-total-resistance-current",
+      "target": "topic-ch10",
+      "type": "BELONGS_TO"
+    },
+    {
+      "source": "lost-volts-formula",
+      "target": "topic-ch10",
+      "type": "BELONGS_TO"
+    },
+    {
+      "source": "emf-terminal-lost",
+      "target": "topic-ch10",
+      "type": "BELONGS_TO"
+    },
+    {
+      "source": "series-total-voltage",
+      "target": "topic-ch10",
+      "type": "BELONGS_TO"
+    },
+    {
+      "source": "series-total-resistance",
+      "target": "topic-ch10",
+      "type": "BELONGS_TO"
+    },
+    {
+      "source": "parallel-total-voltage",
+      "target": "topic-ch10",
+      "type": "BELONGS_TO"
+    },
+    {
+      "source": "parallel-total-resistance",
+      "target": "topic-ch10",
+      "type": "BELONGS_TO"
+    },
+    {
+      "source": "potential-divider-formula",
+      "target": "topic-ch10",
+      "type": "BELONGS_TO"
+    },
+    {
+      "source": "null-measurement-formula",
+      "target": "topic-ch10",
+      "type": "BELONGS_TO"
+    },
+    {
+      "source": "calculate-total-resistance",
+      "target": "topic-ch10",
+      "type": "BELONGS_TO"
+    },
+    {
+      "source": "measure-emf",
+      "target": "topic-ch10",
+      "type": "BELONGS_TO"
+    },
+    {
+      "source": "apply-kirchhoffs-laws",
+      "target": "topic-ch10",
+      "type": "BELONGS_TO"
+    },
+    {
+      "source": "use-potential-divider",
+      "target": "topic-ch10",
+      "type": "BELONGS_TO"
+    },
+    {
+      "source": "perform-null-measurement",
+      "target": "topic-ch10",
+      "type": "BELONGS_TO"
+    },
+    {
+      "source": "series-circuit",
+      "target": "parallel-circuit",
+      "type": "CONTRASTED_WITH"
+    },
+    {
+      "source": "terminal-p-d",
+      "target": "lost-volts",
+      "type": "CONTRASTED_WITH"
+    },
+    {
+      "source": "rutherford-scattering",
+      "target": "nucleus",
+      "type": "PREREQUISITE_OF"
+    },
+    {
+      "source": "specific-charge",
+      "target": "specific-charge-formula",
+      "type": "PREREQUISITE_OF"
+    },
+    {
+      "source": "proton-number",
+      "target": "nuclear-notation",
+      "type": "PREREQUISITE_OF"
+    },
+    {
+      "source": "nucleon-number",
+      "target": "nuclear-notation",
+      "type": "PREREQUISITE_OF"
+    },
+    {
+      "source": "conservation-of-charge",
+      "target": "alpha-decay-equation",
+      "type": "PREREQUISITE_OF"
+    },
+    {
+      "source": "conservation-of-nucleons",
+      "target": "alpha-decay-equation",
+      "type": "PREREQUISITE_OF"
+    },
+    {
+      "source": "conservation-of-charge",
+      "target": "beta-minus-decay-equation",
+      "type": "PREREQUISITE_OF"
+    },
+    {
+      "source": "conservation-of-nucleons",
+      "target": "beta-minus-decay-equation",
+      "type": "PREREQUISITE_OF"
+    },
+    {
+      "source": "conservation-of-lepton-number",
+      "target": "beta-minus-decay-equation",
+      "type": "PREREQUISITE_OF"
+    },
+    {
+      "source": "conservation-of-charge",
+      "target": "beta-plus-decay-equation",
+      "type": "PREREQUISITE_OF"
+    },
+    {
+      "source": "conservation-of-nucleons",
+      "target": "beta-plus-decay-equation",
+      "type": "PREREQUISITE_OF"
+    },
+    {
+      "source": "conservation-of-lepton-number",
+      "target": "beta-plus-decay-equation",
+      "type": "PREREQUISITE_OF"
+    },
+    {
+      "source": "quarks",
+      "target": "hadrons",
+      "type": "PREREQUISITE_OF"
+    },
+    {
+      "source": "hadrons",
+      "target": "baryons",
+      "type": "PREREQUISITE_OF"
+    },
+    {
+      "source": "hadrons",
+      "target": "mesons",
+      "type": "PREREQUISITE_OF"
+    },
+    {
+      "source": "quarks",
+      "target": "proton-composition",
+      "type": "PREREQUISITE_OF"
+    },
+    {
+      "source": "quarks",
+      "target": "neutron-composition",
+      "type": "PREREQUISITE_OF"
+    },
+    {
+      "source": "beta-minus-decay",
+      "target": "beta-minus-quark-change",
+      "type": "PREREQUISITE_OF"
+    },
+    {
+      "source": "beta-plus-decay",
+      "target": "beta-plus-quark-change",
+      "type": "PREREQUISITE_OF"
+    },
+    {
+      "source": "rutherford-scattering",
+      "target": "draw-rutherford-scattering-diagram",
+      "type": "REQUIRES_SKILL"
+    },
+    {
+      "source": "specific-charge",
+      "target": "calculate-specific-charge",
+      "type": "REQUIRES_SKILL"
+    },
+    {
+      "source": "alpha-decay",
+      "target": "write-nuclear-equations",
+      "type": "REQUIRES_SKILL"
+    },
+    {
+      "source": "beta-minus-decay",
+      "target": "write-nuclear-equations",
+      "type": "REQUIRES_SKILL"
+    },
+    {
+      "source": "beta-plus-decay",
+      "target": "write-nuclear-equations",
+      "type": "REQUIRES_SKILL"
+    },
+    {
+      "source": "hadrons",
+      "target": "determine-quark-composition",
+      "type": "REQUIRES_SKILL"
+    },
+    {
+      "source": "rutherford-scattering",
+      "target": "topic-ch11",
+      "type": "BELONGS_TO"
+    },
+    {
+      "source": "nucleus",
+      "target": "topic-ch11",
+      "type": "BELONGS_TO"
+    },
+    {
+      "source": "specific-charge",
+      "target": "topic-ch11",
+      "type": "BELONGS_TO"
+    },
+    {
+      "source": "proton-number",
+      "target": "topic-ch11",
+      "type": "BELONGS_TO"
+    },
+    {
+      "source": "nucleon-number",
+      "target": "topic-ch11",
+      "type": "BELONGS_TO"
+    },
+    {
+      "source": "isotopes",
+      "target": "topic-ch11",
+      "type": "BELONGS_TO"
+    },
+    {
+      "source": "radiation",
+      "target": "topic-ch11",
+      "type": "BELONGS_TO"
+    },
+    {
+      "source": "unified-atomic-mass-unit",
+      "target": "topic-ch11",
+      "type": "BELONGS_TO"
+    },
+    {
+      "source": "elementary-charge",
+      "target": "topic-ch11",
+      "type": "BELONGS_TO"
+    },
+    {
+      "source": "antiparticle",
+      "target": "topic-ch11",
+      "type": "BELONGS_TO"
+    },
+    {
+      "source": "alpha-decay",
+      "target": "topic-ch11",
+      "type": "BELONGS_TO"
+    },
+    {
+      "source": "beta-minus-decay",
+      "target": "topic-ch11",
+      "type": "BELONGS_TO"
+    },
+    {
+      "source": "beta-plus-decay",
+      "target": "topic-ch11",
+      "type": "BELONGS_TO"
+    },
+    {
+      "source": "quarks",
+      "target": "topic-ch11",
+      "type": "BELONGS_TO"
+    },
+    {
+      "source": "hadrons",
+      "target": "topic-ch11",
+      "type": "BELONGS_TO"
+    },
+    {
+      "source": "baryons",
+      "target": "topic-ch11",
+      "type": "BELONGS_TO"
+    },
+    {
+      "source": "mesons",
+      "target": "topic-ch11",
+      "type": "BELONGS_TO"
+    },
+    {
+      "source": "leptons",
+      "target": "topic-ch11",
+      "type": "BELONGS_TO"
+    },
+    {
+      "source": "conservation-of-charge",
+      "target": "topic-ch11",
+      "type": "BELONGS_TO"
+    },
+    {
+      "source": "conservation-of-nucleons",
+      "target": "topic-ch11",
+      "type": "BELONGS_TO"
+    },
+    {
+      "source": "conservation-of-lepton-number",
+      "target": "topic-ch11",
+      "type": "BELONGS_TO"
+    },
+    {
+      "source": "specific-charge-formula",
+      "target": "topic-ch11",
+      "type": "BELONGS_TO"
+    },
+    {
+      "source": "nuclear-notation",
+      "target": "topic-ch11",
+      "type": "BELONGS_TO"
+    },
+    {
+      "source": "alpha-decay-equation",
+      "target": "topic-ch11",
+      "type": "BELONGS_TO"
+    },
+    {
+      "source": "beta-minus-decay-equation",
+      "target": "topic-ch11",
+      "type": "BELONGS_TO"
+    },
+    {
+      "source": "beta-plus-decay-equation",
+      "target": "topic-ch11",
+      "type": "BELONGS_TO"
+    },
+    {
+      "source": "proton-composition",
+      "target": "topic-ch11",
+      "type": "BELONGS_TO"
+    },
+    {
+      "source": "neutron-composition",
+      "target": "topic-ch11",
+      "type": "BELONGS_TO"
+    },
+    {
+      "source": "beta-minus-quark-change",
+      "target": "topic-ch11",
+      "type": "BELONGS_TO"
+    },
+    {
+      "source": "beta-plus-quark-change",
+      "target": "topic-ch11",
+      "type": "BELONGS_TO"
+    },
+    {
+      "source": "draw-rutherford-scattering-diagram",
+      "target": "topic-ch11",
+      "type": "BELONGS_TO"
+    },
+    {
+      "source": "calculate-specific-charge",
+      "target": "topic-ch11",
+      "type": "BELONGS_TO"
+    },
+    {
+      "source": "write-nuclear-equations",
+      "target": "topic-ch11",
+      "type": "BELONGS_TO"
+    },
+    {
+      "source": "determine-quark-composition",
+      "target": "topic-ch11",
+      "type": "BELONGS_TO"
+    },
+    {
+      "source": "baryons",
+      "target": "mesons",
+      "type": "CONTRASTED_WITH"
+    },
+    {
+      "source": "hadrons",
+      "target": "leptons",
+      "type": "CONTRASTED_WITH"
+    },
+    {
+      "source": "beta-minus-decay",
+      "target": "beta-plus-decay",
+      "type": "CONTRASTED_WITH"
+    },
+    {
+      "source": "physical-quantity",
+      "target": "bigidea-measurement",
+      "type": "EXEMPLIFIES"
+    },
+    {
+      "source": "estimation",
+      "target": "bigidea-measurement",
+      "type": "EXEMPLIFIES"
+    },
+    {
+      "source": "si-units",
+      "target": "bigidea-measurement",
+      "type": "EXEMPLIFIES"
+    },
+    {
+      "source": "derived-units",
+      "target": "bigidea-measurement",
+      "type": "EXEMPLIFIES"
+    },
+    {
+      "source": "homogeneous-equation",
+      "target": "bigidea-modeling",
+      "type": "EXEMPLIFIES"
+    },
+    {
+      "source": "prefixes",
+      "target": "bigidea-measurement",
+      "type": "EXEMPLIFIES"
+    },
+    {
+      "source": "precision",
+      "target": "bigidea-measurement",
+      "type": "EXEMPLIFIES"
+    },
+    {
+      "source": "accuracy",
+      "target": "bigidea-measurement",
+      "type": "EXEMPLIFIES"
+    },
+    {
+      "source": "absolute-uncertainty",
+      "target": "bigidea-measurement",
+      "type": "EXEMPLIFIES"
+    },
+    {
+      "source": "fractional-uncertainty",
+      "target": "bigidea-measurement",
+      "type": "EXEMPLIFIES"
+    },
+    {
+      "source": "percentage-uncertainty",
+      "target": "bigidea-measurement",
+      "type": "EXEMPLIFIES"
+    },
+    {
+      "source": "combining-uncertainties",
+      "target": "bigidea-measurement",
+      "type": "EXEMPLIFIES"
+    },
+    {
+      "source": "scalar",
+      "target": "bigidea-modeling",
+      "type": "EXEMPLIFIES"
+    },
+    {
+      "source": "vector",
+      "target": "bigidea-modeling",
+      "type": "EXEMPLIFIES"
+    },
+    {
+      "source": "resultant-force",
+      "target": "bigidea-modeling",
+      "type": "EXEMPLIFIES"
+    },
+    {
+      "source": "vector-addition",
+      "target": "bigidea-modeling",
+      "type": "EXEMPLIFIES"
+    },
+    {
+      "source": "resolution-of-vectors",
+      "target": "bigidea-modeling",
+      "type": "EXEMPLIFIES"
+    },
+    {
+      "source": "scale-drawing",
+      "target": "bigidea-modeling",
+      "type": "EXEMPLIFIES"
+    },
+    {
+      "source": "pythagoras-theorem",
+      "target": "bigidea-modeling",
+      "type": "EXEMPLIFIES"
+    },
+    {
+      "source": "trigonometry-for-vectors",
+      "target": "bigidea-modeling",
+      "type": "EXEMPLIFIES"
+    },
+    {
+      "source": "distance",
+      "target": "bigidea-measurement",
+      "type": "EXEMPLIFIES"
+    },
+    {
+      "source": "displacement",
+      "target": "bigidea-measurement",
+      "type": "EXEMPLIFIES"
+    },
+    {
+      "source": "speed",
+      "target": "bigidea-measurement",
+      "type": "EXEMPLIFIES"
+    },
+    {
+      "source": "velocity",
+      "target": "bigidea-measurement",
+      "type": "EXEMPLIFIES"
+    },
+    {
+      "source": "acceleration",
+      "target": "bigidea-measurement",
+      "type": "EXEMPLIFIES"
+    },
+    {
+      "source": "uniform-acceleration",
+      "target": "bigidea-modeling",
+      "type": "EXEMPLIFIES"
+    },
+    {
+      "source": "instantaneous-velocity",
+      "target": "bigidea-measurement",
+      "type": "EXEMPLIFIES"
+    },
+    {
+      "source": "suvat-equations",
+      "target": "bigidea-modeling",
+      "type": "EXEMPLIFIES"
+    },
+    {
+      "source": "acceleration-due-to-gravity",
+      "target": "bigidea-conservation",
+      "type": "EXEMPLIFIES"
+    },
+    {
+      "source": "projectile-motion",
+      "target": "bigidea-modeling",
+      "type": "EXEMPLIFIES"
+    },
+    {
+      "source": "draw-a-tangent",
+      "target": "bigidea-measurement",
+      "type": "EXEMPLIFIES"
+    },
+    {
+      "source": "measure-g-using-light-gates",
+      "target": "bigidea-measurement",
+      "type": "EXEMPLIFIES"
+    },
+    {
+      "source": "solve-kinematics-problems",
+      "target": "bigidea-modeling",
+      "type": "EXEMPLIFIES"
+    },
+    {
+      "source": "newtons-first-law",
+      "target": "bigidea-modeling",
+      "type": "EXEMPLIFIES"
+    },
+    {
+      "source": "newtons-second-law",
+      "target": "bigidea-modeling",
+      "type": "EXEMPLIFIES"
+    },
+    {
+      "source": "newtons-third-law",
+      "target": "bigidea-modeling",
+      "type": "EXEMPLIFIES"
+    },
+    {
+      "source": "mass",
+      "target": "bigidea-macro-micro",
+      "type": "EXEMPLIFIES"
+    },
+    {
+      "source": "momentum",
+      "target": "bigidea-conservation",
+      "type": "EXEMPLIFIES"
+    },
+    {
+      "source": "weight",
+      "target": "bigidea-energy",
+      "type": "EXEMPLIFIES"
+    },
+    {
+      "source": "terminal-velocity",
+      "target": "bigidea-modeling",
+      "type": "EXEMPLIFIES"
+    },
+    {
+      "source": "conservation-of-momentum",
+      "target": "bigidea-conservation",
+      "type": "EXEMPLIFIES"
+    },
+    {
+      "source": "elastic-collision",
+      "target": "bigidea-conservation",
+      "type": "EXEMPLIFIES"
+    },
+    {
+      "source": "elastic-collision",
+      "target": "bigidea-energy",
+      "type": "EXEMPLIFIES"
+    },
+    {
+      "source": "inelastic-collision",
+      "target": "bigidea-conservation",
+      "type": "EXEMPLIFIES"
+    },
+    {
+      "source": "inelastic-collision",
+      "target": "bigidea-energy",
+      "type": "EXEMPLIFIES"
+    },
+    {
+      "source": "kinetic-energy",
+      "target": "bigidea-energy",
+      "type": "EXEMPLIFIES"
+    },
+    {
+      "source": "elastic-strain-energy",
+      "target": "bigidea-energy",
+      "type": "EXEMPLIFIES"
+    },
+    {
+      "source": "air-resistance",
+      "target": "bigidea-modeling",
+      "type": "EXEMPLIFIES"
+    },
+    {
+      "source": "p-mv",
+      "target": "bigidea-conservation",
+      "type": "EXEMPLIFIES"
+    },
+    {
+      "source": "weight-mg",
+      "target": "bigidea-energy",
+      "type": "EXEMPLIFIES"
+    },
+    {
+      "source": "force-rate-of-change-of-momentum",
+      "target": "bigidea-conservation",
+      "type": "EXEMPLIFIES"
+    },
+    {
+      "source": "conservation-of-momentum-equation",
+      "target": "bigidea-conservation",
+      "type": "EXEMPLIFIES"
+    },
+    {
+      "source": "relative-speed-of-approach-relative-speed-of-separation",
+      "target": "bigidea-conservation",
+      "type": "EXEMPLIFIES"
+    },
+    {
+      "source": "relative-speed-of-approach-relative-speed-of-separation",
+      "target": "bigidea-energy",
+      "type": "EXEMPLIFIES"
+    },
+    {
+      "source": "resolve-forces",
+      "target": "bigidea-modeling",
+      "type": "EXEMPLIFIES"
+    },
+    {
+      "source": "apply-conservation-of-momentum",
+      "target": "bigidea-conservation",
+      "type": "EXEMPLIFIES"
+    },
+    {
+      "source": "uniform-gravitational-field",
+      "target": "bigidea-modeling",
+      "type": "EXEMPLIFIES"
+    },
+    {
+      "source": "centre-of-gravity",
+      "target": "bigidea-modeling",
+      "type": "EXEMPLIFIES"
+    },
+    {
+      "source": "principle-of-moments",
+      "target": "bigidea-conservation",
+      "type": "EXEMPLIFIES"
+    },
+    {
+      "source": "equilibrium",
+      "target": "bigidea-conservation",
+      "type": "EXEMPLIFIES"
+    },
+    {
+      "source": "density",
+      "target": "bigidea-macro-micro",
+      "type": "EXEMPLIFIES"
+    },
+    {
+      "source": "pressure",
+      "target": "bigidea-macro-micro",
+      "type": "EXEMPLIFIES"
+    },
+    {
+      "source": "pressure-difference-in-fluid",
+      "target": "bigidea-energy",
+      "type": "EXEMPLIFIES"
+    },
+    {
+      "source": "upthrust",
+      "target": "bigidea-energy",
+      "type": "EXEMPLIFIES"
+    },
+    {
+      "source": "archimedes-principle",
+      "target": "bigidea-conservation",
+      "type": "EXEMPLIFIES"
+    },
+    {
+      "source": "f-mg",
+      "target": "bigidea-energy",
+      "type": "EXEMPLIFIES"
+    },
+    {
+      "source": "m-v",
+      "target": "bigidea-macro-micro",
+      "type": "EXEMPLIFIES"
+    },
+    {
+      "source": "p-f-a",
+      "target": "bigidea-macro-micro",
+      "type": "EXEMPLIFIES"
+    },
+    {
+      "source": "p-g-h",
+      "target": "bigidea-energy",
+      "type": "EXEMPLIFIES"
+    },
+    {
+      "source": "f-g-v",
+      "target": "bigidea-energy",
+      "type": "EXEMPLIFIES"
+    },
+    {
+      "source": "resolve-forces-into-components",
+      "target": "bigidea-modeling",
+      "type": "EXEMPLIFIES"
+    },
+    {
+      "source": "draw-scale-diagram-for-equilibrium",
+      "target": "bigidea-modeling",
+      "type": "EXEMPLIFIES"
+    },
+    {
+      "source": "energy",
+      "target": "bigidea-energy",
+      "type": "EXEMPLIFIES"
+    },
+    {
+      "source": "work",
+      "target": "bigidea-energy",
+      "type": "EXEMPLIFIES"
+    },
+    {
+      "source": "work-done-formula",
+      "target": "bigidea-energy",
+      "type": "EXEMPLIFIES"
+    },
+    {
+      "source": "work-done-on-gas",
+      "target": "bigidea-energy",
+      "type": "EXEMPLIFIES"
+    },
+    {
+      "source": "efficiency",
+      "target": "bigidea-energy",
+      "type": "EXEMPLIFIES"
+    },
+    {
+      "source": "efficiency-formula",
+      "target": "bigidea-energy",
+      "type": "EXEMPLIFIES"
+    },
+    {
+      "source": "percentage-efficiency-formula",
+      "target": "bigidea-energy",
+      "type": "EXEMPLIFIES"
+    },
+    {
+      "source": "principle-of-conservation-of-energy",
+      "target": "bigidea-conservation",
+      "type": "EXEMPLIFIES"
+    },
+    {
+      "source": "principle-of-conservation-of-energy",
+      "target": "bigidea-energy",
+      "type": "EXEMPLIFIES"
+    },
+    {
+      "source": "power",
+      "target": "bigidea-energy",
+      "type": "EXEMPLIFIES"
+    },
+    {
+      "source": "power-formula",
+      "target": "bigidea-energy",
+      "type": "EXEMPLIFIES"
+    },
+    {
+      "source": "kinetic-energy-formula",
+      "target": "bigidea-energy",
+      "type": "EXEMPLIFIES"
+    },
+    {
+      "source": "gravitational-potential-energy",
+      "target": "bigidea-energy",
+      "type": "EXEMPLIFIES"
+    },
+    {
+      "source": "gravitational-potential-energy-formula",
+      "target": "bigidea-energy",
+      "type": "EXEMPLIFIES"
+    },
+    {
+      "source": "deformation",
+      "target": "bigidea-modeling",
+      "type": "EXEMPLIFIES"
+    },
+    {
+      "source": "hookes-law",
+      "target": "bigidea-modeling",
+      "type": "EXEMPLIFIES"
+    },
+    {
+      "source": "limit-of-proportionality",
+      "target": "bigidea-modeling",
+      "type": "EXEMPLIFIES"
+    },
+    {
+      "source": "elastic-limit",
+      "target": "bigidea-modeling",
+      "type": "EXEMPLIFIES"
+    },
+    {
+      "source": "young-modulus",
+      "target": "bigidea-measurement",
+      "type": "EXEMPLIFIES"
+    },
+    {
+      "source": "elastic-deformation",
+      "target": "bigidea-energy",
+      "type": "EXEMPLIFIES"
+    },
+    {
+      "source": "plastic-deformation",
+      "target": "bigidea-energy",
+      "type": "EXEMPLIFIES"
+    },
+    {
+      "source": "hookes-law-equation",
+      "target": "bigidea-modeling",
+      "type": "EXEMPLIFIES"
+    },
+    {
+      "source": "young-modulus-formula",
+      "target": "bigidea-measurement",
+      "type": "EXEMPLIFIES"
+    },
+    {
+      "source": "cross-sectional-area-formula",
+      "target": "bigidea-measurement",
+      "type": "EXEMPLIFIES"
+    },
+    {
+      "source": "elastic-strain-energy-formula",
+      "target": "bigidea-energy",
+      "type": "EXEMPLIFIES"
+    },
+    {
+      "source": "measure-young-modulus-of-a-metal-wire",
+      "target": "bigidea-measurement",
+      "type": "EXEMPLIFIES"
+    },
+    {
+      "source": "plot-stress-strain-graph",
+      "target": "bigidea-measurement",
+      "type": "EXEMPLIFIES"
+    },
+    {
+      "source": "calculate-elastic-strain-energy-from-graph",
+      "target": "bigidea-energy",
+      "type": "EXEMPLIFIES"
+    },
+    {
+      "source": "wave-equation",
+      "target": "bigidea-waves",
+      "type": "EXEMPLIFIES"
+    },
+    {
+      "source": "intensity",
+      "target": "bigidea-energy",
+      "type": "EXEMPLIFIES"
+    },
+    {
+      "source": "intensity-formula",
+      "target": "bigidea-energy",
+      "type": "EXEMPLIFIES"
+    },
+    {
+      "source": "intensity-amplitude-relation",
+      "target": "bigidea-energy",
+      "type": "EXEMPLIFIES"
+    },
+    {
+      "source": "transverse-wave",
+      "target": "bigidea-waves",
+      "type": "EXEMPLIFIES"
+    },
+    {
+      "source": "longitudinal-wave",
+      "target": "bigidea-waves",
+      "type": "EXEMPLIFIES"
+    },
+    {
+      "source": "displacement-distance-graph",
+      "target": "bigidea-measurement",
+      "type": "EXEMPLIFIES"
+    },
+    {
+      "source": "displacement-time-graph",
+      "target": "bigidea-measurement",
+      "type": "EXEMPLIFIES"
+    },
+    {
+      "source": "doppler-effect",
+      "target": "bigidea-waves",
+      "type": "EXEMPLIFIES"
+    },
+    {
+      "source": "doppler-effect-formula",
+      "target": "bigidea-waves",
+      "type": "EXEMPLIFIES"
+    },
+    {
+      "source": "electromagnetic-spectrum",
+      "target": "bigidea-waves",
+      "type": "EXEMPLIFIES"
+    },
+    {
+      "source": "polarisation",
+      "target": "bigidea-waves",
+      "type": "EXEMPLIFIES"
+    },
+    {
+      "source": "malus-law",
+      "target": "bigidea-energy",
+      "type": "EXEMPLIFIES"
+    },
+    {
+      "source": "malus-law-formula",
+      "target": "bigidea-energy",
+      "type": "EXEMPLIFIES"
+    },
+    {
+      "source": "use-cro-to-measure-frequency-and-amplitude",
+      "target": "bigidea-measurement",
+      "type": "EXEMPLIFIES"
+    },
+    {
+      "source": "measure-wavelength-from-displacement-distance-graph",
+      "target": "bigidea-measurement",
+      "type": "EXEMPLIFIES"
+    },
+    {
+      "source": "measure-period-from-displacement-time-graph",
+      "target": "bigidea-measurement",
+      "type": "EXEMPLIFIES"
+    },
+    {
+      "source": "superposition",
+      "target": "bigidea-waves",
+      "type": "EXEMPLIFIES"
+    },
+    {
+      "source": "constructive-interference",
+      "target": "bigidea-waves",
+      "type": "EXEMPLIFIES"
+    },
+    {
+      "source": "destructive-interference",
+      "target": "bigidea-waves",
+      "type": "EXEMPLIFIES"
+    },
+    {
+      "source": "stationary-wave",
+      "target": "bigidea-waves",
+      "type": "EXEMPLIFIES"
+    },
+    {
+      "source": "node",
+      "target": "bigidea-waves",
+      "type": "EXEMPLIFIES"
+    },
+    {
+      "source": "antinode",
+      "target": "bigidea-waves",
+      "type": "EXEMPLIFIES"
+    },
+    {
+      "source": "fundamental-frequency",
+      "target": "bigidea-waves",
+      "type": "EXEMPLIFIES"
+    },
+    {
+      "source": "harmonic",
+      "target": "bigidea-waves",
+      "type": "EXEMPLIFIES"
+    },
+    {
+      "source": "diffraction",
+      "target": "bigidea-waves",
+      "type": "EXEMPLIFIES"
+    },
+    {
+      "source": "coherent-light-source",
+      "target": "bigidea-waves",
+      "type": "EXEMPLIFIES"
+    },
+    {
+      "source": "youngs-double-slit-experiment",
+      "target": "bigidea-waves",
+      "type": "EXEMPLIFIES"
+    },
+    {
+      "source": "youngs-double-slit-experiment",
+      "target": "bigidea-measurement",
+      "type": "EXEMPLIFIES"
+    },
+    {
+      "source": "diffraction-grating",
+      "target": "bigidea-waves",
+      "type": "EXEMPLIFIES"
+    },
+    {
+      "source": "order-of-maximum",
+      "target": "bigidea-waves",
+      "type": "EXEMPLIFIES"
+    },
+    {
+      "source": "fringe-spacing-formula",
+      "target": "bigidea-waves",
+      "type": "EXEMPLIFIES"
+    },
+    {
+      "source": "fringe-spacing-formula",
+      "target": "bigidea-measurement",
+      "type": "EXEMPLIFIES"
+    },
+    {
+      "source": "diffraction-grating-formula",
+      "target": "bigidea-waves",
+      "type": "EXEMPLIFIES"
+    },
+    {
+      "source": "vibrating-string-frequency-formula",
+      "target": "bigidea-waves",
+      "type": "EXEMPLIFIES"
+    },
+    {
+      "source": "wave-speed-formula",
+      "target": "bigidea-waves",
+      "type": "EXEMPLIFIES"
+    },
+    {
+      "source": "measure-node-spacing",
+      "target": "bigidea-measurement",
+      "type": "EXEMPLIFIES"
+    },
+    {
+      "source": "derive-diffraction-grating-formula",
+      "target": "bigidea-modeling",
+      "type": "EXEMPLIFIES"
+    },
+    {
+      "source": "electric-current",
+      "target": "bigidea-measurement",
+      "type": "EXEMPLIFIES"
+    },
+    {
+      "source": "charge",
+      "target": "bigidea-conservation",
+      "type": "EXEMPLIFIES"
+    },
+    {
+      "source": "elementary-charge",
+      "target": "bigidea-measurement",
+      "type": "EXEMPLIFIES"
+    },
+    {
+      "source": "i-q-t",
+      "target": "bigidea-measurement",
+      "type": "EXEMPLIFIES"
+    },
+    {
+      "source": "q-it",
+      "target": "bigidea-measurement",
+      "type": "EXEMPLIFIES"
+    },
+    {
+      "source": "i-a-n-v-q",
+      "target": "bigidea-macro-micro",
+      "type": "EXEMPLIFIES"
+    },
+    {
+      "source": "potential-difference",
+      "target": "bigidea-energy",
+      "type": "EXEMPLIFIES"
+    },
+    {
+      "source": "v-w-q",
+      "target": "bigidea-energy",
+      "type": "EXEMPLIFIES"
+    },
+    {
+      "source": "p-e-t",
+      "target": "bigidea-energy",
+      "type": "EXEMPLIFIES"
+    },
+    {
+      "source": "p-vi",
+      "target": "bigidea-energy",
+      "type": "EXEMPLIFIES"
+    },
+    {
+      "source": "p-v-2-r",
+      "target": "bigidea-energy",
+      "type": "EXEMPLIFIES"
+    },
+    {
+      "source": "p-i-2r",
+      "target": "bigidea-energy",
+      "type": "EXEMPLIFIES"
+    },
+    {
+      "source": "resistance",
+      "target": "bigidea-measurement",
+      "type": "EXEMPLIFIES"
+    },
+    {
+      "source": "r-v-i",
+      "target": "bigidea-measurement",
+      "type": "EXEMPLIFIES"
+    },
+    {
+      "source": "ohms-law",
+      "target": "bigidea-modeling",
+      "type": "EXEMPLIFIES"
+    },
+    {
+      "source": "ohmic-conductor",
+      "target": "bigidea-modeling",
+      "type": "EXEMPLIFIES"
+    },
+    {
+      "source": "semiconductor-diode",
+      "target": "bigidea-modeling",
+      "type": "EXEMPLIFIES"
+    },
+    {
+      "source": "filament-lamp",
+      "target": "bigidea-energy",
+      "type": "EXEMPLIFIES"
+    },
+    {
+      "source": "ammeter",
+      "target": "bigidea-measurement",
+      "type": "EXEMPLIFIES"
+    },
+    {
+      "source": "voltmeter",
+      "target": "bigidea-measurement",
+      "type": "EXEMPLIFIES"
+    },
+    {
+      "source": "resistivity",
+      "target": "bigidea-measurement",
+      "type": "EXEMPLIFIES"
+    },
+    {
+      "source": "ra-l",
+      "target": "bigidea-measurement",
+      "type": "EXEMPLIFIES"
+    },
+    {
+      "source": "thermistor",
+      "target": "bigidea-macro-micro",
+      "type": "EXEMPLIFIES"
+    },
+    {
+      "source": "superconductor",
+      "target": "bigidea-modeling",
+      "type": "EXEMPLIFIES"
+    },
+    {
+      "source": "light-dependent-resistor",
+      "target": "bigidea-measurement",
+      "type": "EXEMPLIFIES"
+    },
+    {
+      "source": "derive-i-a-n-v-q",
+      "target": "bigidea-macro-micro",
+      "type": "EXEMPLIFIES"
+    },
+    {
+      "source": "interpret-i-v-graphs",
+      "target": "bigidea-measurement",
+      "type": "EXEMPLIFIES"
+    },
+    {
+      "source": "apply-ohms-law",
+      "target": "bigidea-modeling",
+      "type": "EXEMPLIFIES"
+    },
+    {
+      "source": "internal-resistance",
+      "target": "bigidea-energy",
+      "type": "EXEMPLIFIES"
+    },
+    {
+      "source": "internal-resistance",
+      "target": "bigidea-modeling",
+      "type": "EXEMPLIFIES"
+    },
+    {
+      "source": "e-m-f",
+      "target": "bigidea-energy",
+      "type": "EXEMPLIFIES"
+    },
+    {
+      "source": "terminal-p-d",
+      "target": "bigidea-energy",
+      "type": "EXEMPLIFIES"
+    },
+    {
+      "source": "lost-volts",
+      "target": "bigidea-energy",
+      "type": "EXEMPLIFIES"
+    },
+    {
+      "source": "kirchhoffs-first-law",
+      "target": "bigidea-conservation",
+      "type": "EXEMPLIFIES"
+    },
+    {
+      "source": "kirchhoffs-second-law",
+      "target": "bigidea-conservation",
+      "type": "EXEMPLIFIES"
+    },
+    {
+      "source": "kirchhoffs-second-law",
+      "target": "bigidea-energy",
+      "type": "EXEMPLIFIES"
+    },
+    {
+      "source": "series-circuit",
+      "target": "bigidea-modeling",
+      "type": "EXEMPLIFIES"
+    },
+    {
+      "source": "parallel-circuit",
+      "target": "bigidea-modeling",
+      "type": "EXEMPLIFIES"
+    },
+    {
+      "source": "potential-divider",
+      "target": "bigidea-modeling",
+      "type": "EXEMPLIFIES"
+    },
+    {
+      "source": "variable-potential-divider",
+      "target": "bigidea-modeling",
+      "type": "EXEMPLIFIES"
+    },
+    {
+      "source": "ldr",
+      "target": "bigidea-macro-micro",
+      "type": "EXEMPLIFIES"
+    },
+    {
+      "source": "potentiometer",
+      "target": "bigidea-measurement",
+      "type": "EXEMPLIFIES"
+    },
+    {
+      "source": "null-measurement",
+      "target": "bigidea-measurement",
+      "type": "EXEMPLIFIES"
+    },
+    {
+      "source": "galvanometer",
+      "target": "bigidea-measurement",
+      "type": "EXEMPLIFIES"
+    },
+    {
+      "source": "emf-formula",
+      "target": "bigidea-energy",
+      "type": "EXEMPLIFIES"
+    },
+    {
+      "source": "total-resistance-with-internal-resistance",
+      "target": "bigidea-modeling",
+      "type": "EXEMPLIFIES"
+    },
+    {
+      "source": "emf-total-resistance-current",
+      "target": "bigidea-energy",
+      "type": "EXEMPLIFIES"
+    },
+    {
+      "source": "terminal-p-d-formula",
+      "target": "bigidea-energy",
+      "type": "EXEMPLIFIES"
+    },
+    {
+      "source": "lost-volts-formula",
+      "target": "bigidea-energy",
+      "type": "EXEMPLIFIES"
+    },
+    {
+      "source": "emf-terminal-lost",
+      "target": "bigidea-energy",
+      "type": "EXEMPLIFIES"
+    },
+    {
+      "source": "series-total-voltage",
+      "target": "bigidea-conservation",
+      "type": "EXEMPLIFIES"
+    },
+    {
+      "source": "series-total-resistance",
+      "target": "bigidea-modeling",
+      "type": "EXEMPLIFIES"
+    },
+    {
+      "source": "parallel-total-voltage",
+      "target": "bigidea-conservation",
+      "type": "EXEMPLIFIES"
+    },
+    {
+      "source": "parallel-total-resistance",
+      "target": "bigidea-modeling",
+      "type": "EXEMPLIFIES"
+    },
+    {
+      "source": "potential-divider-formula",
+      "target": "bigidea-modeling",
+      "type": "EXEMPLIFIES"
+    },
+    {
+      "source": "null-measurement-formula",
+      "target": "bigidea-measurement",
+      "type": "EXEMPLIFIES"
+    },
+    {
+      "source": "calculate-total-resistance",
+      "target": "bigidea-modeling",
+      "type": "EXEMPLIFIES"
+    },
+    {
+      "source": "measure-emf",
+      "target": "bigidea-measurement",
+      "type": "EXEMPLIFIES"
+    },
+    {
+      "source": "apply-kirchhoffs-laws",
+      "target": "bigidea-conservation",
+      "type": "EXEMPLIFIES"
+    },
+    {
+      "source": "use-potential-divider",
+      "target": "bigidea-modeling",
+      "type": "EXEMPLIFIES"
+    },
+    {
+      "source": "perform-null-measurement",
+      "target": "bigidea-measurement",
+      "type": "EXEMPLIFIES"
+    },
+    {
+      "source": "rutherford-scattering",
+      "target": "bigidea-modeling",
+      "type": "EXEMPLIFIES"
+    },
+    {
+      "source": "nucleus",
+      "target": "bigidea-modeling",
+      "type": "EXEMPLIFIES"
+    },
+    {
+      "source": "specific-charge",
+      "target": "bigidea-measurement",
+      "type": "EXEMPLIFIES"
+    },
+    {
+      "source": "radiation",
+      "target": "bigidea-energy",
+      "type": "EXEMPLIFIES"
+    },
+    {
+      "source": "unified-atomic-mass-unit",
+      "target": "bigidea-measurement",
+      "type": "EXEMPLIFIES"
+    },
+    {
+      "source": "alpha-decay",
+      "target": "bigidea-conservation",
+      "type": "EXEMPLIFIES"
+    },
+    {
+      "source": "beta-minus-decay",
+      "target": "bigidea-conservation",
+      "type": "EXEMPLIFIES"
+    },
+    {
+      "source": "beta-plus-decay",
+      "target": "bigidea-conservation",
+      "type": "EXEMPLIFIES"
+    },
+    {
+      "source": "quarks",
+      "target": "bigidea-macro-micro",
+      "type": "EXEMPLIFIES"
+    },
+    {
+      "source": "hadrons",
+      "target": "bigidea-macro-micro",
+      "type": "EXEMPLIFIES"
+    },
+    {
+      "source": "baryons",
+      "target": "bigidea-macro-micro",
+      "type": "EXEMPLIFIES"
+    },
+    {
+      "source": "mesons",
+      "target": "bigidea-macro-micro",
+      "type": "EXEMPLIFIES"
+    },
+    {
+      "source": "leptons",
+      "target": "bigidea-macro-micro",
+      "type": "EXEMPLIFIES"
+    },
+    {
+      "source": "conservation-of-charge",
+      "target": "bigidea-conservation",
+      "type": "EXEMPLIFIES"
+    },
+    {
+      "source": "conservation-of-nucleons",
+      "target": "bigidea-conservation",
+      "type": "EXEMPLIFIES"
+    },
+    {
+      "source": "conservation-of-lepton-number",
+      "target": "bigidea-conservation",
+      "type": "EXEMPLIFIES"
+    },
+    {
+      "source": "specific-charge-formula",
+      "target": "bigidea-measurement",
+      "type": "EXEMPLIFIES"
+    },
+    {
+      "source": "alpha-decay-equation",
+      "target": "bigidea-conservation",
+      "type": "EXEMPLIFIES"
+    },
+    {
+      "source": "beta-minus-decay-equation",
+      "target": "bigidea-conservation",
+      "type": "EXEMPLIFIES"
+    },
+    {
+      "source": "beta-plus-decay-equation",
+      "target": "bigidea-conservation",
+      "type": "EXEMPLIFIES"
+    },
+    {
+      "source": "proton-composition",
+      "target": "bigidea-macro-micro",
+      "type": "EXEMPLIFIES"
+    },
+    {
+      "source": "neutron-composition",
+      "target": "bigidea-macro-micro",
+      "type": "EXEMPLIFIES"
+    },
+    {
+      "source": "beta-minus-quark-change",
+      "target": "bigidea-conservation",
+      "type": "EXEMPLIFIES"
+    },
+    {
+      "source": "beta-plus-quark-change",
+      "target": "bigidea-conservation",
+      "type": "EXEMPLIFIES"
+    },
+    {
+      "source": "draw-rutherford-scattering-diagram",
+      "target": "bigidea-modeling",
+      "type": "EXEMPLIFIES"
+    },
+    {
+      "source": "calculate-specific-charge",
+      "target": "bigidea-measurement",
+      "type": "EXEMPLIFIES"
+    },
+    {
+      "source": "write-nuclear-equations",
+      "target": "bigidea-conservation",
+      "type": "EXEMPLIFIES"
+    },
+    {
+      "source": "determine-quark-composition",
+      "target": "bigidea-macro-micro",
+      "type": "EXEMPLIFIES"
+    },
+    {
+      "source": "derive-i-a-n-v-q",
+      "target": "topic-ch09",
+      "type": "BELONGS_TO"
+    },
+    {
+      "source": "draw-a-tangent",
+      "target": "topic-ch02",
+      "type": "BELONGS_TO"
+    },
+    {
+      "source": "interpret-i-v-graphs",
+      "target": "topic-ch09",
+      "type": "BELONGS_TO"
+    },
+    {
+      "source": "measure-young-modulus-of-a-metal-wire",
+      "target": "topic-ch06",
+      "type": "BELONGS_TO"
+    },
+    {
+      "source": "f-g-v",
+      "target": "topic-ch04",
+      "type": "BELONGS_TO"
+    },
+    {
+      "source": "i-a-n-v-q",
+      "target": "topic-ch09",
+      "type": "BELONGS_TO"
+    },
+    {
+      "source": "m-v",
+      "target": "topic-ch04",
+      "type": "BELONGS_TO"
+    },
+    {
+      "source": "moment-f-d",
+      "target": "topic-ch04",
+      "type": "BELONGS_TO"
+    },
+    {
+      "source": "p-f-a",
+      "target": "topic-ch04",
+      "type": "BELONGS_TO"
+    },
+    {
+      "source": "p-g-h",
+      "target": "topic-ch04",
+      "type": "BELONGS_TO"
+    },
+    {
+      "source": "p-i-2r",
+      "target": "topic-ch09",
+      "type": "BELONGS_TO"
+    },
+    {
+      "source": "p-v-2-r",
+      "target": "topic-ch09",
+      "type": "BELONGS_TO"
+    },
+    {
+      "source": "ra-l",
+      "target": "topic-ch09",
+      "type": "BELONGS_TO"
+    },
+    {
+      "source": "relative-speed-of-approach-relative-speed-of-separation",
+      "target": "topic-ch03",
+      "type": "BELONGS_TO"
+    },
+    {
+      "source": "terminal-p-d-formula",
+      "target": "topic-ch10",
+      "type": "BELONGS_TO"
+    },
+    {
+      "source": "torque-of-couple-f-d",
+      "target": "topic-ch04",
+      "type": "BELONGS_TO"
+    },
+    {
+      "source": "weight-mg",
+      "target": "topic-ch03",
+      "type": "BELONGS_TO"
+    }
+  ]
+}

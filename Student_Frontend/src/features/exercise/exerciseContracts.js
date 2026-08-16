@@ -1,6 +1,7 @@
 const supportedQuestionTypes = new Set(['choice', 'fill_blank', 'calculation', 'proof', 'reading', 'writing'])
 const isRecord = (value) => value !== null && typeof value === 'object' && !Array.isArray(value)
 const isNonemptyString = (value) => typeof value === 'string' && value.trim().length > 0
+const hasMarkScheme = (value) => isNonemptyString(value) || (Array.isArray(value) && value.length > 0 && value.every(isRecord))
 
 function hasCompleteHints(hints) {
   if (!Array.isArray(hints) || hints.length !== 5) return false
@@ -25,20 +26,20 @@ function isRenderableQuestion(question) {
     || !Number.isFinite(question.order)
     || !Number.isFinite(question.difficulty)
     || !supportedQuestionTypes.has(question.type)
-    || !isNonemptyString(question.correctDisplay)
-    || !isNonemptyString(question.errorType)
-    || !Array.isArray(question.acceptKeywords)
-    || question.acceptKeywords.length === 0
-    || !question.acceptKeywords.every(isNonemptyString)
     || !hasCompleteHints(question.hints)) return false
 
-  if (question.type !== 'choice') return true
-  return Array.isArray(question.options)
-    && question.options.length > 0
-    && question.options.every(isNonemptyString)
-    && Number.isInteger(question.correctIndex)
-    && question.correctIndex >= 0
-    && question.correctIndex < question.options.length
+  if (question.type === 'choice') {
+    return Array.isArray(question.options)
+      && question.options.length > 0
+      && question.options.every(isNonemptyString)
+      && Number.isInteger(question.correctIndex)
+      && question.correctIndex >= 0
+      && question.correctIndex < question.options.length
+  }
+
+  // Free-response questions need a gradeable standard: markScheme, or a concise
+  // correct answer as a fallback.
+  return hasMarkScheme(question.markScheme) || isNonemptyString(question.correctDisplay)
 }
 
 export function isRenderableExerciseSet(exerciseSet) {

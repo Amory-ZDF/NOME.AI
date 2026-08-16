@@ -258,6 +258,7 @@ const exactSummary = sessionSummarySchema.parse({
   errorDistribution: {},
   topicOutcomes: [{ topic: 'Calculus', correct: 1, wrong: 0 }],
   wrongQuestions: [],
+  errorQuestions: [],
 })
 
 function exactEmptyBootstrap() {

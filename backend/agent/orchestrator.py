@@ -46,6 +46,8 @@ from core.types import (
 from core.llm_client import LLMClient
 from skill.common import SkillDomain
 from skill.loader import load_skill, SkillLoadError
+from tool.knowledge_graph import KnowledgeGraph
+from memory.retriever import MemoryRetriever
 
 logger = logging.getLogger(__name__)
 
@@ -89,9 +91,20 @@ class Orchestrator:
         4. Converts the Pydantic model into a core.types dataclass.
     """
 
-    def __init__(self, client: LLMClient, provider: str = "deepseek") -> None:
+    def __init__(
+        self,
+        client: LLMClient,
+        provider: str = "deepseek",
+        knowledge_graph: KnowledgeGraph | None = None,
+        memory_retriever: MemoryRetriever | None = None,
+    ) -> None:
         self.client = client
         self.provider = provider
+        # Optional graph + memory wiring. When present, the framework skill is fed
+        # deterministically-computed node_states / prerequisite chains instead of an
+        # empty stub (LLM brain-drawing is the fallback, not the source of truth).
+        self._knowledge_graph = knowledge_graph
+        self._memory_retriever = memory_retriever
 
         self._skill_prompts: dict[SkillDomain, str] = {}
         self._skill_schemas: dict[SkillDomain, type[BaseModel]] = {}
@@ -121,7 +134,7 @@ class Orchestrator:
         """
         results: list[AgentResponse] = []
         for question, progress in questions:
-            response = await self.handle(question, progress, error_history)
+            response = await self.handle(student_id, question, progress, error_history)
             results.append(response)
         return results
 
@@ -129,6 +142,7 @@ class Orchestrator:
 
     async def handle(
         self,
+        student_id: str,
         question: QuestionContext,
         progress: StudentProgress,
         error_history: list[ErrorRecord] | None = None,
@@ -141,22 +155,32 @@ class Orchestrator:
             3. If confidence < 0.7 → return counter_question.
             4. Route: error_type determines framework, question.type determines hint.
         """
-        # Answer is correct — nothing to do
+        # Already graded correct by the caller (choice questions pre-grade locally)
         if progress.status == "correct":
-            return AgentResponse()
+            return AgentResponse(is_correct=True)
 
-        # Step 1: Diagnosis always runs first
+        # Free-response questions are NOT pre-graded by the caller, so the
+        # diagnosis run doubles as the grader: the LLM first decides whether the
+        # answer is correct, then only diagnoses when it is wrong.
+        grade_answer = progress.status not in ("correct", "wrong")
+
+        # Step 1: Diagnosis always runs first (with grading when ungraded)
         diagnosis = await self._run_diagnosis(
-            question, progress, error_history
+            question, progress, error_history, grade_answer=grade_answer
         )
         if diagnosis is None:
             return AgentResponse()
+
+        # LLM grading verdict for an ungraded submission
+        if grade_answer and diagnosis.is_correct is True:
+            return AgentResponse(is_correct=True)
 
         # Step 2: Counter-question when uncertain
         if diagnosis.counter_question is not None:
             return AgentResponse(
                 diagnosis=diagnosis,
                 counter_question=diagnosis.counter_question,
+                is_correct=diagnosis.is_correct,
             )
 
         # Step 3: Framework — only when field-constrained conditions are met
@@ -164,7 +188,7 @@ class Orchestrator:
         if self._should_run_framework(diagnosis, question, error_history):
             try:
                 framework = await self._run_framework(
-                    question, progress, diagnosis, error_history
+                    student_id, question, progress, diagnosis, error_history
                 )
             except Exception as exc:
                 logger.warning("Framework failed, continuing without it: %s", exc)
@@ -178,10 +202,12 @@ class Orchestrator:
             hint=hint,
             diagnosis=diagnosis,
             framework=framework,
+            is_correct=diagnosis.is_correct,
         )
 
     async def handle_counter_reply(
         self,
+        student_id: str,
         question: QuestionContext,
         progress: StudentProgress,
         error_history: list[ErrorRecord] | None,
@@ -209,7 +235,7 @@ class Orchestrator:
         if self._should_run_framework(diagnosis, question, error_history):
             try:
                 framework = await self._run_framework(
-                    question, progress, diagnosis, error_history
+                    student_id, question, progress, diagnosis, error_history
                 )
             except Exception as exc:
                 logger.warning("Framework failed: %s", exc)
@@ -223,6 +249,21 @@ class Orchestrator:
             diagnosis=diagnosis,
             framework=framework,
         )
+
+    # ---- Public API: isolated hint generation ----------------------------
+
+    async def generate_hint(
+        self,
+        question: QuestionContext,
+        progress: StudentProgress,
+    ) -> HintResult | None:
+        """Generate the next hint layer for a question, independent of diagnosis.
+
+        Called by the per-layer unlock endpoint. The hint is generated from the
+        question + attempt context alone; no diagnosis is required (the hint
+        skill falls back to generic guidance when none exists).
+        """
+        return await self._generate_hint(question, progress, None, None)
 
     # ---- Internal: field-constrained routing ---------------------------
 
@@ -266,6 +307,7 @@ class Orchestrator:
         progress: StudentProgress,
         error_history: list[ErrorRecord] | None = None,
         counter_reply: str | None = None,
+        grade_answer: bool = False,
     ) -> DiagnosisResult | None:
         """Execute error_diagnosis skill."""
         domain = SkillDomain.ERROR_DIAGNOSIS
@@ -280,6 +322,7 @@ class Orchestrator:
             progress=progress,
             error_history=error_history,
             counter_reply=counter_reply,
+            grade_answer=grade_answer,
         )
 
         pydantic_result = await self.client.chat_structured(
@@ -292,12 +335,20 @@ class Orchestrator:
 
     async def _run_framework(
         self,
+        student_id: str,
         question: QuestionContext,
         progress: StudentProgress,
         diagnosis: DiagnosisResult,
         error_history: list[ErrorRecord] | None = None,
     ) -> FrameworkResult | None:
-        """Execute knowledge_framework skill."""
+        """Execute knowledge_framework skill.
+
+        Pre-computes the graph traversal + decay-weighted mastery deterministically
+        (via KnowledgeGraph.get_prerequisite_chain + MemoryRetriever.get_node_states)
+        and hands the result to the LLM, which only writes the narrative. Without a
+        wired graph/memory, node_states falls back to {} and the LLM has nothing to
+        ground its weak-link claims in.
+        """
         domain = SkillDomain.KNOWLEDGE_FRAMEWORK
         prompt = self._skill_prompts.get(domain)
         output_model = self._skill_schemas.get(domain)
@@ -305,10 +356,17 @@ class Orchestrator:
             logger.error("KnowledgeFramework skill not available")
             return None
 
+        prerequisite_chain, node_states, weak_links = await self._precompute_framework(
+            student_id, question.knowledge_node_id
+        )
+
         user_message = _build_framework_message(
             question=question,
             diagnosis=diagnosis,
             error_history=error_history,
+            node_states=node_states,
+            prerequisite_chain=prerequisite_chain,
+            weak_links=weak_links,
         )
 
         pydantic_result = await self.client.chat_structured(
@@ -318,6 +376,49 @@ class Orchestrator:
             output_model=output_model,
         )
         return _pydantic_to_framework_result(pydantic_result)
+
+    async def _precompute_framework(
+        self,
+        student_id: str,
+        node_id: str | None,
+    ) -> tuple[list[dict[str, Any]], dict[str, float], list[dict[str, Any]]]:
+        """Deterministically compute the framework's evidence inputs.
+
+        Returns (prerequisite_chain, node_states, weak_links):
+            - prerequisite_chain: upstream nodes (with depth) from the graph BFS.
+            - node_states: {node_id: decay-weighted mastery} from memory.
+            - weak_links: chain nodes with mastery < 0.6, sorted (depth, mastery).
+
+        All three are empty when the graph/memory are unwired (pre-Flow C), so the
+        LLM falls back to its own judgment rather than fabricating grounded data.
+        """
+        graph = self._knowledge_graph
+        memory = self._memory_retriever
+
+        if graph is None or node_id is None:
+            return [], {}, []
+
+        chain = graph.get_prerequisite_chain(node_id)
+        if not chain:
+            return [], {}, []
+
+        node_ids = [node.get("id", "") for node in chain]
+        node_ids = [nid for nid in node_ids if nid]
+
+        node_states: dict[str, float] = {}
+        if memory is not None:
+            try:
+                node_states = await memory.get_node_states(student_id, node_ids)
+            except Exception as exc:
+                logger.warning("node_states computation failed: %s", exc)
+
+        weak_links: list[dict[str, Any]] = []
+        try:
+            weak_links = graph.find_weak_links(node_id, node_states, threshold=0.6)
+        except Exception as exc:
+            logger.warning("find_weak_links failed: %s", exc)
+
+        return chain, node_states, weak_links
 
     async def _generate_hint(
         self,
@@ -355,10 +456,20 @@ class Orchestrator:
             logger.error("ProgressiveHint skill not available")
             return None
 
+        # A hint can be requested on its own (per-layer unlock) before any
+        # diagnosis exists. Feed the hint skill a minimal fallback so it still
+        # generates generic, level-appropriate guidance instead of erroring.
+        effective_diagnosis = diagnosis or DiagnosisResult(
+            error_type=None,
+            confidence=1.0,
+            where_wrong="",
+            why_wrong="",
+        )
+
         user_message = _build_hint_message(
             question=question,
             progress=progress,
-            diagnosis=diagnosis,
+            diagnosis=effective_diagnosis,
             framework=framework,
             max_level=max_level,
         )
@@ -382,6 +493,7 @@ def _build_diagnosis_message(
     progress: StudentProgress,
     error_history: list[ErrorRecord] | None = None,
     counter_reply: str | None = None,
+    grade_answer: bool = False,
 ) -> str:
     """Build the user message for error_diagnosis.
 
@@ -396,6 +508,10 @@ def _build_diagnosis_message(
             "difficulty": question.difficulty,
             "content": question.content,
             "correct_answer": question.correct_answer,
+            "mark_scheme": question.mark_scheme,
+            "image_description": question.image_description,
+            "options": question.options,
+            "correct_index": question.correct_index,
             "knowledge_node_id": question.knowledge_node_id,
         },
         "student": {
@@ -419,6 +535,7 @@ def _build_diagnosis_message(
             ),
         },
         "counter_reply": counter_reply,
+        "grade_answer": grade_answer,
     }
     import json
     return json.dumps(payload, ensure_ascii=False, indent=2)
@@ -428,10 +545,15 @@ def _build_framework_message(
     question: QuestionContext,
     diagnosis: DiagnosisResult,
     error_history: list[ErrorRecord] | None = None,
+    node_states: dict[str, float] | None = None,
+    prerequisite_chain: list[dict[str, Any]] | None = None,
+    weak_links: list[dict[str, Any]] | None = None,
 ) -> str:
     """Build the user message for knowledge_framework.
 
-    Matches knowledge_framework/SKILL.md Input schema.
+    Matches knowledge_framework/SKILL.md Input schema. `node_states`,
+    `prerequisite_chain` and `weak_links` are pre-computed deterministically by the
+    orchestrator (graph BFS + decay-weighted memory), NOT hallucinated by the LLM.
     """
     payload: dict[str, Any] = {
         "error_node_id": question.knowledge_node_id,
@@ -456,7 +578,11 @@ def _build_framework_message(
                 if error_history
                 else []
             ),
-            "node_states": {},  # TODO: populated by MemoryRetriever when integrated
+            "node_states": node_states or {},
+        },
+        "graph": {
+            "prerequisite_chain": prerequisite_chain or [],
+            "weak_links": weak_links or [],
         },
     }
     import json
@@ -530,6 +656,7 @@ def _pydantic_to_diagnosis_result(model: BaseModel) -> DiagnosisResult:
         linked_knowledge=getattr(model, "linked_knowledge", []),
         understanding_explanation=getattr(model, "understanding_explanation", None),
         scoring_explanation=getattr(model, "scoring_explanation", None),
+        is_correct=getattr(model, "is_correct", None),
     )
 
 

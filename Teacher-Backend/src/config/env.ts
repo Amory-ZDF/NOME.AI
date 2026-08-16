@@ -48,6 +48,7 @@ const envSchema = z
     HOST: z.string().trim().min(1, 'must not be empty').default('127.0.0.1'),
     PORT: z.coerce.number().int().min(1).max(65_535).default(3002),
     DATABASE_URL: sqliteDatabaseUrlSchema,
+    INSIGHTS_DATABASE_URL: z.string().trim().min(1, 'must not be empty').optional(),
     TEACHER_ID: z.string().trim().min(1, 'must not be empty').optional(),
     CORS_ORIGINS: z
       .string()

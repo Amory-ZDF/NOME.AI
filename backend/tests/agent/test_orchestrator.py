@@ -123,3 +123,48 @@ class TestPlanner:
         import pytest as pt
         with pt.raises(ValueError):
             Planner._parse_plan('{"steps": [], "reasoning": "nothing"}')
+
+    def test_generate_hint_without_diagnosis_falls_back(self):
+        """generate_hint works when no diagnosis exists (per-layer unlock).
+
+        The hint skill needs a DiagnosisResult; when the student unlocks a hint
+        before any diagnosis, the orchestrator must feed a minimal fallback
+        (error_type=None) instead of erroring.
+        """
+        from agent.orchestrator import Orchestrator, _build_hint_message
+
+        class FakeClient:
+            async def chat_structured(self, provider, system, messages, output_model):
+                from skill.progressive_hint.schema import HintOutput
+                return HintOutput(
+                    level=1,
+                    title="Clarify the Question",
+                    content="Focus on what the question asks for.",
+                )
+
+        orch = Orchestrator(FakeClient(), provider="deepseek")
+        question = QuestionContext(
+            id="q1",
+            topic="Kinematics",
+            type=QuestionType.CALCULATION,
+            difficulty=2,
+            content="A car accelerates uniformly from rest at 2 m/s² for 5 s. Find distance.",
+            correct_answer="s = ½at² = 25 m",
+        )
+        progress = StudentProgress(
+            question_id="q1",
+            current_answer="s = at",
+            status="wrong",
+            hint_level=1,
+            solved_at_hint_level=None,
+        )
+
+        # The message builder must accept a fallback diagnosis (error_type=None).
+        fallback = DiagnosisResult(error_type=None, where_wrong="", why_wrong="")
+        message = _build_hint_message(question, progress, fallback, None, max_level=5)
+        assert '"error_type": null' in message
+
+        import asyncio
+        hint = asyncio.run(orch.generate_hint(question, progress))
+        assert hint is not None
+        assert hint.level == 1

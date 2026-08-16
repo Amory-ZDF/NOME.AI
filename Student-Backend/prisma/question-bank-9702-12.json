@@ -1,0 +1,762 @@
+{
+  "subject": "AS Physics",
+  "exerciseSets": [
+    {
+      "id": "bank-9702-12-ch01",
+      "title": "June 2011 9702/12 — Physical Quantities and Units",
+      "topic": "Physical Quantities and Units",
+      "questions": [
+        {
+          "id": "q-9702-12-01",
+          "type": "choice",
+          "difficulty": 2,
+          "content": "Stress has the same SI base units as",
+          "options": [
+            "mass × force",
+            "force / length",
+            "force / area",
+            "energy"
+          ],
+          "correctIndex": 2,
+          "correctDisplay": "force / area",
+          "knowledgeNodeId": "derived-units",
+          "understandingExplanation": "Stress = force/area, so its SI base units are kg·m⁻¹·s⁻², which are the same as force/area.",
+          "scoringExplanation": "判断应力与哪个物理量具有相同的SI基本单位"
+        },
+        {
+          "id": "q-9702-12-02",
+          "type": "choice",
+          "difficulty": 2,
+          "content": "To check calculations, the units are put into the following equations together with the numbers. Which equation must be incorrect?",
+          "options": [
+            "force = 300 J / 6 m",
+            "power = 6000 J × 20 s",
+            "time = 6 m / 30 m s⁻¹",
+            "velocity = 4 m s⁻² × 30 s"
+          ],
+          "correctIndex": 1,
+          "correctDisplay": "power = 6000 J × 20 s",
+          "knowledgeNodeId": "homogeneous-equation",
+          "understandingExplanation": "Power has units of watts (W = J/s). Option B gives J × s, which is not equivalent to J/s, so the equation is dimensionally incorrect.",
+          "scoringExplanation": "通过单位检验判断方程的量纲一致性"
+        },
+        {
+          "id": "q-9702-12-03",
+          "type": "choice",
+          "difficulty": 3,
+          "content": "In making reasonable estimates of physical quantities, which statement is not correct?",
+          "options": [
+            "The frequency of sound can be of the order of GHz.",
+            "The wavelength of light can be of the order of 600 nm.",
+            "The Young modulus can be of the order of 10¹¹ Pa.",
+            "Beta radiation is associated with one unit of negative charge."
+          ],
+          "correctIndex": 0,
+          "correctDisplay": "The frequency of sound can be of the order of GHz.",
+          "knowledgeNodeId": "estimation",
+          "understandingExplanation": "Sound frequencies are typically in the range of 20 Hz to 20 kHz (audible range), not GHz (10⁹ Hz). GHz frequencies are in the microwave/radio wave range, not sound.",
+          "scoringExplanation": "对物理量的数量级进行合理估算"
+        },
+        {
+          "id": "q-9702-12-04",
+          "type": "choice",
+          "difficulty": 3,
+          "content": "The uncertainty in the value of the momentum of a trolley passing between two points X and Y varies with the choice of measuring devices. Measurements for the same trolley made by different instruments were recorded. Which measurements, one for each quantity measured, lead to the least uncertainty in the value of the momentum of the trolley?",
+          "options": [
+            "1, 3 and 6",
+            "1, 3 and 5",
+            "2, 4 and 6",
+            "2, 4 and 5"
+          ],
+          "correctIndex": 3,
+          "correctDisplay": "2, 4 and 5",
+          "knowledgeNodeId": "combining-uncertainties",
+          "understandingExplanation": "To minimize uncertainty in momentum (p = mv), we need the most precise measurements for distance, time, and mass. Using the mm rule (0.547 m), light gates (0.1 s precision), and balance measuring to nearest gram (6.4×10⁻² kg) gives the smallest relative uncertainties.",
+          "scoringExplanation": "选择测量仪器以最小化动量的不确定度"
+        }
+      ]
+    },
+    {
+      "id": "bank-9702-12-ch02",
+      "title": "June 2011 9702/12 — Kinematics",
+      "topic": "Kinematics",
+      "questions": [
+        {
+          "id": "q-9702-12-06",
+          "type": "choice",
+          "difficulty": 3,
+          "content": "A bullet is fired horizontally with speed v from a rifle. For a short time t after leaving the rifle, the only force affecting its motion is gravity. The acceleration of free fall is g. Which expression gives the value of (vertical distance travelled) / (horizontal distance travelled × time)?",
+          "options": [
+            "vt / g",
+            "gt / v",
+            "vt² / g",
+            "v² / gt"
+          ],
+          "correctIndex": 3,
+          "correctDisplay": "v² / gt",
+          "knowledgeNodeId": "projectile-motion",
+          "understandingExplanation": "For horizontal projectile motion: horizontal distance = vt, vertical distance = ½gt². The required ratio involves combining these expressions with the given variables to obtain v²/gt.",
+          "scoringExplanation": "利用平抛运动的运动学关系推导表达式"
+        },
+        {
+          "id": "q-9702-12-07",
+          "type": "choice",
+          "difficulty": 3,
+          "content": "A particle moves in the manner shown by the velocity-time graph. The displacement of the particle has been measured so that it is zero at t = 0. Point Q refers to a point in its motion. Fig: A velocity-time graph with velocity (m/s) on the y-axis and time (s) on the x-axis. The graph shows velocity increasing from zero to a maximum, then decreasing, crossing zero at t = 5 s, and becoming negative. Point Q is marked at the peak of the graph where the gradient is zero.",
+          "options": [
+            "2.5 s, 12.5 m s⁻²",
+            "5 s, 15 m s⁻²",
+            "2.5 s, 0 m s⁻²",
+            "5 s, 0 m s⁻²"
+          ],
+          "correctIndex": 3,
+          "correctDisplay": "5 s, 0 m s⁻²",
+          "knowledgeNodeId": "acceleration",
+          "understandingExplanation": "Maximum displacement occurs when the velocity changes sign (from positive to negative), which is at t = 5 s. At point Q (the peak of the v-t graph), the gradient is zero, so acceleration = 0 m s⁻².",
+          "scoringExplanation": "通过速度-时间图像分析位移最大值和加速度"
+        },
+        {
+          "id": "q-9702-12-08",
+          "type": "choice",
+          "difficulty": 2,
+          "content": "A tennis ball falls freely, in air, from the top of a tall building. Which graph best represents the variation of distance s fallen with time t?",
+          "options": [
+            "s increases with t with increasing gradient (curve concave up)",
+            "s increases with t with decreasing gradient (curve concave down)",
+            "s is constant with t",
+            "s decreases with t"
+          ],
+          "correctIndex": 0,
+          "correctDisplay": "s increases with t with increasing gradient (curve concave up)",
+          "knowledgeNodeId": "uniform-acceleration",
+          "understandingExplanation": "For free fall from rest, s = ½gt², so the s-t graph is a parabola opening upwards (increasing gradient), representing increasing speed.",
+          "scoringExplanation": "判断自由落体运动中距离与时间的关系图像"
+        },
+        {
+          "id": "q-9702-12-14",
+          "type": "choice",
+          "difficulty": 3,
+          "content": "A stone is projected horizontally in a vacuum and moves along the path shown. Fig: A stone follows a curved (parabolic) path after being projected horizontally. Point X is on the path. XV is a vertical line through X (downwards), XH is a horizontal line through X, and XT is the tangent to the path at X. Along which directions do forces act on the stone at X?",
+          "options": [
+            "XV only",
+            "XH only",
+            "XV and XH",
+            "XT only"
+          ],
+          "correctIndex": 0,
+          "correctDisplay": "XV only",
+          "knowledgeNodeId": "projectile-motion",
+          "understandingExplanation": "In projectile motion in a vacuum, the only force acting is gravity, which acts vertically downwards. At point X, the force acts along XV (vertically downwards).",
+          "scoringExplanation": "判断抛体运动中力的方向"
+        }
+      ]
+    },
+    {
+      "id": "bank-9702-12-ch03",
+      "title": "June 2011 9702/12 — Dynamics",
+      "topic": "Dynamics",
+      "questions": [
+        {
+          "id": "q-9702-12-09",
+          "type": "choice",
+          "difficulty": 3,
+          "content": "A small glider moves along a friction-free horizontal air track as shown below. At each end of the air track there is a perfectly elastic buffer. Which graph represents the variation with time t of the velocity v of the glider as it moves between the two buffers?",
+          "options": [
+            "sinusoidal wave (smooth oscillation)",
+            "linearly increasing then decreasing (triangle wave)",
+            "exponential decay",
+            "square wave (constant +v, instant reversal to constant -v, repeating)"
+          ],
+          "correctIndex": 3,
+          "correctDisplay": "square wave (constant +v, instant reversal to constant -v, repeating)",
+          "knowledgeNodeId": "elastic-collision",
+          "understandingExplanation": "On a friction-free track, the glider moves at constant velocity between perfectly elastic collisions with the buffers. Each collision reverses the velocity instantaneously, producing a square wave pattern.",
+          "scoringExplanation": "分析弹性碰撞中速度与时间的关系图像"
+        },
+        {
+          "id": "q-9702-12-10",
+          "type": "choice",
+          "difficulty": 2,
+          "content": "A force F is applied to a freely moving object. At one instant of time, the object has velocity v and acceleration a. Which quantities must be in the same direction?",
+          "options": [
+            "a and v only",
+            "a and F only",
+            "v and F only",
+            "v, F and a"
+          ],
+          "correctIndex": 1,
+          "correctDisplay": "a and F only",
+          "knowledgeNodeId": "newtons-second-law",
+          "understandingExplanation": "By Newton's second law (F = ma), the acceleration a is always in the same direction as the resultant force F. Velocity v may be in a different direction.",
+          "scoringExplanation": "根据牛顿第二定律判断力、加速度和速度的方向关系"
+        },
+        {
+          "id": "q-9702-12-11",
+          "type": "choice",
+          "difficulty": 2,
+          "content": "The momentum of an object changes from 160 kg m s⁻¹ to 240 kg m s⁻¹ in 2 s. What is the mean resultant force on the object during the change?",
+          "options": [
+            "40 N",
+            "80 N",
+            "200 N",
+            "400 N"
+          ],
+          "correctIndex": 0,
+          "correctDisplay": "40 N",
+          "knowledgeNodeId": "force-rate-of-change-of-momentum",
+          "understandingExplanation": "Mean force = change in momentum / time = (240 - 160) / 2 = 80 / 2 = 40 N.",
+          "scoringExplanation": "利用动量变化率计算平均合力"
+        },
+        {
+          "id": "q-9702-12-12",
+          "type": "choice",
+          "difficulty": 3,
+          "content": "A car accelerates in a straight line. A graph of the momentum of the car is plotted against time. What is evaluated by finding the gradient of the graph at a particular time?",
+          "options": [
+            "the acceleration of the car",
+            "the resultant force on the car",
+            "the kinetic energy of the car",
+            "the power supplied to the car"
+          ],
+          "correctIndex": 1,
+          "correctDisplay": "the resultant force on the car",
+          "knowledgeNodeId": "force-rate-of-change-of-momentum",
+          "understandingExplanation": "The gradient of a momentum-time graph gives dp/dt, which by Newton's second law equals the resultant force F.",
+          "scoringExplanation": "理解动量-时间图像斜率的物理意义"
+        },
+        {
+          "id": "q-9702-12-13",
+          "type": "choice",
+          "difficulty": 3,
+          "content": "The diagram shows a particle P, travelling at speed v, about to collide with a stationary particle Q of the same mass. The collision is perfectly elastic. Fig: Particle P is shown moving with velocity v towards stationary particle Q. Both particles have the same mass. Which statement describes the motion of P and of Q immediately after the collision?",
+          "options": [
+            "P rebounds with speed v/2 and Q acquires speed v/2.",
+            "P rebounds with speed v and Q remains stationary.",
+            "P and Q both travel in the same direction with speed v/2.",
+            "P comes to a standstill and Q acquires speed v."
+          ],
+          "correctIndex": 3,
+          "correctDisplay": "P comes to a standstill and Q acquires speed v.",
+          "knowledgeNodeId": "elastic-collision",
+          "understandingExplanation": "In a perfectly elastic collision between two objects of equal mass where one is initially at rest, the moving object comes to rest and the stationary object acquires the full velocity of the first.",
+          "scoringExplanation": "分析等质量粒子的完全弹性碰撞"
+        },
+        {
+          "id": "q-9702-12-17",
+          "type": "choice",
+          "difficulty": 3,
+          "content": "The diagram shows two fixed pins, Y and Z. A length of elastic is stretched between Y and Z and around pin X, which is attached to a trolley. Fig: Two fixed pins Y and Z with an elastic stretched between them and around pin X on a trolley. The elastic forms two segments. The geometry forms a right-angled triangle with sides 30 mm, 40 mm, and 50 mm. The tension in the elastic is 4 N. The trolley is propelled in direction P at right angles to YZ. What is the force accelerating the trolley in the direction P when the trolley is released?",
+          "options": [
+            "2.4 N",
+            "3.2 N",
+            "4.8 N",
+            "6.4 N"
+          ],
+          "correctIndex": 2,
+          "correctDisplay": "4.8 N",
+          "knowledgeNodeId": "resultant-force",
+          "understandingExplanation": "The tension in each segment of the elastic is 4 N. Resolving the two tension forces along direction P (the perpendicular bisector), the resultant force = 2 × 4 × (40/50) = 4.8 N.",
+          "scoringExplanation": "通过力的分解计算弹性绳的合力"
+        }
+      ]
+    },
+    {
+      "id": "bank-9702-12-ch04",
+      "title": "June 2011 9702/12 — Forces, Density and Pressure",
+      "topic": "Forces, Density and Pressure",
+      "questions": [
+        {
+          "id": "q-9702-12-15",
+          "type": "choice",
+          "difficulty": 2,
+          "content": "The diagrams all show a pair of equal forces acting on a metre rule. Which diagram shows forces that provide a couple and zero resultant force?",
+          "options": [
+            "Diagram A: forces in same direction on same side",
+            "Diagram B: equal and opposite forces on opposite sides, not along same line",
+            "Diagram C: forces towards each other along the rule",
+            "Diagram D: forces at an angle"
+          ],
+          "correctIndex": 1,
+          "correctDisplay": "Diagram B: equal and opposite forces on opposite sides, not along same line",
+          "knowledgeNodeId": "couple",
+          "understandingExplanation": "A couple consists of two equal and opposite forces whose lines of action do not coincide, producing pure rotation with zero resultant force.",
+          "scoringExplanation": "识别力偶（大小相等、方向相反、不共线的两个力）"
+        },
+        {
+          "id": "q-9702-12-16",
+          "type": "choice",
+          "difficulty": 3,
+          "content": "A uniform rod XY of weight 10.0 N is freely hinged to a wall at X. It is held horizontal by a force F acting from Y at an angle of 30° to the horizontal, as shown. Fig: A uniform rod XY is hinged at X to a vertical wall and held horizontal. A weight of 10.0 N acts downwards at the centre of the rod. A force F acts at Y at an angle of 30° to the horizontal. What is the value of F?",
+          "options": [
+            "5.0 N",
+            "8.7 N",
+            "10.0 N",
+            "20.0 N"
+          ],
+          "correctIndex": 2,
+          "correctDisplay": "10.0 N",
+          "knowledgeNodeId": "principle-of-moments",
+          "understandingExplanation": "Taking moments about X: clockwise moment = 10.0 × (L/2), anticlockwise moment = F × sin(30°) × L. Equating: 10.0 × L/2 = F × 0.5 × L, so F = 10.0 N.",
+          "scoringExplanation": "利用力矩平衡原理计算力的大小"
+        },
+        {
+          "id": "q-9702-12-20",
+          "type": "choice",
+          "difficulty": 3,
+          "content": "The diagram shows two vessels, P and Q, both with sides inclined at 45°. Fig: Two vessels P and Q are shown. Vessel P tapers outwards (wider at the top) and vessel Q tapers inwards (narrower at the top). Both have sides inclined at 45° to the horizontal. Both contain liquid at the same depth. The liquid in vessel P is twice as dense as the liquid in vessel Q. What is the ratio of the pressure due to the liquid on the base of P to the pressure due to the liquid on the base of Q?",
+          "options": [
+            "2/1",
+            "1/2",
+            "√2/1",
+            "1/√2"
+          ],
+          "correctIndex": 0,
+          "correctDisplay": "2/1",
+          "knowledgeNodeId": "pressure-difference-in-fluid",
+          "understandingExplanation": "Pressure at the base = ρgh. Both vessels have the same liquid depth h and g is the same. Since the liquid in P is twice as dense as Q (ρ_P = 2ρ_Q), the ratio of pressures = ρ_P/ρ_Q = 2/1.",
+          "scoringExplanation": "利用液体压强公式 p = ρgh 比较不同液体的压强"
+        },
+        {
+          "id": "q-9702-12-21",
+          "type": "choice",
+          "difficulty": 3,
+          "content": "Two solid substances P and Q have atoms of mass MP and MQ respectively. They have nP and nQ atoms per unit volume. The density of P is greater than the density of Q. What must be correct?",
+          "options": [
+            "MP > MQ",
+            "nP > nQ",
+            "MP × nP > MQ × nQ",
+            "MP/nP > MQ/nQ"
+          ],
+          "correctIndex": 2,
+          "correctDisplay": "MP × nP > MQ × nQ",
+          "knowledgeNodeId": "density",
+          "understandingExplanation": "Density = mass per unit volume = MP × nP for substance P, and MQ × nQ for substance Q. Since density of P > density of Q, we must have MP × nP > MQ × nQ.",
+          "scoringExplanation": "根据密度定义推导原子质量与数密度的关系"
+        }
+      ]
+    },
+    {
+      "id": "bank-9702-12-ch05",
+      "title": "June 2011 9702/12 — Work, Energy and Power",
+      "topic": "Work, Energy and Power",
+      "questions": [
+        {
+          "id": "q-9702-12-18",
+          "type": "choice",
+          "difficulty": 2,
+          "content": "An electric motor produces 120 W of useful mechanical output power. The efficiency of the motor is 60%. Which row is correct?",
+          "options": [
+            "electrical power input = 72 W, waste heat power output = 48 W",
+            "electrical power input = 192 W, waste heat power output = 72 W",
+            "electrical power input = 200 W, waste heat power output = 72 W",
+            "electrical power input = 200 W, waste heat power output = 80 W"
+          ],
+          "correctIndex": 3,
+          "correctDisplay": "electrical power input = 200 W, waste heat power output = 80 W",
+          "knowledgeNodeId": "efficiency",
+          "understandingExplanation": "Efficiency = output/input = 60%, so input = 120/0.6 = 200 W. Waste heat = input - output = 200 - 120 = 80 W.",
+          "scoringExplanation": "利用效率公式计算输入功率和损耗功率"
+        },
+        {
+          "id": "q-9702-12-19",
+          "type": "choice",
+          "difficulty": 3,
+          "content": "A hammer with 10 J of kinetic energy hits a nail and pushes it 5.0 mm into a plank. Both the hammer and nail come to rest after the collision. What is the average force that acts on the nail while it moves the 5.0 mm?",
+          "options": [
+            "0.050 N",
+            "2.0 N",
+            "50 N",
+            "2000 N"
+          ],
+          "correctIndex": 3,
+          "correctDisplay": "2000 N",
+          "knowledgeNodeId": "work-done-formula",
+          "understandingExplanation": "Work done = force × distance = change in kinetic energy. So F × 0.005 = 10, giving F = 10/0.005 = 2000 N.",
+          "scoringExplanation": "利用功-能关系计算平均力"
+        },
+        {
+          "id": "q-9702-12-22",
+          "type": "choice",
+          "difficulty": 3,
+          "content": "The table summarises some descriptions of evaporation. Which row of the table is correct?",
+          "options": [
+            "involves a change in state from liquid to vapour: true; occurs at a fixed temperature: true; involves a reduction in the average kinetic energy of the remaining atoms: true",
+            "involves a change in state from liquid to vapour: true; occurs at a fixed temperature: false; involves a reduction in the average kinetic energy of the remaining atoms: true",
+            "involves a change in state from liquid to vapour: true; occurs at a fixed temperature: false; involves a reduction in the average kinetic energy of the remaining atoms: false",
+            "involves a change in state from liquid to vapour: false; occurs at a fixed temperature: true; involves a reduction in the average kinetic energy of the remaining atoms: false"
+          ],
+          "correctIndex": 1,
+          "correctDisplay": "involves a change in state from liquid to vapour: true; occurs at a fixed temperature: false; involves a reduction in the average kinetic energy of the remaining atoms: true",
+          "knowledgeNodeId": "energy",
+          "understandingExplanation": "Evaporation involves a change of state from liquid to vapour (true), occurs at any temperature not just a fixed temperature (false), and the remaining atoms lose their higher-energy molecules, reducing the average KE (true).",
+          "scoringExplanation": "理解蒸发的微观机制和特征"
+        }
+      ]
+    },
+    {
+      "id": "bank-9702-12-ch06",
+      "title": "June 2011 9702/12 — Deformation of Solids",
+      "topic": "Deformation of Solids",
+      "questions": [
+        {
+          "id": "q-9702-12-23",
+          "type": "choice",
+          "difficulty": 3,
+          "content": "The behaviour of a wire under tensile stress may be described in terms of the Young modulus E of the material of the wire and of the force per unit extension k of the wire. For a wire of length L and cross-sectional area A, what is the relation between E and k?",
+          "options": [
+            "E = k/(LA)",
+            "E = L/(kA)",
+            "E = kL/A",
+            "E = kA/L"
+          ],
+          "correctIndex": 2,
+          "correctDisplay": "E = kL/A",
+          "knowledgeNodeId": "young-modulus",
+          "understandingExplanation": "Young modulus E = stress/strain = (F/A)/(ΔL/L) = FL/(AΔL). Since k = F/ΔL (force per unit extension), E = k × L/A = kL/A.",
+          "scoringExplanation": "推导杨氏模量与力每单位伸长量的关系"
+        },
+        {
+          "id": "q-9702-12-24",
+          "type": "choice",
+          "difficulty": 3,
+          "content": "The diagram shows the structure of part of a mattress. Fig: A cross-section of part of a mattress showing springs supporting layer 1, which is on top of layer 2. The manufacturer wants to design a softer mattress (one which will compress more for the same load). Which change will not have the desired effect?",
+          "options": [
+            "using more layers of springs",
+            "using more springs per unit area",
+            "using springs with a smaller spring constant",
+            "using springs made from wire with a smaller Young modulus"
+          ],
+          "correctIndex": 1,
+          "correctDisplay": "using more springs per unit area",
+          "knowledgeNodeId": "spring-constant",
+          "understandingExplanation": "Using more springs per unit area increases the effective spring constant (more parallel springs), making the mattress stiffer, not softer. The other options all decrease the effective spring constant.",
+          "scoringExplanation": "分析影响弹簧床垫软硬程度的因素"
+        }
+      ]
+    },
+    {
+      "id": "bank-9702-12-ch07",
+      "title": "June 2011 9702/12 — Waves",
+      "topic": "Waves",
+      "questions": [
+        {
+          "id": "q-9702-12-05",
+          "type": "choice",
+          "difficulty": 3,
+          "content": "The time-base on a cathode-ray oscilloscope is set at 6 ms/cm. A trace consisting of two pulses is recorded as shown in the diagram. Fig: An oscilloscope screen showing two pulses displayed on the graticule, with the time-base set at 6 ms/cm. What is the time interval between the two pulses?",
+          "options": [
+            "0.42 ms",
+            "0.75 ms",
+            "1.33 ms",
+            "27 ms"
+          ],
+          "correctIndex": 3,
+          "correctDisplay": "27 ms",
+          "knowledgeNodeId": "use-cro-to-measure-frequency-and-amplitude",
+          "understandingExplanation": "The time interval between pulses is found by multiplying the horizontal distance between pulses on the screen by the time-base setting. With the given measurements, the distance corresponds to 27 ms.",
+          "scoringExplanation": "使用阴极射线示波器测量时间间隔"
+        },
+        {
+          "id": "q-9702-12-25",
+          "type": "choice",
+          "difficulty": 2,
+          "content": "In which order of magnitude are the frequencies of electromagnetic waves in the visible spectrum?",
+          "options": [
+            "10¹² Hz",
+            "10¹³ Hz",
+            "10¹⁴ Hz",
+            "10¹⁵ Hz"
+          ],
+          "correctIndex": 2,
+          "correctDisplay": "10¹⁴ Hz",
+          "knowledgeNodeId": "electromagnetic-spectrum",
+          "understandingExplanation": "Visible light has wavelengths of approximately 400-700 nm. Using f = c/λ, the frequency range is approximately 4.3×10¹⁴ to 7.5×10¹⁴ Hz, which is of the order of 10¹⁴ Hz.",
+          "scoringExplanation": "估算可见光电磁波的频率数量级"
+        },
+        {
+          "id": "q-9702-12-26",
+          "type": "choice",
+          "difficulty": 3,
+          "content": "A transverse progressive wave is set up on a string. The graph shows the variation with time of displacement for a point on this string. Fig: A displacement-time graph for a point on a transverse progressive wave. The displacement varies sinusoidally with time. Points X and Y are marked on the graph at the same displacement level (both on the same horizontal line intersecting the sine wave at two different times). The separation XY on the graph represents the ……1…… of the wave. X and Y have equal ……2…… .",
+          "options": [
+            "1 = time period, 2 = amplitudes",
+            "1 = time period, 2 = displacements",
+            "1 = wavelength, 2 = amplitudes",
+            "1 = wavelength, 2 = displacements"
+          ],
+          "correctIndex": 1,
+          "correctDisplay": "1 = time period, 2 = displacements",
+          "knowledgeNodeId": "displacement-time-graph",
+          "understandingExplanation": "On a displacement-time graph, the horizontal separation between two points at the same phase is the time period. Points X and Y are at the same displacement level on the graph.",
+          "scoringExplanation": "通过位移-时间图像理解波的周期和位移"
+        },
+        {
+          "id": "q-9702-12-27",
+          "type": "choice",
+          "difficulty": 2,
+          "content": "If a wave can be polarised, it must be",
+          "options": [
+            "a longitudinal wave.",
+            "an electromagnetic wave.",
+            "a sound wave.",
+            "a transverse wave."
+          ],
+          "correctIndex": 3,
+          "correctDisplay": "a transverse wave.",
+          "knowledgeNodeId": "polarisation",
+          "understandingExplanation": "Polarisation is a phenomenon that only transverse waves can exhibit, as it involves the restriction of oscillation to a particular plane. Longitudinal waves cannot be polarised.",
+          "scoringExplanation": "理解偏振现象与横波的关系"
+        }
+      ]
+    },
+    {
+      "id": "bank-9702-12-ch08",
+      "title": "June 2011 9702/12 — Superposition",
+      "topic": "Superposition",
+      "questions": [
+        {
+          "id": "q-9702-12-28",
+          "type": "choice",
+          "difficulty": 2,
+          "content": "In which situation does diffraction occur?",
+          "options": [
+            "A wave bounces back from a surface.",
+            "A wave passes from one medium into another.",
+            "A wave passes through an aperture.",
+            "Waves from two identical sources are superposed."
+          ],
+          "correctIndex": 2,
+          "correctDisplay": "A wave passes through an aperture.",
+          "knowledgeNodeId": "diffraction",
+          "understandingExplanation": "Diffraction is the spreading of waves when they pass through an aperture or around an obstacle. Reflection (A), refraction (B), and interference (D) are different wave phenomena.",
+          "scoringExplanation": "识别衍射现象发生的条件"
+        },
+        {
+          "id": "q-9702-12-29",
+          "type": "choice",
+          "difficulty": 3,
+          "content": "The diagrams show the arrangement of apparatus for a Young's slits experiment and also part of the pattern formed on the screen with a ruler placed next to it. Fig: A Young's double-slit experiment setup. A laser emits light through double slits (separation 0.90 mm) onto a screen 5.0 m away. Part of the interference pattern on the screen is shown with a ruler, displaying alternating bright and dark fringes. The fringe spacing (distance between consecutive bright fringes) is measured. What is the wavelength of the light?",
+          "options": [
+            "4.8 × 10⁻⁷ m",
+            "5.4 × 10⁻⁷ m",
+            "3.2 × 10⁻⁶ m",
+            "3.4 × 10⁻⁶ m"
+          ],
+          "correctIndex": 1,
+          "correctDisplay": "5.4 × 10⁻⁷ m",
+          "knowledgeNodeId": "youngs-double-slit-experiment",
+          "understandingExplanation": "Using the fringe spacing formula λ = dx/D, where d is the slit separation (0.90 mm), D is the distance to the screen (5.0 m), and x is the fringe spacing measured from the pattern on the screen.",
+          "scoringExplanation": "利用杨氏双缝干涉公式计算光的波长"
+        }
+      ]
+    },
+    {
+      "id": "bank-9702-12-ch09",
+      "title": "June 2011 9702/12 — Electricity",
+      "topic": "Electricity",
+      "questions": [
+        {
+          "id": "q-9702-12-30",
+          "type": "choice",
+          "difficulty": 3,
+          "content": "The diagram shows two parallel metal plates connected to a d.c. power supply through a resistor. Fig: Two parallel metal plates connected to a d.c. power supply through a resistor. The plates are shown with positive and negative terminals indicated. There is a uniform electric field in the region between the plates. Which change would cause a decrease in the strength of the electric field?",
+          "options": [
+            "a small increase in the distance between the plates",
+            "a small increase in the potential difference between the plates",
+            "a small increase in the value of the resistor",
+            "a small increase to the area of both plates"
+          ],
+          "correctIndex": 0,
+          "correctDisplay": "a small increase in the distance between the plates",
+          "knowledgeNodeId": "potential-difference",
+          "understandingExplanation": "The electric field strength between parallel plates is E = V/d. Increasing the distance d (while V remains constant from the power supply) decreases E.",
+          "scoringExplanation": "分析平行板电容器中电场强度与板间距的关系"
+        },
+        {
+          "id": "q-9702-12-31",
+          "type": "choice",
+          "difficulty": 3,
+          "content": "In each electric field diagram, a positively charged particle is moved from X to Y. In which diagram would the particle experience an increasing repulsive force?",
+          "options": [
+            "Diagram A: uniform field lines, X to Y along field lines",
+            "Diagram B: field lines converging towards a point, X farther from source than Y, moving towards source",
+            "Diagram C: field lines diverging from a point source, X closer to source than Y, moving away",
+            "Diagram D: parallel field lines perpendicular to plates"
+          ],
+          "correctIndex": 1,
+          "correctDisplay": "Diagram B: field lines converging towards a point, X farther from source than Y, moving towards source",
+          "knowledgeNodeId": "charge",
+          "understandingExplanation": "An increasing repulsive force means the particle is moving towards a region of stronger field (more densely packed field lines) from a like charge. In diagram B, the particle moves towards the source of the field where the field lines are closer together, experiencing increasing repulsion.",
+          "scoringExplanation": "根据电场线分布判断带电粒子所受力的变化"
+        },
+        {
+          "id": "q-9702-12-32",
+          "type": "choice",
+          "difficulty": 3,
+          "content": "What describes the electric potential difference between two points in a wire that carries a current?",
+          "options": [
+            "the force required to move a unit positive charge between the points",
+            "the ratio of the energy dissipated between the points to the current",
+            "the ratio of the power dissipated between the points to the current",
+            "the ratio of the power dissipated between the points to the charge moved"
+          ],
+          "correctIndex": 2,
+          "correctDisplay": "the ratio of the power dissipated between the points to the current",
+          "knowledgeNodeId": "potential-difference",
+          "understandingExplanation": "Potential difference V = P/I, since power P = VI, so V = P/I. This is the ratio of power dissipated to current.",
+          "scoringExplanation": "理解电势差的定义及其与功率和电流的关系"
+        },
+        {
+          "id": "q-9702-12-33",
+          "type": "choice",
+          "difficulty": 3,
+          "content": "A cylindrical piece of a soft, electrically-conducting material has resistance R. It is rolled out so that its length is doubled but its volume stays constant. What is its new resistance?",
+          "options": [
+            "R/2",
+            "R",
+            "2R",
+            "4R"
+          ],
+          "correctIndex": 3,
+          "correctDisplay": "4R",
+          "knowledgeNodeId": "resistivity",
+          "understandingExplanation": "Resistance R = ρL/A. When length is doubled (L' = 2L) and volume is constant, the cross-sectional area halves (A' = A/2). So R' = ρ(2L)/(A/2) = 4ρL/A = 4R.",
+          "scoringExplanation": "利用电阻定律分析导体形变后的电阻变化"
+        }
+      ]
+    },
+    {
+      "id": "bank-9702-12-ch10",
+      "title": "June 2011 9702/12 — D.C. Circuits",
+      "topic": "D.C. Circuits",
+      "questions": [
+        {
+          "id": "q-9702-12-34",
+          "type": "choice",
+          "difficulty": 3,
+          "content": "A source of electromotive force (e.m.f.) E has a constant internal resistance r and is connected to an external variable resistor of resistance R. As R is increased from a value below r to a value above r, which statement is correct?",
+          "options": [
+            "The terminal potential difference remains constant.",
+            "The current in the circuit increases.",
+            "The e.m.f. of the source increases.",
+            "The largest output power is obtained when R reaches r."
+          ],
+          "correctIndex": 3,
+          "correctDisplay": "The largest output power is obtained when R reaches r.",
+          "knowledgeNodeId": "internal-resistance",
+          "understandingExplanation": "The power delivered to the external resistor is P = E²R/(R+r)². This is maximized when R = r (maximum power transfer theorem). As R increases from below r to above r, the power first increases to a maximum at R = r, then decreases.",
+          "scoringExplanation": "分析含内阻电源的输出功率与外电阻的关系"
+        },
+        {
+          "id": "q-9702-12-35",
+          "type": "choice",
+          "difficulty": 3,
+          "content": "Which graph best represents the way in which the current I through a thermistor depends upon the potential difference V across it?",
+          "options": [
+            "I-V graph showing a curve with increasing gradient (resistance decreases as thermistor heats up)",
+            "I-V graph showing a straight line through the origin",
+            "I-V graph showing a curve with decreasing gradient",
+            "I-V graph showing saturation"
+          ],
+          "correctIndex": 0,
+          "correctDisplay": "I-V graph showing a curve with increasing gradient (resistance decreases as thermistor heats up)",
+          "knowledgeNodeId": "thermistor",
+          "understandingExplanation": "As voltage across a thermistor increases, current increases and the thermistor heats up. For a thermistor, resistance decreases with temperature, so the I-V graph shows an increasing gradient (steeper at higher V).",
+          "scoringExplanation": "理解热敏电阻的电流-电压特性"
+        },
+        {
+          "id": "q-9702-12-36",
+          "type": "choice",
+          "difficulty": 3,
+          "content": "Safety on railways is increased by using several electrical switches. In the diagram, switches P, Q, R, S and T control the current through a green lamp. Fig: A circuit diagram showing switches P, Q, R, S, and T connected in a combination of series and parallel arrangements to control the current through a green lamp. Which row does not allow the green lamp to light?",
+          "options": [
+            "P=closed, Q=closed, R=closed, S=open, T=closed",
+            "P=closed, Q=open, R=closed, S=closed, T=open",
+            "P=closed, Q=open, R=open, S=closed, T=closed",
+            "P=open, Q=open, R=closed, S=open, T=closed"
+          ],
+          "correctIndex": 2,
+          "correctDisplay": "P=closed, Q=open, R=open, S=closed, T=closed",
+          "knowledgeNodeId": "series-circuit",
+          "understandingExplanation": "In the railway safety circuit, the switches are arranged so that the lamp lights only when all required switches in the series path are closed. Row C has both Q and R open, which breaks the circuit and prevents the lamp from lighting.",
+          "scoringExplanation": "分析铁路安全电路中开关的组合逻辑"
+        },
+        {
+          "id": "q-9702-12-37",
+          "type": "choice",
+          "difficulty": 3,
+          "content": "The diagram shows a fixed resistor and a light-dependent resistor (LDR) in series with a constant low-voltage supply. Fig: A series circuit consisting of a fixed resistor and a light-dependent resistor (LDR) connected to a constant low-voltage supply. When the LDR is in the dark, the fixed resistor and the LDR have the same value of resistance. Light is shone on the LDR. What happens to the potential differences across the two components?",
+          "options": [
+            "p.d. across resistor: decreased, p.d. across LDR: increased",
+            "p.d. across resistor: increased, p.d. across LDR: decreased",
+            "p.d. across resistor: no change, p.d. across LDR: increased",
+            "p.d. across resistor: no change, p.d. across LDR: decreased"
+          ],
+          "correctIndex": 1,
+          "correctDisplay": "p.d. across resistor: increased, p.d. across LDR: decreased",
+          "knowledgeNodeId": "potential-divider",
+          "understandingExplanation": "When light shines on the LDR, its resistance decreases. In the potential divider, the p.d. across the LDR decreases (since its resistance decreases) and the p.d. across the fixed resistor increases (since more current flows through it).",
+          "scoringExplanation": "分析光敏电阻在分压电路中的行为"
+        },
+        {
+          "id": "q-9702-12-38",
+          "type": "choice",
+          "difficulty": 3,
+          "content": "The diagram shows a d.c. circuit. Fig: A d.c. circuit with a resistor network consisting of four resistors (6 Ω, 6 Ω, 3 Ω, 6 Ω) connected between points P and Q in a combination of series and parallel arrangements. What is the resistance between the points P and Q due to the resistance network?",
+          "options": [
+            "0.47 Ω",
+            "2.1 Ω",
+            "3.0 Ω",
+            "21 Ω"
+          ],
+          "correctIndex": 2,
+          "correctDisplay": "3.0 Ω",
+          "knowledgeNodeId": "calculate-total-resistance",
+          "understandingExplanation": "By analyzing the resistor network (combining series and parallel resistances), the equivalent resistance between points P and Q is calculated to be 3.0 Ω.",
+          "scoringExplanation": "计算电阻网络的等效电阻"
+        }
+      ]
+    },
+    {
+      "id": "bank-9702-12-ch11",
+      "title": "June 2011 9702/12 — Particle Physics",
+      "topic": "Particle Physics",
+      "questions": [
+        {
+          "id": "q-9702-12-39",
+          "type": "choice",
+          "difficulty": 3,
+          "content": "The uranium nucleus ²³⁸₉₂U undergoes α-decay, producing nucleus X. Nucleus X undergoes β-decay, producing nucleus Y. For nucleus Y, what are the values of the proton number and nucleon number?",
+          "options": [
+            "proton number = 89, nucleon number = 234",
+            "proton number = 89, nucleon number = 236",
+            "proton number = 91, nucleon number = 234",
+            "proton number = 91, nucleon number = 236"
+          ],
+          "correctIndex": 2,
+          "correctDisplay": "proton number = 91, nucleon number = 234",
+          "knowledgeNodeId": "alpha-decay",
+          "understandingExplanation": "α-decay: ²³⁸₉₂U → ²³⁴₉₀Th + ⁴₂He (X is ²³⁴₉₀Th). β-decay: ²³⁴₉₀Th → ²³⁴₉₁Pa + ⁰₋₁e (Y is ²³⁴₉₁Pa). So proton number = 91, nucleon number = 234.",
+          "scoringExplanation": "分析α衰变和β衰变后原子核的质子数和中子数"
+        },
+        {
+          "id": "q-9702-12-40",
+          "type": "choice",
+          "difficulty": 2,
+          "content": "Radon-220 is radioactive and decays to polonium-216 with the emission of an α-particle. The equation for the radioactive decay is shown. Rn-220 → Po-216 + He-4. How many neutrons are in the radon and polonium nuclei?",
+          "options": [
+            "Rn: 86, Po: 84",
+            "Rn: 134, Po: 132",
+            "Rn: 134, Po: 84",
+            "Rn: 86, Po: 132"
+          ],
+          "correctIndex": 1,
+          "correctDisplay": "Rn: 134, Po: 132",
+          "knowledgeNodeId": "alpha-decay",
+          "understandingExplanation": "For Rn-220 (Z=86): neutrons = 220 - 86 = 134. For Po-216 (Z=84): neutrons = 216 - 84 = 132.",
+          "scoringExplanation": "计算放射性原子核中的中子数"
+        }
+      ]
+    }
+  ]
+}

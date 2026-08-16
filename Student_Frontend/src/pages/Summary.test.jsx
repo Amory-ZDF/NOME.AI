@@ -70,13 +70,13 @@ function SeededSummary({ session }) {
   return lastSession ? <Summary /> : null
 }
 
-test('reports assisted solutions without turning corrected questions into unresolved errors', async () => {
+test('surfaces a hint-corrected question in the error book without changing its correct outcome', async () => {
   const addErrors = vi.fn((items) => Promise.resolve({ errors: items }))
   const services = createAppServices({
     apiClient: {
       bootstrap: () => Promise.resolve(bootData),
       submitSession: (session) => Promise.resolve({ sessionId: session.sessionId }),
-      addErrors,
+      upsertErrors: addErrors,
       getSessionSummary: () => Promise.resolve(summarizeSession(session)),
     },
     now: () => new Date('2026-08-06T12:34:56.000Z'),
@@ -138,9 +138,69 @@ test('reports assisted solutions without turning corrected questions into unreso
 
   expect(await screen.findByText(/Solved independently/)).toHaveTextContent('1/2')
   expect(screen.getByText(/Hints/)).toHaveTextContent('2.5/question')
-  expect(screen.getByText('No unresolved mistakes in this session. 1 question was solved with hints or after retrying.')).toBeInTheDocument()
-  expect(screen.getByText('No unresolved mistakes remain. Review assisted solutions, then try a variant question to confirm independent mastery.')).toBeInTheDocument()
+  // The error-analysis pane now surfaces the hint-corrected question as an error
+  // (it was wrong before the hints), with a "Solved after hints" indicator.
+  expect(screen.getByText(/1 error/)).toBeInTheDocument()
+  // "Solved after hints" appears in both the Error Analysis detail card and the
+  // Error Cards section for the hint-corrected question.
+  expect(screen.getAllByText('Solved after hints').length).toBeGreaterThanOrEqual(1)
+  expect(screen.getByText('Question 1')).toBeInTheDocument()
+  expect(screen.queryByText(/No unresolved mistakes in this session/i)).not.toBeInTheDocument()
   expect(screen.queryByText(/all solved independently/i)).not.toBeInTheDocument()
+  // …and it is surfaced as an error card.
+  const errorCardsHeading = screen.getByRole('heading', { name: /Error Cards \(1\)/i })
+  expect(errorCardsHeading).toBeInTheDocument()
+  expect(addErrors).not.toHaveBeenCalled()
+})
+
+test('reports assisted solutions without surfacing first-try-correct questions as errors', async () => {
+  const addErrors = vi.fn((items) => Promise.resolve({ errors: items }))
+  const services = createAppServices({
+    apiClient: {
+      bootstrap: () => Promise.resolve(bootData),
+      submitSession: (session) => Promise.resolve({ sessionId: session.sessionId }),
+      upsertErrors: addErrors,
+      getSessionSummary: () => Promise.resolve(summarizeSession(session)),
+    },
+    now: () => new Date('2026-08-06T12:34:56.000Z'),
+    createId: () => 'clean-session',
+  })
+  const session = {
+    sessionId: 'clean-session',
+    taskId: null,
+    taskTitle: 'Clean independence practice',
+    subject: 'A-Level Math',
+    timeSpent: 2,
+    questions: [
+      {
+        id: 'q1',
+        order: 1,
+        topic: 'Calculus - Differentiation',
+        errorType: 'method',
+        content: 'Differentiate the expression.',
+        correctDisplay: '42',
+        acceptKeywords: ['42'],
+        result: {
+          status: 'correct',
+          attempts: [{ answer: '42', isCorrect: true }],
+          hintsUsed: 0,
+          solvedAtHintLevel: 0,
+          handwritingUsed: false,
+        },
+      },
+    ],
+  }
+
+  renderStudentApp(
+    <AppProvider services={services}>
+      <Routes>
+        <Route path="/summary/:sessionId" element={<SeededSummary session={session} />} />
+      </Routes>
+    </AppProvider>,
+    { route: '/summary/clean-session' },
+  )
+
+  expect(await screen.findByText(/Solved independently/)).toHaveTextContent('1/1')
   expect(screen.queryByRole('heading', { name: /Error Cards/i })).not.toBeInTheDocument()
   expect(addErrors).not.toHaveBeenCalled()
 })

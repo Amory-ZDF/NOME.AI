@@ -1,10 +1,10 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { motion, AnimatePresence } from 'framer-motion'
 import { useApp } from '../store/AppStore'
 import { ERROR_TYPES, ERROR_TYPE_META } from '../features/errors/errorTypes'
 import { canMarkMastered } from '../features/errors/masteryRules'
-import { Icon, Badge, EmptyState, ProgressBar, staggerContainer, fadeUpItem } from '../components/ui'
+import { Icon, Badge, EmptyState, ProgressBar, Stars, staggerContainer, fadeUpItem } from '../components/ui'
 
 const STATUS_META = {
   pending_review: { label: 'To Review', tone: 'amber' },
@@ -52,6 +52,77 @@ function DiagnosisLayers({ item }) {
   )
 }
 
+const RELATION_META = {
+  contrasted: { label: 'Easily confused', icon: 'swap_horiz' },
+  sibling: { label: 'Same chapter', icon: 'account_tree' },
+  child: { label: 'Builds on this', icon: 'call_split' },
+}
+
+// Similar real-exam questions, resolved from the knowledge graph via the
+// source question's knowledge node (contrasted / same-chapter / downstream).
+function SimilarQuestions({ questionId, expanded }) {
+  const { loadSimilarQuestions } = useApp()
+  const navigate = useNavigate()
+  const [state, setState] = useState({ status: 'idle', items: [] })
+
+  useEffect(() => {
+    if (!expanded) return
+    let cancelled = false
+    setState({ status: 'loading', items: [] })
+    loadSimilarQuestions(questionId)
+      .then((items) => { if (!cancelled) setState({ status: 'done', items: items ?? [] }) })
+      .catch(() => { if (!cancelled) setState({ status: 'error', items: [] }) })
+    return () => { cancelled = true }
+  }, [expanded, questionId, loadSimilarQuestions])
+
+  if (state.status === 'loading') {
+    return (
+      <div className="mt-4 pt-4 border-t border-whisper-line text-xs text-warm-stone flex items-center gap-2">
+        <Icon name="progress_activity" size={14} /> Finding similar real-exam questions…
+      </div>
+    )
+  }
+  if (state.status === 'error') {
+    return (
+      <div className="mt-4 pt-4 border-t border-whisper-line text-xs text-warm-stone flex items-center gap-2">
+        <Icon name="cloud_off" size={14} /> Couldn't load similar questions right now.
+      </div>
+    )
+  }
+  if (state.items.length === 0) return null
+
+  return (
+    <div className="mt-4 pt-4 border-t border-whisper-line">
+      <p className="text-xs font-semibold text-deep-ink mb-2 flex items-center gap-1.5">
+        <Icon name="auto_awesome" size={15} className="text-deep-teal" /> Similar real-exam questions
+      </p>
+      <div className="grid md:grid-cols-2 gap-2">
+        {state.items.map((q) => {
+          const meta = RELATION_META[q.relation] || RELATION_META.sibling
+          return (
+            <div key={q.id} className="bg-pure-surface border border-whisper-line rounded-comp p-3 flex flex-col gap-1.5">
+              <div className="flex items-center gap-1.5 flex-wrap">
+                <Badge tone="teal">{meta.label}</Badge>
+                <span className="text-[10px] text-warm-stone font-mono">{q.relatedNodeName}</span>
+                <span className="ml-auto"><Stars level={q.difficulty} /></span>
+              </div>
+              <p className="text-xs leading-5 line-clamp-2">{q.preview}</p>
+              <button
+                className="text-xs text-deep-teal font-medium flex items-center gap-0.5 self-start"
+                onClick={() => q.setId ? navigate(`/bank/exercise/${q.setId}`) : undefined}
+                disabled={!q.setId}
+                title={q.setId ? 'Practice this question' : 'No practice screen for this question type yet'}
+              >
+                Practice <Icon name="chevron_right" size={14} />
+              </button>
+            </div>
+          )
+        })}
+      </div>
+    </div>
+  )
+}
+
 function ErrorCard({ item }) {
   const navigate = useNavigate()
   const { markErrorMastered, isActionPending } = useApp()
@@ -74,7 +145,20 @@ function ErrorCard({ item }) {
       </div>
 
       <p className="font-medium mt-3 leading-6">{item.questionSummary}</p>
-      <p className="text-sm text-warm-stone mt-1.5 leading-6">Cause: {item.errorDescription}</p>
+      {/* Student judgment (what the student actually did) — kept per user. */}
+      <p className="text-sm text-warm-stone mt-1.5 leading-6">
+        <span className="font-semibold text-deep-ink">What happened: </span>{item.errorDescription}
+      </p>
+      {/* AI root-cause analysis occupies the Cause position. */}
+      <p className="text-sm text-warm-stone mt-1.5 leading-6">
+        <span className="font-semibold text-deep-ink">Cause: </span>{item.analysis}
+      </p>
+      {/* 题目解析 — the solution (concept + mark-scheme) below the cause. */}
+      <div className="bg-warm-paper rounded-comp p-3 mt-2 text-sm text-warm-stone leading-6">
+        <p className="font-semibold text-deep-ink mb-1">题目解析</p>
+        {item.understandingExplanation && <p className="mb-2">{item.understandingExplanation}</p>}
+        {item.scoringExplanation && <p>{item.scoringExplanation}</p>}
+      </div>
       <p className="text-xs mt-2">
         Topic: <span className="text-deep-teal cursor-pointer hover:underline" onClick={() => navigate('/profile')}>{item.relatedTopic}</span>
       </p>
@@ -93,10 +177,8 @@ function ErrorCard({ item }) {
                 <p className="text-warm-stone">{item.correctAnswer}</p>
               </div>
             </div>
-            <div className="bg-warm-paper rounded-comp p-3 mt-3 text-sm text-warm-stone leading-6">
-              <span className="font-semibold text-deep-ink">AI analysis: </span>{item.analysis}
-            </div>
             <DiagnosisLayers item={item} />
+            <SimilarQuestions questionId={item.questionId} expanded={expanded} />
             {item.redoHistory.length > 0 && (
               <p className="text-xs text-warm-stone mt-2">Redo history: {item.redoHistory.length} attempt(s), latest {item.redoHistory[item.redoHistory.length - 1].isCorrect ? '✓ correct' : '✗ wrong'}</p>
             )}

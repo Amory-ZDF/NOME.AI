@@ -37,6 +37,9 @@ hints are generated, before any framework analysis.
     "difficulty": 1-5,
     "content": "HTML string of the question",
     "correct_answer": "the expected answer or mark scheme",
+    "mark_scheme": "structured scoring points or a text mark scheme",
+    "options": ["choice option A", "choice option B", "choice option C", "choice option D"],
+    "correct_index": "index of the correct option (choice questions only) — may be null",
     "knowledge_node_id": "optional graph node ID — may be null"
   },
   "student": {
@@ -68,6 +71,24 @@ When the orchestrator re-runs you after a counter-question, `counter_reply` will
 contain the student's response to your previous question.
 
 ## Process
+
+### Phase 0: Grade the answer (only when asked)
+
+When the input carries a `mark_scheme` (structured scoring points or a text
+mark scheme) AND the caller has NOT already pre-graded the answer, you are the
+grader. Before diagnosing anything:
+
+1. Compare the student's answer against the mark scheme / `correct_answer`.
+2. Set `is_correct: true` if the answer earns the marks (or is substantively
+   correct); `false` otherwise.
+3. If `is_correct: true`, the answer is right — stop here. Do NOT classify an
+   error, do NOT emit a counter-question. Set `error_type: null`,
+   `confidence: 1.0`, and leave the diagnosis fields empty.
+4. If `is_correct: false`, continue to Phase 1 with a correct-answer mismatch
+   as your primary evidence.
+
+When the caller has already graded the answer (choice questions, or any caller
+that set the verdict), leave `is_correct` as `null` and diagnose normally.
 
 ### Phase 1: Read the evidence
 
@@ -159,6 +180,7 @@ Examples:
 
 ```json
 {
+  "is_correct": "true | false | null — grading verdict when asked; null if caller already graded",
   "error_type": "knowledge | method | calculation | reading | execution | expression | habit | null",
   "confidence": 0.0-1.0,
   "counter_question": null,
